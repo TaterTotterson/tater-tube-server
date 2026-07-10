@@ -9,7 +9,7 @@ import (
 )
 
 func TestMoveFile_Normal(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "altmount-move-test")
+	tmpDir, err := os.MkdirTemp("", "tater-tube-server-move-test")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -18,7 +18,7 @@ func TestMoveFile_Normal(t *testing.T) {
 	src := filepath.Join(tmpDir, "src.txt")
 	dst := filepath.Join(tmpDir, "dst.txt")
 
-	content := []byte("hello altmount")
+	content := []byte("hello tater-tube-server")
 	if err := os.WriteFile(src, content, 0644); err != nil {
 		t.Fatalf("failed to write source file: %v", err)
 	}

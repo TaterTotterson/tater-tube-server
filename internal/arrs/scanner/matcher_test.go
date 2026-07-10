@@ -57,7 +57,7 @@ func TestRadarrFileMatchesTarget(t *testing.T) {
 		{
 			name:     "basename match when parent directory differs",
 			movie:    movieWithFile("/data/movies/Film (2020)/Film.mkv"),
-			filePath: "/mnt/altmount/Film (2020)/Film.mkv",
+			filePath: "/mnt/tater-tube-server/Film (2020)/Film.mkv",
 			want:     true,
 		},
 		{

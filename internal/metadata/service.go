@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/utils"
 	lru "github.com/hashicorp/golang-lru/v2"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/utils"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 )

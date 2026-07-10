@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/encryption"
-	"github.com/javi11/altmount/internal/encryption/rclone"
-	"github.com/javi11/altmount/internal/errors"
-	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/encryption"
+	"github.com/TaterTotterson/tater-tube-server/internal/encryption/rclone"
+	"github.com/TaterTotterson/tater-tube-server/internal/errors"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/parser/fileinfo"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
 	"github.com/javi11/nxg"
 )
 

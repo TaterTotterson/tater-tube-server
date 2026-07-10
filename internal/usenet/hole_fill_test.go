@@ -8,10 +8,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/javi11/altmount/internal/holes"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/altmount/internal/testsupport/segments"
+	"github.com/TaterTotterson/tater-tube-server/internal/holes"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/fakepool"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/segments"
 	"github.com/javi11/nntppool/v4"
 )
 

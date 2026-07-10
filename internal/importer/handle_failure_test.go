@@ -15,8 +15,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
 )
 
 // newMoveToFailedTestService builds a minimal *Service with a real SQLite DB so that
@@ -71,7 +71,7 @@ func newMoveToFailedTestService(t *testing.T) *Service {
 	cfgGetter := config.ConfigGetter(func() *config.Config {
 		return &config.Config{
 			Database: config.DatabaseConfig{
-				Path: filepath.Join(configDir, "altmount.db"),
+				Path: filepath.Join(configDir, "tater-tube-server.db"),
 			},
 		}
 	})
@@ -92,7 +92,7 @@ func TestHandleFailure_MovesToFailedDir(t *testing.T) {
 	svc := newMoveToFailedTestService(t)
 
 	// Write a .nzb in the OS temp queue dir (simulating post-ensurePersistentNzb state).
-	tmpQueue := filepath.Join(os.TempDir(), ".altmount-queue")
+	tmpQueue := filepath.Join(os.TempDir(), ".tater-tube-server-queue")
 	require.NoError(t, os.MkdirAll(tmpQueue, 0755))
 	nzbPath := filepath.Join(tmpQueue, "42-show.s01e01.nzb")
 	require.NoError(t, os.WriteFile(nzbPath, []byte("<nzb/>"), 0644))
@@ -146,7 +146,7 @@ func TestHandleFailure_SourceMissing_IsNoop(t *testing.T) {
 
 	item := &database.ImportQueueItem{
 		ID:      999,
-		NzbPath: filepath.Join(os.TempDir(), ".altmount-queue", "nonexistent-handle-failure.nzb"),
+		NzbPath: filepath.Join(os.TempDir(), ".tater-tube-server-queue", "nonexistent-handle-failure.nzb"),
 	}
 
 	err := svc.MoveToFailedFolder(context.Background(), item)

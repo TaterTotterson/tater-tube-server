@@ -2,11 +2,11 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
-			"name": "Debug altmount server",
+			"name": "Debug tater-tube-server server",
 			"type": "go",
 			"request": "launch",
 			"mode": "auto",
-			"program": "${workspaceFolder}/cmd/altmount",
+			"program": "${workspaceFolder}/cmd/tater-tube-server",
 			"args": ["serve", "--config=${workspaceFolder}//example/config.yaml"],
 			"env": {
 				"PPROF_PORT": "6060",
@@ -30,7 +30,7 @@
 	"compounds": [
 		{
 			"name": "Full Stack",
-			"configurations": ["Debug altmount server", "Frontend (bun dev)"]
+			"configurations": ["Debug tater-tube-server server", "Frontend (bun dev)"]
 		}
 	]
 }

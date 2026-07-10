@@ -6,9 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/arrs"
-	"github.com/javi11/altmount/internal/config"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -245,4 +245,3 @@ func TestHandleArrsWebhook_WithInstanceName(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, true, result["success"])
 }
-

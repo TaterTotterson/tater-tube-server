@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/auth"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
-	"github.com/javi11/altmount/internal/auth"
-	"github.com/javi11/altmount/internal/database"
 )
 
 // AuthResponse represents authentication response data

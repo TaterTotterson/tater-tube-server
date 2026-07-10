@@ -205,7 +205,7 @@ const (
 	ImportMigrationStatusSymlinksMigrated ImportMigrationStatus = "symlinks_migrated"
 )
 
-// ImportMigration tracks progress of two-phase migrations (e.g. nzbdav → altmount)
+// ImportMigration tracks progress of two-phase migrations (e.g. nzbdav → tater-tube-server)
 type ImportMigration struct {
 	ID           int64                 `db:"id"`
 	Source       string                `db:"source"`        // e.g. "nzbdav"

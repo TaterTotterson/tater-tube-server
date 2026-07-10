@@ -6,8 +6,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/javi11/altmount/internal/importer/filesystem"
-	"github.com/javi11/altmount/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/filesystem"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
 )
 
 // NewISOReadSeeker creates an io.ReadSeeker backed by Usenet segments for the given

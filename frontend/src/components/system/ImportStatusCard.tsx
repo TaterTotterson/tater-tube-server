@@ -1,6 +1,6 @@
-import { Database, Download, FolderOpen, Loader2 } from "lucide-react";
+import { Download, FolderOpen, Loader2 } from "lucide-react";
 import { useMemo } from "react";
-import { useNzbdavImportStatus, useQueue, useQueueStats, useScanStatus } from "../../hooks/useApi";
+import { useQueue, useQueueStats, useScanStatus } from "../../hooks/useApi";
 import { useProgressStream } from "../../hooks/useProgressStream";
 import { ScanStatus } from "../../types/api";
 
@@ -10,7 +10,6 @@ interface ImportStatusCardProps {
 
 export function ImportStatusCard({ className }: ImportStatusCardProps) {
 	const { data: scanStatus } = useScanStatus(5000);
-	const { data: nzbDavStatus } = useNzbdavImportStatus(5000);
 	const { data: queueStats } = useQueueStats();
 	const { data: processingQueue } = useQueue({
 		status: "processing",
@@ -39,23 +38,7 @@ export function ImportStatusCard({ className }: ImportStatusCardProps) {
 			};
 		}
 
-		// 2. Check for NZBDav import
-		if (nzbDavStatus?.status === "running") {
-			const processed =
-				(nzbDavStatus.added || 0) + (nzbDavStatus.failed || 0) + (nzbDavStatus.skipped || 0);
-			const percent =
-				nzbDavStatus.total > 0 ? Math.round((processed / nzbDavStatus.total) * 100) : 0;
-			return {
-				title: "NZBDav Import",
-				icon: <Database className="h-8 w-8 text-secondary" />,
-				progress: percent,
-				detail: `${processed} / ${nzbDavStatus.total} items`,
-				status: "Importing",
-				color: "progress-secondary",
-			};
-		}
-
-		// 3. Check for active queue processing
+		// 2. Check for active queue processing
 		if (processingQueue?.data && processingQueue.data.length > 0) {
 			// Calculate aggregate progress of active items
 			let totalPercent = 0;
@@ -118,7 +101,7 @@ export function ImportStatusCard({ className }: ImportStatusCardProps) {
 		}
 
 		return null;
-	}, [scanStatus, nzbDavStatus, processingQueue, liveProgress, queueStats]);
+	}, [scanStatus, processingQueue, liveProgress, queueStats]);
 
 	if (!activeImport) {
 		return (

@@ -7,8 +7,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -141,7 +141,7 @@ func TestCreateStrmFiles_WithIsolation(t *testing.T) {
 		SABnzbd: config.SABnzbdConfig{
 			CompleteDir: "/complete",
 		},
-		WebDAV: config.WebDAVConfig{
+		Server: config.ServerConfig{
 			Port: 8080,
 			Host: "localhost",
 		},

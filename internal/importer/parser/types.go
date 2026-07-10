@@ -3,7 +3,7 @@ package parser
 import (
 	"time"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
 )
 
 // ParseOptions carries pre-parse knowledge into ParseNzb, allowing the

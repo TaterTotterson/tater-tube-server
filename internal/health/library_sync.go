@@ -15,11 +15,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/metadata"
-	"github.com/javi11/altmount/internal/utils"
-	"github.com/javi11/altmount/pkg/rclonecli"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
+	"github.com/TaterTotterson/tater-tube-server/internal/utils"
 	"github.com/sourcegraph/conc/pool"
 )
 
@@ -74,7 +73,6 @@ type LibrarySyncWorker struct {
 	progress        *internalSyncProgress
 	lastSyncResult  *SyncResult
 	manualTrigger   chan struct{}
-	rcloneClient    rclonecli.RcloneRcClient
 }
 
 // NewLibrarySyncWorker creates a new library sync worker
@@ -83,14 +81,12 @@ func NewLibrarySyncWorker(
 	healthRepo *database.HealthRepository,
 	configGetter config.ConfigGetter,
 	configManager *config.Manager,
-	rcloneClient rclonecli.RcloneRcClient,
 ) *LibrarySyncWorker {
 	worker := &LibrarySyncWorker{
 		metadataService: metadataService,
 		healthRepo:      healthRepo,
 		configGetter:    configGetter,
 		configManager:   configManager,
-		rcloneClient:    rcloneClient,
 		manualTrigger:   make(chan struct{}, 1), // Buffered channel for non-blocking sends
 	}
 
@@ -905,7 +901,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 							continue
 						}
 
-						// Protect symlinks that have import history (AltMount imported this file)
+						// Protect symlinks that have import history (Tater Tube Server imported this file)
 						target, readlinkErr := os.Readlink(file)
 						if readlinkErr == nil {
 							mountRelPath := strings.TrimPrefix(filepath.ToSlash(target), filepath.ToSlash(cfg.MountPath))

@@ -1,5 +1,5 @@
 // Package fakepool provides a deterministic in-process replacement for
-// nntppool.Client used by tests that exercise AltMount's streaming and
+// nntppool.Client used by tests that exercise Tater Tube Server's streaming and
 // connection-management invariants.
 //
 // The real nntppool.Client opens TCP sockets, dials providers, and runs
@@ -45,7 +45,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/javi11/altmount/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
 	"github.com/javi11/nntppool/v4"
 )
 

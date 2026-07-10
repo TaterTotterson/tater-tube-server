@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/javi11/altmount/internal/importer/archive"
-	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/archive"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/parser"
 )
 
 var (

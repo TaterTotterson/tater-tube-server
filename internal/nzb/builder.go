@@ -5,7 +5,7 @@ import (
 	"encoding/xml"
 	"strconv"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
 )
 
 const nzbHeader = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE nzb PUBLIC \"-//newzBin//DTD NZB 1.1//EN\" \"http://www.newzbin.com/DTD/nzb/nzb-1.1.dtd\">\n"

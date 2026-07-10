@@ -10,7 +10,6 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  DOCKERHUB_IMAGE: laris11/altmount
 
 jobs:
   test:
@@ -141,32 +140,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Check DockerHub credentials
-        id: dockerhub
-        env:
-          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          if [ -n "$DH_USER" ] && [ -n "$DH_TOKEN" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "DockerHub credentials not set; skipping DockerHub publish (GHCR only)." >&2
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Log in to Container Registry (GHCR)
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Log in to Container Registry (DockerHub)
-        if: steps.dockerhub.outputs.enabled == 'true'
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Normalize image name
         id: normalize
@@ -179,9 +158,6 @@ jobs:
         id: imgtags
         run: |
           TAGS="${{ env.REGISTRY }}/${{ steps.normalize.outputs.image_name }}:dev-amd64-temp"
-          if [ "${{ steps.dockerhub.outputs.enabled }}" = "true" ]; then
-            TAGS="${TAGS},${{ env.DOCKERHUB_IMAGE }}:dev-amd64-temp"
-          fi
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push AMD64 image
@@ -220,32 +196,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Check DockerHub credentials
-        id: dockerhub
-        env:
-          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          if [ -n "$DH_USER" ] && [ -n "$DH_TOKEN" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "DockerHub credentials not set; skipping DockerHub publish (GHCR only)." >&2
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Log in to Container Registry (GHCR)
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Log in to Container Registry (DockerHub)
-        if: steps.dockerhub.outputs.enabled == 'true'
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Normalize image name
         id: normalize
@@ -258,9 +214,6 @@ jobs:
         id: imgtags
         run: |
           TAGS="${{ env.REGISTRY }}/${{ steps.normalize.outputs.image_name }}:dev-arm64-temp"
-          if [ "${{ steps.dockerhub.outputs.enabled }}" = "true" ]; then
-            TAGS="${TAGS},${{ env.DOCKERHUB_IMAGE }}:dev-arm64-temp"
-          fi
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push ARM64 image
@@ -287,32 +240,12 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Check DockerHub credentials
-        id: dockerhub
-        env:
-          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          if [ -n "$DH_USER" ] && [ -n "$DH_TOKEN" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "DockerHub credentials not set; skipping DockerHub publish (GHCR only)." >&2
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Log in to Container Registry (GHCR)
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Log in to Container Registry (DockerHub)
-        if: steps.dockerhub.outputs.enabled == 'true'
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Normalize image name
         id: normalize
@@ -335,24 +268,8 @@ jobs:
           docker manifest create ${IMAGE}:${TIMESTAMP_TAG} $AMD64_IMAGE $ARM64_IMAGE
           docker manifest push ${IMAGE}:${TIMESTAMP_TAG}
 
-      - name: Create and push manifest (DockerHub)
-        if: steps.dockerhub.outputs.enabled == 'true'
-        run: |
-          DH=${{ env.DOCKERHUB_IMAGE }}
-          AMD64_IMAGE="${DH}:dev-amd64-temp"
-          ARM64_IMAGE="${DH}:dev-arm64-temp"
-          TIMESTAMP_TAG="dev_${{ steps.timestamp.outputs.timestamp }}"
-
-          docker manifest create ${DH}:dev $AMD64_IMAGE $ARM64_IMAGE
-          docker manifest push ${DH}:dev
-
-          docker manifest create ${DH}:${TIMESTAMP_TAG} $AMD64_IMAGE $ARM64_IMAGE
-          docker manifest push ${DH}:${TIMESTAMP_TAG}
-
       - name: Clean up temporary tags
         run: |
           IMAGE=${{ env.REGISTRY }}/${{ steps.normalize.outputs.image_name }}
           docker manifest rm ${IMAGE}:dev-amd64-temp || true
           docker manifest rm ${IMAGE}:dev-arm64-temp || true
-          docker manifest rm ${{ env.DOCKERHUB_IMAGE }}:dev-amd64-temp || true
-          docker manifest rm ${{ env.DOCKERHUB_IMAGE }}:dev-arm64-temp || true

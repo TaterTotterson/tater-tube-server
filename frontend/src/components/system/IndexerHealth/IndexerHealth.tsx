@@ -9,7 +9,7 @@ import { IndexerHealthTable } from "./IndexerHealthTable";
 import { PruneStatsModal } from "./PruneStatsModal";
 import { type IndexerSummary, SORT_KEYS, type SortKey } from "./types";
 
-const SORT_STORAGE_KEY = "altmount.indexerHealth.sort";
+const SORT_STORAGE_KEY = "tater-tube-server.indexerHealth.sort";
 
 // Persisted sort preference so the chosen order survives a page refresh instead
 // of resetting to health-descending.

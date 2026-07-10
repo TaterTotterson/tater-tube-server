@@ -14,13 +14,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	internalerrors "github.com/TaterTotterson/tater-tube-server/internal/errors"
+	"github.com/TaterTotterson/tater-tube-server/internal/httpclient"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/utils/nzbtrim"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzbfile"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzblnk"
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/database"
-	internalerrors "github.com/javi11/altmount/internal/errors"
-	"github.com/javi11/altmount/internal/httpclient"
-	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
-	"github.com/javi11/altmount/internal/nzbfile"
-	"github.com/javi11/altmount/internal/nzblnk"
 )
 
 // removeQueueNzbFiles deletes the on-disk NZB files for every non-empty path.
@@ -630,7 +630,7 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 
 	// Create temporary directory for upload
 	tempDir := os.TempDir()
-	uploadDir := filepath.Join(tempDir, "altmount-uploads")
+	uploadDir := filepath.Join(tempDir, "tater-tube-server-uploads")
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		return RespondInternalError(c, "Failed to create upload directory", err.Error())
 	}
@@ -771,7 +771,7 @@ func (s *Server) handleUploadNZBLnk(c *fiber.Ctx) error {
 
 		// Create temp file for the NZB
 		tempDir := os.TempDir()
-		uploadDir := filepath.Join(tempDir, "altmount-uploads")
+		uploadDir := filepath.Join(tempDir, "tater-tube-server-uploads")
 		if err := os.MkdirAll(uploadDir, 0755); err != nil {
 			result.ErrorMessage = "Failed to create upload directory"
 			results = append(results, result)
@@ -933,7 +933,7 @@ func (s *Server) handleSearchNZBByName(c *fiber.Ctx) error {
 		})
 	}
 
-	uploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
+	uploadDir := filepath.Join(os.TempDir(), "tater-tube-server-uploads")
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		return RespondInternalError(c, "Failed to create upload directory", err.Error())
 	}

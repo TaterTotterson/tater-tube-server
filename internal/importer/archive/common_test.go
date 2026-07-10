@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
 )
 
 // seg builds a SegmentData covering [0, size-1].

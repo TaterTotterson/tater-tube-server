@@ -11,8 +11,6 @@ import { ToastProvider } from "./contexts/ToastContext";
 import { queryClient } from "./lib/queryClient";
 import { ConfigurationPage } from "./pages/ConfigurationPage";
 import { Dashboard } from "./pages/Dashboard";
-import { FilesPage } from "./pages/FilesPage";
-import { HealthPage } from "./pages/HealthPage";
 import { LogsPage } from "./pages/LogsPage";
 import { QueuePage } from "./pages/QueuePage";
 
@@ -36,9 +34,6 @@ function App() {
 									>
 										<Route index element={<Dashboard />} />
 										<Route path="queue" element={<QueuePage />} />
-										<Route path="health" element={<HealthPage />} />
-										<Route path="health/:tab" element={<HealthPage />} />
-										<Route path="files" element={<FilesPage />} />
 										<Route path="logs" element={<LogsPage />} />
 
 										{/* Admin-only routes */}

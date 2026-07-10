@@ -1,4 +1,4 @@
-module github.com/javi11/altmount
+module github.com/TaterTotterson/tater-tube-server
 
 go 1.26.0
 
@@ -16,7 +16,6 @@ require (
 	github.com/go-pkgz/auth/v2 v2.0.0
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/google/uuid v1.6.0
-	github.com/hanwen/go-fuse/v2 v2.9.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/javi11/nntppool/v4 v4.13.0
@@ -37,7 +36,6 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.20.0
 	github.com/stretchr/testify v1.11.1
-	github.com/winfsp/cgofuse v1.6.0
 	golang.org/x/crypto v0.46.0
 	golang.org/x/net v0.48.0
 	golang.org/x/sync v0.19.0

@@ -1,5 +1,5 @@
 // Package updater provides binary self-update capabilities for standalone
-// (non-Docker) installs of altmount. It fetches release assets from GitHub,
+// (non-Docker) installs of tater-tube-server. It fetches release assets from GitHub,
 // verifies their SHA-512 checksum, extracts the binary, and applies the
 // update in-place using github.com/minio/selfupdate.
 package updater
@@ -30,8 +30,8 @@ import (
 
 const (
 	defaultGitHubAPIBase = "https://api.github.com"
-	repoOwner            = "javi11"
-	repoName             = "altmount"
+	repoOwner            = "TaterTotterson"
+	repoName             = "tater-tube-server"
 
 	// Channel identifiers.
 	ChannelLatest = "latest"
@@ -244,7 +244,7 @@ func pickAssets(assets []githubAsset, goos, goarch string) (archive githubAsset,
 
 // candidateArchiveNames returns the suffixes we accept for a given
 // GOOS/GOARCH, in priority order. Asset names follow the release.yml pattern
-// `altmount-cli_v<version>_<goos>_<goarch>.<ext>`.
+// `tater-tube-server_v<version>_<goos>_<goarch>.<ext>`.
 func candidateArchiveNames(goos, goarch string) []string {
 	ext := ".tar.gz"
 	if goos == "windows" {
@@ -266,9 +266,9 @@ func expectedBinaryName(goos, goarch string) string {
 	if goos == "darwin" {
 		// If the universal binary is present, it uses this name; otherwise the
 		// arch-specific binary name is the fallback. extractBinary tries both.
-		return "altmount-cli-darwin-universal"
+		return "tater-tube-server-darwin-universal"
 	}
-	name := fmt.Sprintf("altmount-cli-%s-%s", goos, goarch)
+	name := fmt.Sprintf("tater-tube-server-%s-%s", goos, goarch)
 	if goos == "windows" {
 		name += ".exe"
 	}
@@ -316,7 +316,7 @@ func findChecksum(name string, checksumFile []byte) (string, error) {
 // not present, a secondary lookup by arch-specific name is attempted (this
 // covers darwin_universal archives whose binary name differs).
 func extractBinary(archiveName string, archiveBytes []byte, expectedName string) (io.Reader, error) {
-	alt := fmt.Sprintf("altmount-cli-%s-%s", runtime.GOOS, runtime.GOARCH)
+	alt := fmt.Sprintf("tater-tube-server-%s-%s", runtime.GOOS, runtime.GOARCH)
 	if runtime.GOOS == "windows" {
 		alt += ".exe"
 	}

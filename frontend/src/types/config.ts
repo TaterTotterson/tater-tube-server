@@ -1,19 +1,14 @@
 // Configuration types that match the backend API structure
 
-// Mount type for unified mount configuration
-export type MountType = "none" | "rclone" | "fuse" | "rclone_external";
-
 // Base configuration response from API
 export interface ConfigResponse {
-	webdav: WebDAVConfig;
+	server: ServerConfig;
 	api: APIConfig;
 	auth: AuthConfig;
 	database: DatabaseConfig;
 	metadata: MetadataConfig;
 	streaming: StreamingConfig;
 	health: HealthConfig;
-	rclone: RCloneConfig;
-	fuse: FuseConfig;
 	segment_cache: SegmentCacheConfig;
 	import: ImportConfig;
 	log: LogConfig;
@@ -23,20 +18,15 @@ export interface ConfigResponse {
 	providers: ProviderConfig[];
 	nzblnk: NzblnkConfig;
 	network: NetworkConfig;
-	mount_path: string;
-	mount_type: MountType;
 	api_key?: string;
 	download_key?: string;
 	profiler_enabled: boolean;
 }
 
-// WebDAV server configuration
-export interface WebDAVConfig {
+// HTTP server bind configuration
+export interface ServerConfig {
 	port: number;
-	user: string;
-	password: string;
 	host?: string;
-	debug?: boolean;
 }
 
 // API server configuration
@@ -139,79 +129,6 @@ export interface DryRunSyncResult {
 	orphaned_library_files: number; // Number of orphaned library files (symlinks/STRM)
 	database_records_to_clean: number; // Number of database records to clean
 	would_cleanup: boolean; // Whether cleanup would occur based on config
-}
-
-// RClone configuration (sanitized)
-export interface RCloneConfig {
-	// Encryption
-	password_set: boolean;
-	salt_set: boolean;
-
-	// RC (Remote Control) Configuration
-	rc_enabled: boolean;
-	rc_url: string;
-	vfs_name: string;
-	rc_port: number;
-	rc_user: string;
-	rc_pass_set: boolean;
-	rc_options: Record<string, string>;
-
-	// Mount Configuration
-	mount_enabled: boolean;
-	mount_options: Record<string, string>;
-
-	// Mount-Specific Settings
-	allow_other: boolean;
-	allow_non_empty: boolean;
-	read_only: boolean;
-	timeout: string;
-	syslog: boolean;
-
-	// System and filesystem options
-	log_level: string;
-	uid: number;
-	gid: number;
-	umask: string;
-	buffer_size: string;
-	attr_timeout: string;
-	transfers: number;
-
-	// VFS Cache Settings
-	cache_dir: string;
-	vfs_cache_mode: string;
-	vfs_cache_poll_interval: string;
-	vfs_read_chunk_size: string;
-	vfs_read_chunk_size_limit: string;
-	vfs_cache_max_size: string;
-	vfs_cache_max_age: string;
-	vfs_read_ahead: string;
-	dir_cache_time: string;
-	vfs_cache_min_free_space: string;
-	vfs_disk_space_total: string;
-	vfs_read_chunk_streams: number;
-
-	// Advanced Settings
-	no_mod_time: boolean;
-	no_checksum: boolean;
-	async_read: boolean;
-	vfs_fast_fingerprint: boolean;
-	use_mmap: boolean;
-	links: boolean;
-}
-
-// Fuse configuration
-export interface FuseConfig {
-	mount_path: string;
-	enabled: boolean;
-	allow_other: boolean;
-	debug: boolean;
-	attr_timeout_seconds: number;
-	entry_timeout_seconds: number;
-	max_cache_size_mb: number;
-	max_read_ahead_mb: number;
-	async_buffer_size_mb: number;
-	async_buffer_max_total_mb: number;
-	no_mod_time: boolean;
 }
 
 // Import strategy type
@@ -318,7 +235,7 @@ export interface SABnzbdCategory {
 
 // Configuration update request types
 export interface ConfigUpdateRequest {
-	webdav?: WebDAVUpdateRequest;
+	server?: ServerUpdateRequest;
 	api?: APIUpdateRequest;
 	auth?: AuthUpdateRequest;
 	database?: DatabaseUpdateRequest;
@@ -326,8 +243,6 @@ export interface ConfigUpdateRequest {
 	streaming?: StreamingUpdateRequest;
 	segment_cache?: Partial<SegmentCacheConfig>;
 	health?: HealthUpdateRequest;
-	rclone?: RCloneUpdateRequest;
-	fuse?: Partial<FuseConfig>;
 	import?: ImportUpdateRequest;
 	log?: LogUpdateRequest;
 	sabnzbd?: SABnzbdUpdateRequest;
@@ -336,18 +251,13 @@ export interface ConfigUpdateRequest {
 	providers?: ProviderUpdateRequest[];
 	nzblnk?: NzblnkConfig;
 	network?: NetworkConfig;
-	mount_path?: string;
-	mount_type?: MountType;
 	profiler_enabled?: boolean;
 }
 
-// WebDAV update request
-export interface WebDAVUpdateRequest {
+// Server update request
+export interface ServerUpdateRequest {
 	port?: number;
-	user?: string;
-	password?: string;
 	host?: string;
-	debug?: boolean;
 }
 
 // API update request
@@ -400,59 +310,6 @@ export interface HealthUpdateRequest {
 	acceptable_missing_segments_percentage?: number;
 	repair?: Partial<RepairConfig>;
 	corruption_action?: "repair" | "delete";
-}
-
-// RClone update request
-export interface RCloneUpdateRequest {
-	password?: string;
-	salt?: string;
-	rc_enabled?: boolean;
-	rc_url?: string;
-	vfs_name?: string;
-	rc_port?: number;
-	rc_user?: string;
-	rc_pass?: string;
-	rc_options?: Record<string, string>;
-	mount_enabled?: boolean;
-	mount_options?: Record<string, string>;
-
-	// Mount-Specific Settings
-	allow_other?: boolean;
-	allow_non_empty?: boolean;
-	read_only?: boolean;
-	timeout?: string;
-	syslog?: boolean;
-
-	// System and filesystem options
-	log_level?: string;
-	uid?: number;
-	gid?: number;
-	umask?: string;
-	buffer_size?: string;
-	attr_timeout?: string;
-	transfers?: number;
-
-	// VFS Cache Settings
-	cache_dir?: string;
-	vfs_cache_mode?: string;
-	vfs_cache_poll_interval?: string;
-	vfs_cache_max_size?: string;
-	vfs_cache_max_age?: string;
-	vfs_read_chunk_size?: string;
-	vfs_read_chunk_size_limit?: string;
-	vfs_read_ahead?: string;
-	dir_cache_time?: string;
-	vfs_cache_min_free_space?: string;
-	vfs_disk_space_total?: string;
-	vfs_read_chunk_streams?: number;
-
-	// Advanced Settings
-	no_mod_time?: boolean;
-	no_checksum?: boolean;
-	async_read?: boolean;
-	vfs_fast_fingerprint?: boolean;
-	use_mmap?: boolean;
-	links?: boolean;
 }
 
 // Import update request
@@ -515,7 +372,7 @@ export interface SABnzbdUpdateRequest {
 
 // Configuration section names for PATCH requests
 export type ConfigSection =
-	| "webdav"
+	| "server"
 	| "auth"
 	| "metadata"
 	| "streaming"
@@ -523,66 +380,12 @@ export type ConfigSection =
 	| "health"
 	| "import"
 	| "providers"
-	| "mount"
-	| "rclone"
-	| "fuse"
 	| "sabnzbd"
 	| "arrs"
 	| "stremio"
 	| "nzblnk"
 	| "network"
 	| "system";
-
-// Form data interfaces for UI components
-export interface RCloneMountFormData {
-	mount_enabled: boolean;
-	mount_options: Record<string, string>;
-
-	// Mount-Specific Settings
-	allow_other: boolean;
-	allow_non_empty: boolean;
-	read_only: boolean;
-	timeout: string;
-	syslog: boolean;
-
-	// System and filesystem options
-	log_level: string;
-	uid: number;
-	gid: number;
-	umask: string;
-	buffer_size: string;
-	attr_timeout: string;
-	transfers: number;
-
-	// VFS Cache Settings
-	cache_dir: string;
-	vfs_cache_mode: string;
-	vfs_cache_poll_interval: string;
-	vfs_read_chunk_size: string;
-	vfs_read_chunk_size_limit: string;
-	vfs_cache_max_size: string;
-	vfs_cache_max_age: string;
-	vfs_read_ahead: string;
-	dir_cache_time: string;
-	vfs_cache_min_free_space: string;
-	vfs_disk_space_total: string;
-	vfs_read_chunk_streams: number;
-
-	// Advanced Settings
-	no_mod_time: boolean;
-	no_checksum: boolean;
-	async_read: boolean;
-	vfs_fast_fingerprint: boolean;
-	use_mmap: boolean;
-	links: boolean;
-}
-
-export interface MountStatus {
-	mounted: boolean;
-	mount_point: string;
-	error?: string;
-	started_at?: string;
-}
 
 export interface ProviderFormData {
 	name: string;
@@ -728,11 +531,12 @@ export interface ProviderReorderRequest {
 }
 
 export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo> = {
-	webdav: {
-		title: "WebDAV Server",
-		description: "Expose your virtual library over the network via WebDAV protocol.",
+	server: {
+		title: "Server",
+		description: "Configure the web UI and API host/port.",
 		icon: "Globe",
 		canEdit: true,
+		hidden: true,
 	},
 	auth: {
 		title: "Authentication",
@@ -740,27 +544,21 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		icon: "Shield",
 		canEdit: true,
 	},
-	mount: {
-		title: "Mount",
-		description: "Configure filesystem mount (RClone or native FUSE)",
-		icon: "HardDrive",
-		canEdit: true,
-	},
 	metadata: {
-		title: "Metadata",
-		description: "Configure how AltMount stores and manages virtual file metadata.",
+		title: "Stream Metadata",
+		description: "Configure where processed NZB metadata and streamer cache state are stored.",
 		icon: "Folder",
 		canEdit: true,
 	},
 	streaming: {
-		title: "Streaming & Downloads",
-		description: "Segment prefetch and on-disk segment cache for smoother media playback.",
+		title: "Streaming",
+		description: "Segment prefetch and on-disk cache settings for smoother media playback.",
 		icon: "Download",
 		canEdit: true,
 	},
 	segment_cache: {
 		title: "Segment Cache",
-		description: "Segment-aligned disk cache shared by FUSE and WebDAV for faster media playback",
+		description: "Segment-aligned disk cache for smoother media playback.",
 		icon: "HardDrive",
 		canEdit: true,
 		hidden: true,
@@ -770,38 +568,26 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		description: "File health monitoring and automatic repair settings",
 		icon: "Shield",
 		canEdit: true,
+		hidden: true,
 	},
 	import: {
-		title: "Import Processing",
-		description: "Configure how workers handle new imports and validation.",
+		title: "NZB Processing",
+		description: "Configure workers that prepare NZB releases for streaming.",
 		icon: "Cog",
 		canEdit: true,
 	},
 	providers: {
 		title: "NNTP Providers",
-		description: "Usenet provider configuration for downloads",
+		description: "Usenet provider configuration used by the streaming engine.",
 		icon: "Radio",
 		canEdit: true,
 	},
-	rclone: {
-		title: "RClone",
-		description: "RClone configuration",
-		icon: "HardDrive",
-		canEdit: true,
-		hidden: true,
-	},
-	fuse: {
-		title: "FUSE",
-		description: "Native FUSE configuration",
-		icon: "HardDrive",
-		canEdit: true,
-		hidden: true,
-	},
 	sabnzbd: {
 		title: "SABnzbd API",
-		description: "Emulate a SABnzbd server to allow ARR applications to send NZBs to AltMount.",
+		description: "Emulate a SABnzbd server to allow ARR applications to send NZBs to Tater Tube Server.",
 		icon: "Download",
 		canEdit: true,
+		hidden: true,
 	},
 	arrs: {
 		title: "ARR Management",
@@ -809,11 +595,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 			"Configure Radarr, Sonarr, Lidarr, Readarr, and Whisparr instances for media file synchronization and automatic repair.",
 		icon: "Cog",
 		canEdit: true,
+		hidden: true,
 	},
 	stremio: {
 		title: "Stremio Integration",
 		description:
-			"Upload an NZB for instant stream URLs, or enable the addon to automatically search Prowlarr by IMDB ID and stream results directly from Stremio.",
+			"Enable the Stremio addon and direct NZB stream endpoint.",
 		icon: "Tv",
 		canEdit: true,
 	},
@@ -826,7 +613,7 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 	network: {
 		title: "Network & User Agent",
 		description:
-			"HTTP/HTTPS proxy and indexer User-Agent for outbound indexer, Arrs, NZB grab, and SABnzbd fallback traffic",
+			"HTTP/HTTPS proxy and indexer User-Agent for outbound indexer and NZB traffic.",
 		icon: "Globe",
 		canEdit: true,
 	},

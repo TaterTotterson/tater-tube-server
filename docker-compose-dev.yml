@@ -1,11 +1,9 @@
 services:
-  altmount:
-    extra_hosts:
-      - "host.docker.internal:host-gateway" # Optional if you rclone is outside the container
+  tater-tube-server:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: altmount
+    container_name: tater-tube-server
     environment:
       - PUID=1000
       - PGID=1000
@@ -14,16 +12,10 @@ services:
       - COOKIE_DOMAIN=localhost # Must match the domain/IP where web interface is accessed
     volumes:
       - ./config:/config
-      - ./mnt:/mnt:rshared
+      - ./metadata:/metadata
       - /var/run/docker.sock:/var/run/docker.sock # Required for the auto-update feature
     group_add:
       - "999" # GID of the docker group on the host (run `getent group docker | cut -d: -f3` to find yours)
     ports:
       - "8080:8080"
     restart: unless-stopped
-    devices:
-      - /dev/fuse:/dev/fuse:rwm
-    cap_add:
-      - SYS_ADMIN
-    security_opt:
-      - apparmor:unconfined

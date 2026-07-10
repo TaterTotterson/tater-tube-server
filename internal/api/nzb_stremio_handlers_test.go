@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
-	"github.com/javi11/altmount/internal/metadata"
-	"github.com/javi11/altmount/internal/testsupport/nzbbuild"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/parser/fileinfo"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/nzbbuild"
 	"github.com/javi11/nzbparser"
 	"github.com/stretchr/testify/require"
 )

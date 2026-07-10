@@ -6,16 +6,16 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/javi11/altmount/internal/arrs/failures"
-	"github.com/javi11/altmount/internal/arrs/model"
-	"github.com/javi11/altmount/internal/arrs/registrar"
-	"github.com/javi11/altmount/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/failures"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/model"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/registrar"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"golift.io/starr/sonarr"
 )
 
 // HandleImportFailure runs the importer-side failure breaker for one
 // permanently failed *arr-originated download. It closes the re-grab loop the
-// queue-cleanup breaker can never see: AltMount fast-fails an import (e.g. dead
+// queue-cleanup breaker can never see: Tater Tube Server fast-fails an import (e.g. dead
 // articles), reports Failed via the SABnzbd API, and the *arr's failed-download
 // handling blocklists only that one release and instantly re-searches — finding
 // the same dead release on the next indexer, forever.
@@ -122,7 +122,7 @@ func (w *Worker) importFailureSonarr(ctx context.Context, instance *model.Config
 		giveUpTitle string
 	)
 	for _, q := range queue.Records {
-		if !strings.EqualFold(q.DownloadID, downloadID) || !registrar.IsAltmountDownloadClient(q.DownloadClient) {
+		if !strings.EqualFold(q.DownloadID, downloadID) || !registrar.IsTaterTubeServerDownloadClient(q.DownloadClient) {
 			continue
 		}
 		found = true
@@ -173,7 +173,7 @@ func (w *Worker) importFailureRadarr(ctx context.Context, instance *model.Config
 	}
 
 	for _, q := range queue.Records {
-		if !strings.EqualFold(q.DownloadID, downloadID) || !registrar.IsAltmountDownloadClient(q.DownloadClient) {
+		if !strings.EqualFold(q.DownloadID, downloadID) || !registrar.IsTaterTubeServerDownloadClient(q.DownloadClient) {
 			continue
 		}
 		if q.MovieID > 0 && w.bumpBreaker(failures.MovieKey(instance.Name, q.MovieID)) >= maxFailures {
@@ -207,7 +207,7 @@ func (w *Worker) importFailureLidarr(ctx context.Context, instance *model.Config
 	}
 
 	for _, q := range queue.Records {
-		if !strings.EqualFold(q.DownloadID, downloadID) || !registrar.IsAltmountDownloadClient(q.DownloadClient) {
+		if !strings.EqualFold(q.DownloadID, downloadID) || !registrar.IsTaterTubeServerDownloadClient(q.DownloadClient) {
 			continue
 		}
 		if q.AlbumID > 0 && w.bumpBreaker(failures.AlbumKey(instance.Name, q.AlbumID)) >= maxFailures {
@@ -236,7 +236,7 @@ func (w *Worker) importFailureReadarr(ctx context.Context, instance *model.Confi
 	}
 
 	for _, q := range queue.Records {
-		if !strings.EqualFold(q.DownloadID, downloadID) || !registrar.IsAltmountDownloadClient(q.DownloadClient) {
+		if !strings.EqualFold(q.DownloadID, downloadID) || !registrar.IsTaterTubeServerDownloadClient(q.DownloadClient) {
 			continue
 		}
 		if q.BookID > 0 && w.bumpBreaker(failures.BookKey(instance.Name, q.BookID)) >= maxFailures {

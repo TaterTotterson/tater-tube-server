@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/altmount/internal/testsupport/segments"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/fakepool"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/segments"
 	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/nzbparser"
 )

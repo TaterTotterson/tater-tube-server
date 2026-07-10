@@ -14,7 +14,7 @@ export function Logo({ width, height, className }: LogoProps) {
 
 	return (
 		<Link to="/" className={`cursor-pointer ${containerClass}`}>
-			<img src="/logo.png" alt="AltMount Logo" className="object-contain" />
+			<img src="/logo.png" alt="Tater Tube Server" className="object-contain" />
 		</Link>
 	);
 }

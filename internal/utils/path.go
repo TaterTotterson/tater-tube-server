@@ -39,7 +39,7 @@ func CheckDirectoryWritable(path string) error {
 	}
 
 	// Test write permissions by creating a temporary file
-	testFile := filepath.Join(absPath, ".altmount-write-test")
+	testFile := filepath.Join(absPath, ".tater-tube-server-write-test")
 	file, err := os.Create(testFile)
 	if err != nil {
 		return fmt.Errorf("directory %s is not writable: %w", absPath, err)

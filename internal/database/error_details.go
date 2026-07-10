@@ -3,7 +3,7 @@ package database
 import (
 	"encoding/json"
 
-	"github.com/javi11/altmount/internal/holes"
+	"github.com/TaterTotterson/tater-tube-server/internal/holes"
 )
 
 // HealthErrorDetails is the structured JSON stored in file_health.error_details.

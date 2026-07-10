@@ -16,20 +16,19 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/encryption"
-	"github.com/javi11/altmount/internal/encryption/aes"
-	"github.com/javi11/altmount/internal/encryption/rclone"
-	"github.com/javi11/altmount/internal/holes"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/encryption"
+	"github.com/TaterTotterson/tater-tube-server/internal/encryption/aes"
+	"github.com/TaterTotterson/tater-tube-server/internal/encryption/rclone"
+	"github.com/TaterTotterson/tater-tube-server/internal/holes"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzbfilesystem/segcache"
 
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/usenet"
-	"github.com/javi11/altmount/internal/utils"
-	"github.com/javi11/altmount/pkg/rclonecli"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/usenet"
+	"github.com/TaterTotterson/tater-tube-server/internal/utils"
 	"github.com/spf13/afero"
 )
 
@@ -38,15 +37,13 @@ type MetadataRemoteFile struct {
 	metadataService  *metadata.MetadataService
 	healthRepository *database.HealthRepository
 	arrsService      ARRsRepairService
-	rcloneClient     rclonecli.RcloneRcClient // RClone RC client for VFS notifications
-	poolManager      pool.Manager             // Pool manager for dynamic pool access
-	configGetter     config.ConfigGetter      // Dynamic config access
-	rcloneCipher     *rclone.RcloneCrypt      // For rclone encryption/decryption
-	aesCipher        *aes.AesCipher           // For AES encryption/decryption
-	streamTracker    StreamTracker            // Stream tracker for monitoring active streams
-	cacheSource      *segcache.Source         // Segment cache source (nil = no cache configured)
-	repairCoalescer  *RepairCoalescer         // Throttles streaming-failure repair triggers and rclone VFS refreshes
-	renameMu         sync.Mutex               // Mutex to protect rename operations from race conditions
+	poolManager      pool.Manager        // Pool manager for dynamic pool access
+	configGetter     config.ConfigGetter // Dynamic config access
+	rcloneCipher     *rclone.RcloneCrypt // For rclone encryption/decryption
+	aesCipher        *aes.AesCipher      // For AES encryption/decryption
+	streamTracker    StreamTracker       // Stream tracker for monitoring active streams
+	cacheSource      *segcache.Source    // Segment cache source (nil = no cache configured)
+	renameMu         sync.Mutex          // Mutex to protect rename operations from race conditions
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -57,7 +54,6 @@ func NewMetadataRemoteFile(
 	metadataService *metadata.MetadataService,
 	healthRepository *database.HealthRepository,
 	arrsService ARRsRepairService,
-	rcloneClient rclonecli.RcloneRcClient,
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
 	streamTracker StreamTracker,
@@ -79,14 +75,12 @@ func NewMetadataRemoteFile(
 		metadataService:  metadataService,
 		healthRepository: healthRepository,
 		arrsService:      arrsService,
-		rcloneClient:     rcloneClient,
 		poolManager:      poolManager,
 		configGetter:     configGetter,
 		rcloneCipher:     rcloneCipher,
 		aesCipher:        aesCipher,
 		streamTracker:    streamTracker,
 		cacheSource:      cacheSource,
-		repairCoalescer:  NewRepairCoalescer(rcloneClient, configGetter),
 	}
 }
 
@@ -270,8 +264,6 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		metadataService:  mrf.metadataService,
 		healthRepository: mrf.healthRepository,
 		arrsService:      mrf.arrsService,
-		rcloneClient:     mrf.rcloneClient,
-		repairCoalescer:  mrf.repairCoalescer,
 		configGetter:     mrf.configGetter,
 		poolManager:      mrf.poolManager,
 		ctx:              ctx,
@@ -788,8 +780,6 @@ type MetadataVirtualFile struct {
 	metadataService  *metadata.MetadataService
 	healthRepository *database.HealthRepository
 	arrsService      ARRsRepairService
-	rcloneClient     rclonecli.RcloneRcClient // RClone RC client for VFS notifications
-	repairCoalescer  *RepairCoalescer         // Throttles repair triggers; may be nil in tests
 	configGetter     config.ConfigGetter
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
@@ -2064,21 +2054,7 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 
 // updateFileHealthOnError updates both metadata and database health status when corruption is detected.
 // Uses synchronous operations with timeout to prevent goroutine leaks.
-//
-// A streaming-failure repair trigger for the same path is debounced through the
-// shared RepairCoalescer so that repeated corrupt reads of one file (or a batch
-// of corrupt files) cannot fan out into one DB write + one rclone VFS refresh
-// per call. See issue #539 for the failure mode this guards against.
 func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usenet.DataCorruptionError, noRetry bool) {
-	// Per-path debounce: short-circuit if this file already triggered a repair
-	// inside the debounce window. ShouldTrigger handles a nil coalescer
-	// (test harness) by returning true.
-	if !mvf.repairCoalescer.ShouldTrigger(mvf.name) {
-		slog.DebugContext(mvf.ctx, "Streaming failure repair already triggered recently, debouncing",
-			"file", mvf.name)
-		return
-	}
-
 	// Use a short timeout context to prevent blocking indefinitely
 	ctx, cancel := context.WithTimeout(mvf.ctx, 5*time.Second)
 	defer cancel()
@@ -2172,14 +2148,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 				relativePath := strings.TrimPrefix(mvf.name, cfg.MountPath)
 				relativePath = strings.TrimPrefix(relativePath, "/")
 				slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", mvf.name)
-				if moveErr := mvf.metadataService.MoveToCorrupted(ctx, relativePath); moveErr == nil {
-					// Successfully moved metadata, enqueue a coalesced rclone VFS
-					// refresh. Multiple files in the same directory collapse into a
-					// single RC call; concurrent failures across directories are
-					// batched into one call as well. EnqueueRefresh is a no-op on a
-					// nil coalescer (test harness).
-					mvf.repairCoalescer.EnqueueRefresh(filepath.Dir(mvf.name))
-				} else {
+				if moveErr := mvf.metadataService.MoveToCorrupted(ctx, relativePath); moveErr != nil {
 					slog.WarnContext(ctx, "Failed to move corrupted metadata file, proceeding with repair trigger status", "error", moveErr)
 				}
 			}

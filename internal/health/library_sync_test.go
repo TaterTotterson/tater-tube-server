@@ -9,28 +9,21 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// MockRcloneClient implements rclonecli.RcloneRcClient
-type MockRcloneClient struct{}
-
-func (m *MockRcloneClient) RefreshDir(ctx context.Context, provider string, dirs []string) error {
-	return nil
-}
 
 func TestSyncLibrary_WorkerPool(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinks not supported on Windows")
 	}
 	// Setup temporary directory for metadata
-	tempDir, err := os.MkdirTemp("", "altmount_test_metadata")
+	tempDir, err := os.MkdirTemp("", "tater_tube_server_test_metadata")
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
@@ -92,7 +85,6 @@ func TestSyncLibrary_WorkerPool(t *testing.T) {
 		healthRepo,
 		configManager.GetConfig,
 		configManager,
-		&MockRcloneClient{},
 	)
 
 	// Create some metadata files

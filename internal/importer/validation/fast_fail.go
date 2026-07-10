@@ -6,10 +6,10 @@ import (
 	"math/rand"
 	"time"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/progress"
-	"github.com/javi11/altmount/internal/usenet"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/progress"
+	"github.com/TaterTotterson/tater-tube-server/internal/usenet"
 	"github.com/javi11/nntppool/v4"
 )
 

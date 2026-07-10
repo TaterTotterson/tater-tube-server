@@ -7,14 +7,14 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/javi11/altmount/internal/arrs/model"
-	"github.com/javi11/altmount/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/model"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"golift.io/starr"
 	"golift.io/starr/lidarr"
 	"golift.io/starr/radarr"
 	"golift.io/starr/readarr"
 	"golift.io/starr/sonarr"
-	)
+)
 
 type Manager struct {
 	configGetter  config.ConfigGetter
@@ -169,7 +169,7 @@ func (m *Manager) RegisterInstance(ctx context.Context, arrURL, apiKey string) (
 
 	// Determine category based on ARR type
 	var category string
-	
+
 	// Check if instance already exists in config to respect pre-configured category
 	existingInstances := m.GetAllInstances()
 	found := false

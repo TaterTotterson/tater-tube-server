@@ -4,10 +4,10 @@ package utils
 type contextKey string
 
 func (c contextKey) String() string {
-	return "webdav context key " + string(c)
+	return "server context key " + string(c)
 }
 
-// Context keys for passing WebDAV request metadata through context
+// Context keys for passing Server request metadata through context
 const (
 	ContentLengthKey          = contextKey("contentLength")
 	RangeKey                  = contextKey("rangeKey")

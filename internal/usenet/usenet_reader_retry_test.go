@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/altmount/internal/testsupport/segments"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/fakepool"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/segments"
 	"github.com/javi11/nntppool/v4"
 	"github.com/stretchr/testify/assert"
 )
@@ -150,7 +150,7 @@ func TestMissingSegment_EmitsDebugLog(t *testing.T) {
 
 	var mu sync.Mutex
 	type logRecord struct {
-		msg  string
+		msg   string
 		segID string
 	}
 	var captured []logRecord

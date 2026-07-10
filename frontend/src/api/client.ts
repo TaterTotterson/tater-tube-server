@@ -5,7 +5,6 @@ import type {
 	ChangeOwnPasswordRequest,
 	FileHealth,
 	FileMetadata,
-	FuseStatus,
 	HealthCheckRequest,
 	HealthCleanupRequest,
 	HealthCleanupResponse,
@@ -13,11 +12,8 @@ import type {
 	HealthStats,
 	HealthWorkerStatus,
 	ImportHistoryItem,
-	ImportStatusResponse,
 	LibrarySyncStatus,
 	ManualScanRequest,
-	NzbdavMigrateSymlinksRequest,
-	NzbdavMigrateSymlinksResponse,
 	PoolMetrics,
 	ProviderHistoricalStatsResponse,
 	ProviderSpeedTestHistoryResponse,
@@ -881,45 +877,6 @@ class APIClient {
 		});
 	}
 
-	// NZBDav Import endpoints
-	async getNzbdavImportStatus() {
-		return this.request<ImportStatusResponse>("/import/nzbdav/status");
-	}
-
-	async resetNzbdavImportStatus() {
-		return this.request<{ message: string }>("/import/nzbdav/reset", {
-			method: "POST",
-		});
-	}
-
-	async cancelNzbdavImport() {
-		return this.request<{ message: string }>("/import/nzbdav", {
-			method: "DELETE",
-		});
-	}
-
-	async clearPendingNzbdavMigrations() {
-		return this.request<{ message: string; data: { deleted: number } }>(
-			"/import/nzbdav/pending-migrations",
-			{ method: "DELETE" },
-		);
-	}
-
-	async clearAllNzbdavMigrations() {
-		return this.request<{ message: string; data: { deleted: number } }>(
-			"/import/nzbdav/migrations",
-			{ method: "DELETE" },
-		);
-	}
-
-	async migrateNzbdavSymlinks(req: NzbdavMigrateSymlinksRequest) {
-		return this.request<NzbdavMigrateSymlinksResponse>("/import/nzbdav/migrate-symlinks", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(req),
-		});
-	}
-
 	// Native upload endpoint using JWT authentication
 	async uploadToQueue(
 		file: File,
@@ -987,32 +944,6 @@ class APIClient {
 		return this.request<APIResponse<QueueItem>>("/queue/test", {
 			method: "POST",
 			body: JSON.stringify({ size }),
-		});
-	}
-
-	// FUSE endpoints
-	async getFuseStatus() {
-		return this.request<FuseStatus>("/fuse/status");
-	}
-
-	async startFuseMount(path: string) {
-		return this.request<{ message: string }>("/fuse/start", {
-			method: "POST",
-			body: JSON.stringify({ path }),
-		});
-	}
-
-	async stopFuseMount() {
-		return this.request<{ message: string }>("/fuse/stop", {
-			method: "POST",
-			body: JSON.stringify({}),
-		});
-	}
-
-	async forceStopFuseMount() {
-		return this.request<{ message: string }>("/fuse/force-stop", {
-			method: "POST",
-			body: JSON.stringify({}),
 		});
 	}
 

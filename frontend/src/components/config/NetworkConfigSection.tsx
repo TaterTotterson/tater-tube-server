@@ -70,8 +70,8 @@ export function NetworkConfigSection({
 				<div className="text-sm">
 					Applied to every outbound HTTP request used for indexer search, NZB grabbing, Arrs
 					(Radarr/Sonarr/Lidarr/Readarr/Whisparr), SABnzbd fallback, and the NZBLNK resolver.
-					Internal endpoints (RC server, self-loopback) are not affected. Leave fields blank to
-					connect directly. Changes take effect on the next external request. Restart AltMount if
+					Internal self-loopback requests are not affected. Leave fields blank to
+					connect directly. Changes take effect on the next external request. Restart Tater Tube Server if
 					you want long-lived clients to pick up the new proxy immediately.
 				</div>
 			</div>

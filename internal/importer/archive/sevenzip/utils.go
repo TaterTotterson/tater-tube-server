@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/javi11/altmount/internal/importer/archive"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/archive"
 )
 
 var (

@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/altmount/internal/testsupport/goroutines"
-	"github.com/javi11/altmount/internal/testsupport/segments"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/fakepool"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/goroutines"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/segments"
 )
 
 // slowCloseReader is a stand-in io.ReadCloser whose Close blocks for the
@@ -71,12 +71,12 @@ func (r *slowCloseReader) Close() error {
 func TestStorm_RandomReadAtCreatesEphemeralReaderPerCall(t *testing.T) {
 	t.Parallel()
 	const (
-		segCount     = 200
-		segSize      = 1024
-		readCount    = 200
-		readSize     = 64
+		segCount      = 200
+		segSize       = 1024
+		readCount     = 200
+		readSize      = 64
 		hotWindowSegs = 8 // working set fits in randomReadCacheSize
-		maxPrefetch  = 4
+		maxPrefetch   = 4
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -129,7 +129,7 @@ func TestStorm_RandomReadAtCreatesEphemeralReaderPerCall(t *testing.T) {
 // 16 KiB). The cache then slices `full[rel : rel + len(p)]` past the
 // segment's actual size:
 //
-//   panic: runtime error: slice bounds out of range [:704512] with capacity 703432
+//	panic: runtime error: slice bounds out of range [:704512] with capacity 703432
 //
 // reproduced on a Jellyfin library scan against an .mp4 whose last
 // segment is partially-filled. The fix clamps the copy length to the

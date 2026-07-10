@@ -80,9 +80,9 @@ export function ActivityHub() {
 	const groupedStreams = useMemo(() => {
 		if (!allStreams) return [];
 
-		// Filter to show only active streaming sessions (WebDAV, FUSE, or API/Stremio)
+		// Filter to show only active streaming sessions.
 		const streamingOnly = allStreams.filter((s) => {
-			const isSystemSource = s.source === "WebDAV" || s.source === "FUSE" || s.source === "API";
+			const isSystemSource = s.source === "API" || s.source === "Stremio";
 			const isStreaming = s.status === "Streaming";
 
 			// Heuristic: Filter out metadata probes and very short system scans

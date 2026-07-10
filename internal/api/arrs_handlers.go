@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/model"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/arrs/model"
-	"github.com/javi11/altmount/internal/database"
 )
 
 // ArrsInstanceRequest represents a request to create/update an arrs instance
@@ -26,6 +26,7 @@ type ArrsInstanceRequest struct {
 	Enabled           bool   `json:"enabled"`
 	SyncIntervalHours int    `json:"sync_interval_hours"`
 }
+
 // ArrsWebhookRequest represents a webhook payload from Radarr/Sonarr
 type ArrsWebhookRequest struct {
 	Artist struct {
@@ -132,7 +133,6 @@ func (req ArrsWebhookRequest) ToMetadata() model.WebhookMetadata {
 		}
 	}
 
-
 	if req.Artist.Id > 0 {
 		meta.Artist = &model.ArtistMetadata{
 			Id: req.Artist.Id,
@@ -201,7 +201,7 @@ func (df *ArrsDeletedFiles) UnmarshalJSON(data []byte) error {
 //	@Tags			ARRs
 //	@Accept			json
 //	@Produce		json
-//	@Param			apikey	query		string				true	"AltMount API key"
+//	@Param			apikey	query		string				true	"Tater Tube Server API key"
 //	@Param			body	body		ArrsWebhookRequest	true	"Webhook payload"
 //	@Success		200		{object}	APIResponse
 //	@Failure		401		{object}	APIResponse
@@ -940,7 +940,7 @@ func (s *Server) handleGetArrsHealth(c *fiber.Ctx) error {
 // handleRegisterArrsWebhooks triggers automatic registration of webhooks in ARR instances
 //
 //	@Summary		Register ARR webhooks
-//	@Description	Automatically registers AltMount as a webhook connection in all configured ARR instances.
+//	@Description	Automatically registers Tater Tube Server as a webhook connection in all configured ARR instances.
 //	@Tags			ARRs
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
@@ -963,7 +963,7 @@ func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
 		cfg := s.configManager.GetConfig()
 		baseURL = cfg.GetWebhookBaseURL()
 	} else {
-		baseURL = "http://altmount:8080" // Fallback if no config manager is available
+		baseURL = "http://tater-tube-server:8080" // Fallback if no config manager is available
 	}
 
 	if err := s.arrsService.EnsureWebhookRegistration(c.Context(), baseURL, apiKey); err != nil {
@@ -973,10 +973,10 @@ func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
 	return RespondMessage(c, "Webhooks registered successfully")
 }
 
-// handleRegisterArrsDownloadClients triggers automatic registration of AltMount as a download client in ARR instances
+// handleRegisterArrsDownloadClients triggers automatic registration of Tater Tube Server as a download client in ARR instances
 //
 //	@Summary		Register ARR download clients
-//	@Description	Automatically registers AltMount as a download client (SABnzbd-compatible) in all configured ARR instances.
+//	@Description	Automatically registers Tater Tube Server as a download client (SABnzbd-compatible) in all configured ARR instances.
 //	@Tags			ARRs
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
@@ -996,13 +996,13 @@ func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
 		})
 	}
 
-	// Get configured host/port or use defaults from WebDAV config
+	// Get configured host/port or use defaults from Server config
 	cfg := s.configManager.GetConfig()
-	host := cfg.WebDAV.Host
+	host := cfg.Server.Host
 	if host == "" {
-		host = "altmount"
+		host = "tater-tube-server"
 	}
-	port := cfg.WebDAV.Port
+	port := cfg.Server.Port
 	if port == 0 {
 		port = 8080
 	}
@@ -1051,17 +1051,17 @@ func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
 	}
 	if len(failures) > 0 {
 		return RespondError(c, fiber.StatusBadGateway, ErrCodeInternalServer,
-			"Download client registered, but ARR instances cannot reach AltMount",
+			"Download client registered, but ARR instances cannot reach Tater Tube Server",
 			strings.Join(failures, "; "))
 	}
 
 	return RespondMessage(c, "Download client registered and verified successfully")
 }
 
-// handleTestArrsDownloadClients tests the connection from ARR instances to AltMount
+// handleTestArrsDownloadClients tests the connection from ARR instances to Tater Tube Server
 //
 //	@Summary		Test ARR download clients
-//	@Description	Tests whether AltMount is reachable as a download client from all configured ARR instances.
+//	@Description	Tests whether Tater Tube Server is reachable as a download client from all configured ARR instances.
 //	@Tags			ARRs
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
@@ -1080,13 +1080,13 @@ func (s *Server) handleTestArrsDownloadClients(c *fiber.Ctx) error {
 		})
 	}
 
-	// Get configured host/port or use defaults from WebDAV config
+	// Get configured host/port or use defaults from Server config
 	cfg := s.configManager.GetConfig()
-	host := cfg.WebDAV.Host
+	host := cfg.Server.Host
 	if host == "" {
-		host = "altmount"
+		host = "tater-tube-server"
 	}
-	port := cfg.WebDAV.Port
+	port := cfg.Server.Port
 	if port == 0 {
 		port = 8080
 	}
@@ -1129,4 +1129,3 @@ func (s *Server) handleTestArrsDownloadClients(c *fiber.Ctx) error {
 		"data":    results,
 	})
 }
-

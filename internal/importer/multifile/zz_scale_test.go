@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/importer/parser"
-	"github.com/javi11/altmount/internal/metadata"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/parser"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
 )
 
 // TestProcessRegularFilesCollisionScaling guards against O(N^2) regressions in

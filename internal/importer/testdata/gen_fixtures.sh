@@ -9,7 +9,7 @@
 #   cd internal/importer/testdata && bash gen_fixtures.sh
 #
 # All archives use store mode (no compression) so that segment offsets map
-# 1-to-1 onto the inner file bytes. This is required by altmount's archive
+# 1-to-1 onto the inner file bytes. This is required by tater-tube-server's archive
 # analyzers: compressed entries are rejected.
 #
 # Regenerate whenever payload_a.bin or payload_b.bin content changes, or when

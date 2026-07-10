@@ -190,7 +190,7 @@ func CheckMetadataIntegrity(fileSize int64, ml SegmentLoader) error {
 		// Gap detection: if the logical file position we're tracking
 		// is less than the file position this segment would cover,
 		// there's a gap in the metadata.
-		// (Note: in altmount segments are expected to be perfectly sequential
+		// (Note: in tater-tube-server segments are expected to be perfectly sequential
 		// because of how they are imported from NZBs)
 
 		usableLen := src.End - src.Start + 1

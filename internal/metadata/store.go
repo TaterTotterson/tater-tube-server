@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"sort"
 
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzb"
 	lru "github.com/hashicorp/golang-lru/v2"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/nzb"
 	"github.com/klauspost/compress/zstd"
 	"google.golang.org/protobuf/proto"
 )

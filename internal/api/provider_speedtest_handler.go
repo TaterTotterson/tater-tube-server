@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/nntppool/v4"
 )
 

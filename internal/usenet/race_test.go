@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
 )
 
 func TestUsenetReader_Race_Close_GetBufferedOffset(t *testing.T) {

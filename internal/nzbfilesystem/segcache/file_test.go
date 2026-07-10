@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzbfilesystem/segcache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

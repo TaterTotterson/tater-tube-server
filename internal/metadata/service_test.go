@@ -7,11 +7,10 @@ import (
 	"runtime"
 	"testing"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
 
 func TestDeleteFileMetadataWithSourceNzb_RemovesMetadata(t *testing.T) {
 	root := t.TempDir()

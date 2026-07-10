@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/javi11/altmount/internal/importer/migration"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/migration"
 )
 
 // mockLookup implements SymlinkLookup for testing.
@@ -33,7 +33,7 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 
 	const (
 		sourceMountPath = "/mnt/nzbdav"
-		altmountPath    = "/mnt/altmount"
+		serverPath      = "/mnt/tater-tube-server"
 		source          = "nzbdav"
 	)
 
@@ -79,7 +79,7 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 				if err != nil {
 					t.Fatalf("readlink after rewrite: %v", err)
 				}
-				want := filepath.Join(altmountPath, "movies/Movie (2020)/Movie (2020).mkv")
+				want := filepath.Join(serverPath, "movies/Movie (2020)/Movie (2020).mkv")
 				if got != want {
 					t.Errorf("symlink target: got %q, want %q", got, want)
 				}
@@ -111,9 +111,9 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 			},
 			lookup:                 &mockLookup{paths: map[string]string{}},
 			wantScanned:            1,
-			wantMatched:             0,
-			wantRewritten:           0,
-			wantUnmatched:           0,
+			wantMatched:            0,
+			wantRewritten:          0,
+			wantUnmatched:          0,
 			wantSkippedWrongPrefix: 1,
 		},
 		{
@@ -177,7 +177,7 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 				if err != nil {
 					t.Fatalf("readfile after rewrite: %v", err)
 				}
-				want := filepath.Join(altmountPath, "tv/Show S01/Show.S01E01.mkv")
+				want := filepath.Join(serverPath, "tv/Show S01/Show.S01E01.mkv")
 				if string(content) != want {
 					t.Errorf("rclonelink content: got %q, want %q", string(content), want)
 				}
@@ -216,7 +216,7 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 			},
 		},
 		{
-			name:  "context cancellation stops walk",
+			name: "context cancellation stops walk",
 			setup: func(t *testing.T, dir string) {
 				t.Helper()
 				// Create one symlink so the walk has an entry to process.
@@ -249,7 +249,7 @@ func TestRewriteLibrarySymlinks(t *testing.T) {
 				ctx,
 				dir,
 				sourceMountPath,
-				altmountPath,
+				serverPath,
 				source,
 				tc.lookup,
 				tc.dryRun,

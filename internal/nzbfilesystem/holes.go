@@ -5,11 +5,11 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/holes"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/usenet"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/holes"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/usenet"
 )
 
 // holeEligible reports whether this file's missing segments may be
@@ -97,12 +97,6 @@ func (mvf *MetadataVirtualFile) recordDegradedPad(segIndex int, total, longest, 
 	// Always persist the hole so the next open pre-pads it without a fetch.
 	if err := mvf.metadataService.AddKnownHoles(mvf.name, []holes.Run{{Start: segIndex, Count: 1}}); err != nil {
 		slog.WarnContext(mvf.ctx, "Failed to persist known hole", "file", mvf.name, "error", err)
-	}
-
-	// Distinct debounce key from the repair path so pads never consume a
-	// repair-trigger token.
-	if !mvf.repairCoalescer.ShouldTrigger(mvf.name + "\x00degraded-pad") {
-		return
 	}
 
 	ctx, cancel := context.WithTimeout(mvf.ctx, 5*time.Second)

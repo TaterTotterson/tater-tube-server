@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/javi11/altmount/internal/auth"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/auth"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
 )
 
 // CreateStrmFiles creates STRM files for an imported file or directory
@@ -46,13 +46,13 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 	if err != nil {
 		metaFile := metadataPath + ".meta"
 		if _, metaErr := os.Stat(metaFile); metaErr == nil {
-			return c.CreateSingleStrmFile(ctx, resultingPath, originalResultingPath, cfg.WebDAV.Port)
+			return c.CreateSingleStrmFile(ctx, resultingPath, originalResultingPath, cfg.Server.Port)
 		}
 		return fmt.Errorf("failed to stat metadata path: %w", err)
 	}
 
 	if !fileInfo.IsDir() {
-		return c.CreateSingleStrmFile(ctx, resultingPath, originalResultingPath, cfg.WebDAV.Port)
+		return c.CreateSingleStrmFile(ctx, resultingPath, originalResultingPath, cfg.Server.Port)
 	}
 
 	// Directory - walk through and create STRM files for all files
@@ -94,7 +94,7 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 		// double-prefix the category/CompleteDir on Windows (issue #585).
 		strmResultingPath := buildLibraryRelPath(relPath, cfg.SABnzbd.CompleteDir, category)
 
-		if err := c.CreateSingleStrmFile(ctx, strmResultingPath, relPath, cfg.WebDAV.Port); err != nil {
+		if err := c.CreateSingleStrmFile(ctx, strmResultingPath, relPath, cfg.Server.Port); err != nil {
 			c.log.ErrorContext(ctx, "Failed to create STRM file",
 				"path", relPath,
 				"error", err)
@@ -161,7 +161,7 @@ func (c *Coordinator) CreateSingleStrmFile(ctx context.Context, strmResultingPat
 	hashedKey := auth.HashAPIKey(adminAPIKey)
 
 	// Determine host to use
-	host := cfg.WebDAV.Host
+	host := cfg.Server.Host
 	if host == "" {
 		host = "localhost"
 	}
@@ -184,4 +184,3 @@ func (c *Coordinator) CreateSingleStrmFile(ctx context.Context, strmResultingPat
 
 	return nil
 }
-

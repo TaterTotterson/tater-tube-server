@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/javi11/altmount/internal/nzbfile"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzbfile"
 )
 
 const migrationSentinelFile = ".migration_nzb_compressed_v1"
@@ -67,4 +67,3 @@ func migrateNzbsToGz(ctx context.Context, nzbDir, sentinelPath string, updater f
 	}
 	return nil
 }
-

@@ -1,4 +1,4 @@
-# Multi-stage build for AltMount - Multi-platform optimized
+# Multi-stage build for Tater Tube Server - Multi-platform optimized
 # This is the self-contained development/local build Dockerfile
 # For CI builds, use Dockerfile.ci which expects pre-built frontend assets
 # Use buildkit syntax for advanced features
@@ -52,7 +52,6 @@ RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
     go mod download
 
 # Copy source code in optimal order for caching
-COPY ./pkg ./pkg
 COPY ./internal ./internal
 COPY ./cmd ./cmd
 COPY ./frontend/embed_cli.go ./frontend/embed_cli.go
@@ -69,8 +68,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     --mount=type=cache,target=/tmp/go-build-cache,sharing=locked \
     CGO_ENABLED=1 GOOS=linux \
     go build -a \
-    -ldflags "-linkmode external -extldflags \"-static\" -X 'github.com/javi11/altmount/internal/version.Version=${VERSION}' -X 'github.com/javi11/altmount/internal/version.GitCommit=${COMMIT}' -X 'github.com/javi11/altmount/internal/version.Timestamp=${BUILD_TIMESTAMP}'" \
-    -o altmount cmd/altmount/main.go
+    -ldflags "-linkmode external -extldflags \"-static\" -X 'github.com/TaterTotterson/tater-tube-server/internal/version.Version=${VERSION}' -X 'github.com/TaterTotterson/tater-tube-server/internal/version.GitCommit=${COMMIT}' -X 'github.com/TaterTotterson/tater-tube-server/internal/version.Timestamp=${BUILD_TIMESTAMP}'" \
+    -o tater-tube-server cmd/tater-tube-server/main.go
 
 # Final stage - use custom base image with pre-installed packages
 ARG TARGETARCH
@@ -90,7 +89,7 @@ ENV PGID=${PGID}
 WORKDIR /app
 
 # Copy web binary from builder
-COPY --from=backend-builder /app/altmount /app/altmount
+COPY --from=backend-builder /app/tater-tube-server /app/tater-tube-server
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 # Install required packages for runtime (mime-support already in custom-base)
@@ -102,30 +101,8 @@ RUN apt-get update && \
         docker.io && \
     rm -rf /var/lib/apt/lists/*
 
-# Install rclone and FUSE support for internal mount functionality
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        fuse3 \
-        curl \
-        unzip && \
-    echo "user_allow_other" >> /etc/fuse.conf && \
-    case "$(uname -m)" in \
-        x86_64) ARCH=amd64 ;; \
-        aarch64) ARCH=arm64 ;; \
-        armv7l) ARCH=arm ;; \
-        *) echo "Unsupported architecture: $(uname -m)" && exit 1 ;; \
-    esac && \
-    curl -O "https://downloads.rclone.org/rclone-current-linux-${ARCH}.zip" && \
-    unzip "rclone-current-linux-${ARCH}.zip" && \
-    cp rclone-*/rclone /usr/local/bin/ && \
-    chmod +x /usr/local/bin/rclone && \
-    rm -rf rclone-* && \
-    apt-get remove -y curl unzip && \
-    apt-get autoremove -y && \
-    rm -rf /var/lib/apt/lists/*
-
 # Make binary executable
-RUN chmod +x /app/altmount
+RUN chmod +x /app/tater-tube-server
 
 # Copy s6-overlay service configuration
 COPY docker/root/ /
@@ -145,6 +122,6 @@ HEALTHCHECK --interval=5s --timeout=10s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT}/live || exit 1
 
 # Labels
-LABEL org.opencontainers.image.source="https://github.com/javi11/altmount"
+LABEL org.opencontainers.image.title="Tater Tube Server"
 LABEL build_version="version: Build-date:- ${VERSION}  ${BUILD_DATE}"
-LABEL maintainer="javi11"
+LABEL maintainer="Tater Tube"

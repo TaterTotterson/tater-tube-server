@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
 	"github.com/gofiber/fiber/v2"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
 )
 
 // handleGetFileMetadata handles GET /files/info requests
@@ -283,7 +283,7 @@ func (s *Server) generateNZBFromMetadata(metadata *metapb.FileMetadata, filePath
 
 	// Create a single file entry with all segments
 	file := nzbFile{
-		Poster:  "altmount@export",
+		Poster:  "tater-tube-server@export",
 		Date:    fmt.Sprintf("%d", time.Now().UnixMilli()),
 		Subject: filename,
 		Groups: nzbGroups{
@@ -306,7 +306,7 @@ func (s *Server) generateNZBFromMetadata(metadata *metapb.FileMetadata, filePath
 	// Add PAR2 files if present
 	for _, par2File := range metadata.Par2Files {
 		par2FileEntry := nzbFile{
-			Poster:  "altmount@export",
+			Poster:  "tater-tube-server@export",
 			Date:    fmt.Sprintf("%d", time.Now().UnixMilli()),
 			Subject: par2File.Filename,
 			Groups: nzbGroups{

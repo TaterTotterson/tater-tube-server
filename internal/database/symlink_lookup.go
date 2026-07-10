@@ -17,7 +17,7 @@ func NewDBSymlinkLookup(repo *ImportMigrationRepository) *DBSymlinkLookup {
 	return &DBSymlinkLookup{repo: repo}
 }
 
-// LookupFinalPath returns the final AltMount path for the given source and externalID.
+// LookupFinalPath returns the final Tater Tube Server path for the given source and externalID.
 // Returns ("", false, nil) when no matching row exists or the row has no final_path.
 //
 // Season-pack episode rows use a "file:<episodeFilename>" relative_path to signal that

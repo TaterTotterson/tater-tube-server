@@ -31,8 +31,8 @@ go.work.sum
 # .idea/
 example/
 
-/altmount
-/altmount.exe
+/tater-tube-server
+/tater-tube-server.exe
 *.db*
 *node_modules*
 .git

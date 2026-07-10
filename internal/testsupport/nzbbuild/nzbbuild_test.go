@@ -3,7 +3,7 @@ package nzbbuild_test
 import (
 	"testing"
 
-	"github.com/javi11/altmount/internal/testsupport/nzbbuild"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/nzbbuild"
 	"github.com/javi11/nzbparser"
 )
 

@@ -20,7 +20,7 @@ type ManagerConfig struct {
 func DefaultManagerConfig() ManagerConfig {
 	return ManagerConfig{
 		Enabled:        false,
-		CachePath:      "/tmp/altmount-segcache",
+		CachePath:      "/tmp/tater-tube-server-segcache",
 		MaxSizeBytes:   10 * 1024 * 1024 * 1024, // 10 GB
 		ExpiryDuration: 24 * time.Hour,
 	}

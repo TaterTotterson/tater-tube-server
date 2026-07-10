@@ -1,8 +1,8 @@
 package metadata
 
 import (
-	"github.com/javi11/altmount/internal/holes"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/holes"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
 )
 
 // AddKnownHoles merges newly confirmed missing-segment runs into a file's

@@ -4,7 +4,7 @@
 // Only FileDesc packets are emitted — enough for the par2.GetFileDescriptors
 // path that reconstructs real filenames from obfuscated Usenet releases.
 // No recovery blocks, IFSC, or Main packets are generated; the par2 reader
-// used by altmount ignores those packet types.
+// used by tater-tube-server ignores those packet types.
 package par2gen
 
 import (

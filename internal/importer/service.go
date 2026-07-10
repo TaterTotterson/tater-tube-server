@@ -16,23 +16,22 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/arrs"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/httpclient"
-	"github.com/javi11/altmount/internal/importer/filesystem"
-	"github.com/javi11/altmount/internal/importer/parser"
-	"github.com/javi11/altmount/internal/importer/postprocessor"
-	"github.com/javi11/altmount/internal/importer/queue"
-	"github.com/javi11/altmount/internal/importer/scanner"
-	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
-	"github.com/javi11/altmount/internal/metadata"
-	"github.com/javi11/altmount/internal/nzbfile"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/progress"
-	"github.com/javi11/altmount/internal/sabnzbd"
-	"github.com/javi11/altmount/internal/utils"
-	"github.com/javi11/altmount/pkg/rclonecli"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/httpclient"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/filesystem"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/parser"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/postprocessor"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/queue"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/scanner"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/utils/nzbtrim"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzbfile"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/progress"
+	"github.com/TaterTotterson/tater-tube-server/internal/sabnzbd"
+	"github.com/TaterTotterson/tater-tube-server/internal/utils"
 	"github.com/javi11/nzbparser"
 )
 
@@ -181,7 +180,6 @@ type Service struct {
 	dirScanner      *scanner.DirectoryScanner     // Manual directory scanning
 	watcher         *scanner.Watcher              // Directory watcher for automated imports
 	nzbdavImporter  *scanner.NzbDavImporter       // NZBDav database imports
-	rcloneClient    rclonecli.RcloneRcClient      // Optional rclone client for VFS notifications
 	configGetter    config.ConfigGetter           // Config getter for dynamic configuration access
 	sabnzbdClient   *sabnzbd.SABnzbdClient        // SABnzbd client for fallback
 	arrsService     *arrs.Service                 // ARRs service for triggering scans
@@ -213,7 +211,7 @@ type Service struct {
 }
 
 // NewService creates a new NZB import service with manual scanning and queue processing capabilities
-func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter, healthRepo *database.HealthRepository, broadcaster *progress.ProgressBroadcaster, userRepo *database.UserRepository) (*Service, error) {
+func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, configGetter config.ConfigGetter, healthRepo *database.HealthRepository, broadcaster *progress.ProgressBroadcaster, userRepo *database.UserRepository) (*Service, error) {
 	// Set defaults
 	if config.Workers == 0 {
 		config.Workers = 2
@@ -233,7 +231,6 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	postProc := postprocessor.NewCoordinator(postprocessor.Config{
 		ConfigGetter:    configGetter,
 		MetadataService: metadataService,
-		RcloneClient:    rcloneClient,
 		HealthRepo:      healthRepo,
 		UserRepo:        userRepo,
 	})
@@ -244,7 +241,6 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		database:        database,
 		processor:       processor,
 		postProcessor:   postProc,
-		rcloneClient:    rcloneClient,
 		configGetter:    configGetter,
 		healthRepo:      healthRepo,
 		sabnzbdClient:   sabnzbd.NewSABnzbdClient(httpclient.NewForExternal(configGetter().Network, httpclient.LongTimeout)),
@@ -407,13 +403,6 @@ func (s *Service) RegisterConfigChangeHandler(configManager any) {
 		return
 	}
 	mgr.OnConfigChange(func(oldConfig, newConfig *config.Config) {
-		// Update rclone client reference
-		s.mu.Lock()
-		if s.postProcessor != nil {
-			s.postProcessor.SetRcloneClient(s.rcloneClient)
-		}
-		s.mu.Unlock()
-
 		// Dynamically resize queue workers if count changed
 		oldWorkers := oldConfig.Import.MaxProcessorWorkers
 		newWorkers := newConfig.Import.MaxProcessorWorkers
@@ -491,30 +480,6 @@ func (s *Service) IsRunning() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.running
-}
-
-// SetRcloneClient sets or updates the RClone client for VFS notifications
-func (s *Service) SetRcloneClient(client any) {
-	var rc rclonecli.RcloneRcClient
-	if client != nil {
-		var ok bool
-		rc, ok = client.(rclonecli.RcloneRcClient)
-		if !ok {
-			s.log.ErrorContext(s.ctx, "SetRcloneClient: unexpected client type", "type", fmt.Sprintf("%T", client))
-			return
-		}
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.rcloneClient = rc
-	if s.postProcessor != nil {
-		s.postProcessor.SetRcloneClient(rc)
-	}
-	if rc != nil {
-		s.log.InfoContext(s.ctx, "RClone client updated for VFS notifications")
-	} else {
-		s.log.InfoContext(s.ctx, "RClone client disabled")
-	}
 }
 
 // SetArrsService sets or updates the ARRs service
@@ -759,7 +724,7 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 // its category-independent base filename and updates its category/priority in place. Returns nil if none.
 func (s *Service) FindAndUpdatePendingUpload(ctx context.Context, filename string, category *string, priority *database.QueuePriority) (*database.ImportQueueItem, error) {
 	// NZBs uploaded via the API are persisted into the OS temp queue dir.
-	queueDir := filepath.Join(os.TempDir(), ".altmount-queue")
+	queueDir := filepath.Join(os.TempDir(), ".tater-tube-server-queue")
 
 	base := nzbtrim.TrimNzbExtension(sanitizeFilename(filepath.Base(filename)))
 	if base == "" {
@@ -781,7 +746,7 @@ func (s *Service) FindAndUpdatePendingUpload(ctx context.Context, filename strin
 	// Also search the Stremio upload staging directory: handleNzbStreams writes there
 	// before calling AddToQueue, so without this scan Stremio-submitted NZBs are never
 	// found by FindAndUpdatePendingUpload and always create a new queue entry.
-	stremioUploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
+	stremioUploadDir := filepath.Join(os.TempDir(), "tater-tube-server-uploads")
 	stremioItems, err := s.database.Repository.GetPendingQueueItemsByPathPrefix(ctx, stremioUploadDir+string(filepath.Separator))
 	if err != nil {
 		return nil, err
@@ -865,7 +830,7 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 	// return early here: the category resolution and CompleteDir prepend below still
 	// need to run, otherwise category-tagged uploads (SABnzbd/manual/Stremio) would
 	// land at the mount root instead of inside their category folder.
-	tempQueueDir := filepath.Join(os.TempDir(), ".altmount-queue")
+	tempQueueDir := filepath.Join(os.TempDir(), ".tater-tube-server-queue")
 	inTempQueue := strings.HasPrefix(item.NzbPath, tempQueueDir+string(filepath.Separator)) || item.NzbPath == tempQueueDir
 
 	// Fix for issue where files moved to persistent .nzbs directory end up with exposed paths (like /config) in virtual directory
@@ -1010,14 +975,14 @@ func sanitizeVirtualPath(p string) string {
 // worker can process it.
 func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.ImportQueueItem) error {
 	// Use OS temp queue dir; itemID ensures uniqueness so no category subfolder needed.
-	nzbDir := filepath.Join(os.TempDir(), ".altmount-queue")
+	nzbDir := filepath.Join(os.TempDir(), ".tater-tube-server-queue")
 
 	// Check if current path is already in the persistent directory
 	absNzbPath, _ := filepath.Abs(item.NzbPath)
 	absNzbDir, _ := filepath.Abs(nzbDir)
 
 	// Simple check: if path starts with persistent dir (with separator) or equals it, assume it's fine.
-	// The trailing separator prevents a false match like /tmp/.altmount-queue-other/ matching /tmp/.altmount-queue.
+	// The trailing separator prevents a false match like /tmp/.tater-tube-server-queue-other/ matching /tmp/.tater-tube-server-queue.
 	if strings.HasPrefix(absNzbPath, absNzbDir+string(os.PathSeparator)) || absNzbPath == absNzbDir {
 		return nil
 	}
@@ -1169,18 +1134,15 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		return err
 	}
 
-	// Signal streamable as early as possible — files are accessible via VFS now.
+	// Signal streamable as early as possible — direct stream URLs are available now.
 	// Stremio waiters listening on the broadcaster can return stream URLs without
 	// waiting for post-processing (symlinks, STRM, health scheduling) to complete.
 	if s.broadcaster != nil {
 		s.broadcaster.NotifyStreamable(int(item.ID), resultingPath)
 	}
 
-	// Refresh mount path if needed before post-processing
-	s.postProcessor.RefreshMountPathIfNeeded(ctx, resultingPath, item.ID)
-
 	// Delegate all post-processing to the coordinator
-	// This handles: VFS notification, symlinks, ID links, STRM files, health checks, ARR notifications
+	// This handles: symlinks, ID links, STRM files, health checks, ARR notifications
 	result, err := s.postProcessor.HandleSuccess(ctx, item, resultingPath, writtenPaths)
 	if err != nil {
 		s.log.ErrorContext(ctx, "Post-processing failed", "queue_id", item.ID, "error", err)

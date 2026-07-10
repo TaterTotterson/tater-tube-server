@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/javi11/altmount/internal/arrs/clients"
-	"github.com/javi11/altmount/internal/arrs/instances"
-	"github.com/javi11/altmount/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/clients"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/instances"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
 )
 
 func TestFindInstanceForFilePath_CategoryMatch(t *testing.T) {

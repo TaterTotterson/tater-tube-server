@@ -9,7 +9,7 @@
 //
 // # Naming
 //
-// MessageID(i) returns "altmount-test-seg-NNNNNN@fake" — six-digit zero-padded
+// MessageID(i) returns "tater-tube-server-test-seg-NNNNNN@fake" — six-digit zero-padded
 // so lexicographic sort matches segment order. Tests pin this format so the
 // fakepool behaviors and the segment-range builder agree without sharing a
 // channel.
@@ -36,7 +36,7 @@ import (
 
 // MessageIDPrefix is the constant prefix used for all generated message-IDs.
 // Exposed so fakepool setup loops can sanity-check inputs.
-const MessageIDPrefix = "altmount-test-seg-"
+const MessageIDPrefix = "tater-tube-server-test-seg-"
 
 // MessageID returns the canonical fake message-ID for the i-th segment.
 func MessageID(i int) string {

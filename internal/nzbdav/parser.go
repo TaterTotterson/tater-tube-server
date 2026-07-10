@@ -126,7 +126,7 @@ func copyDBToTemp(src string) (string, func(), error) {
 	}
 	defer in.Close()
 
-	tmp, err := os.CreateTemp("", "altmount-nzbdav-*.db")
+	tmp, err := os.CreateTemp("", "tater-tube-server-nzbdav-*.db")
 	if err != nil {
 		return "", nil, err
 	}

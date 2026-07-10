@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/auth"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/slogutil"
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/auth"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/nntppool/v4"
 )
 
@@ -80,7 +80,7 @@ func RegisterLogLevelHandler(ctx context.Context, configManager *config.Manager,
 // handleGetConfig returns the current configuration
 //
 //	@Summary		Get configuration
-//	@Description	Returns the current AltMount configuration with sensitive values masked.
+//	@Description	Returns the current Tater Tube Server configuration with sensitive values masked.
 //	@Tags			Config
 //	@Produce		json
 //	@Success		200	{object}	APIResponse{data=ConfigAPIResponse}
@@ -107,7 +107,7 @@ func (s *Server) handleGetConfig(c *fiber.Ctx) error {
 // handleUpdateConfig updates the entire configuration
 //
 //	@Summary		Update configuration
-//	@Description	Replaces the entire AltMount configuration. Triggers restart if required.
+//	@Description	Replaces the entire Tater Tube Server configuration. Triggers restart if required.
 //	@Tags			Config
 //	@Accept			json
 //	@Produce		json
@@ -153,9 +153,6 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to save configuration", err.Error())
 	}
 
-	// Try to start RC server if RClone is enabled but RC is not running
-	s.startRCServerIfNeeded(c.Context())
-
 	// Get API key for response
 	apiKey := s.getAPIKeyForConfig(c)
 
@@ -166,7 +163,7 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 // handlePatchConfigSection updates a specific configuration section
 //
 //	@Summary		Patch configuration section
-//	@Description	Updates a specific named section of the configuration (e.g. import, sabnzbd, rclone).
+//	@Description	Updates a specific named section of the configuration (e.g. import, sabnzbd, streaming).
 //	@Tags			Config
 //	@Accept			json
 //	@Produce		json
@@ -213,21 +210,10 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 				newConfig.Providers[i].Password = oldPwdByID[newConfig.Providers[i].ID]
 			}
 		}
-	case "webdav", "api", "auth", "database", "metadata", "streaming", "health", "rclone", "import", "log", "sabnzbd", "arrs", "fuse", "segment_cache", "system", "mount_path", "mount", "stremio", "nzblnk", "network":
+	case "server", "api", "auth", "database", "metadata", "streaming", "health", "import", "log", "sabnzbd", "arrs", "segment_cache", "system", "stremio", "nzblnk", "network":
 		err = c.BodyParser(newConfig)
 		// BodyParser will map fields like "profiler_enabled" from JSON to the root of newConfig
 		// because Config struct has it with `json:"profiler_enabled"`.
-		// Preserve existing rc_pass when the request omits or sends an empty value.
-		// The frontend sends rc_pass: "" when the user hasn't entered a new password,
-		// so an empty value means "keep the existing password", not "clear it".
-		if err == nil && newConfig.RClone.RCPass == "" {
-			newConfig.RClone.RCPass = currentConfig.RClone.RCPass
-		}
-		// Preserve existing WebDAV password when the request omits or sends an empty value.
-		// The frontend sends password: "" when the user hasn't entered a new password.
-		if err == nil && newConfig.WebDAV.Password == "" {
-			newConfig.WebDAV.Password = currentConfig.WebDAV.Password
-		}
 	default:
 		return RespondValidationError(c, fmt.Sprintf("Unknown configuration section: %s", section), "INVALID_SECTION")
 	}
@@ -262,11 +248,6 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to save configuration", err.Error())
 	}
 
-	// Try to start RC server if RClone/mount section was updated or full config update
-	if section == "rclone" || section == "mount" || section == "" {
-		s.startRCServerIfNeeded(c.Context())
-	}
-
 	// Get API key for response
 	apiKey := s.getAPIKeyForConfig(c)
 
@@ -277,7 +258,7 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 // handleReloadConfig reloads configuration from file
 //
 //	@Summary		Reload configuration
-//	@Description	Reloads the AltMount configuration from disk without restarting.
+//	@Description	Reloads the Tater Tube Server configuration from disk without restarting.
 //	@Tags			Config
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
@@ -1016,39 +997,6 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 	}
 
 	return RespondSuccess(c, providers)
-}
-
-// startRCServerIfNeeded starts the RC server if RClone is enabled and RC is not running
-func (s *Server) startRCServerIfNeeded(ctx context.Context) {
-	// Check if we have a mount service to work with
-	if s.mountService == nil {
-		slog.WarnContext(ctx, "Mount service not available, cannot start RC server")
-		return
-	}
-
-	// Only start RC server for rclone-based mount types
-	if s.configManager != nil {
-		cfg := s.configManager.GetConfig()
-		if cfg != nil && cfg.MountType != config.MountTypeRClone && cfg.MountType != config.MountTypeRCloneExternal {
-			slog.DebugContext(ctx, "Skipping RC server start, mount_type is not rclone-based",
-				"mount_type", string(cfg.MountType))
-			return
-		}
-	}
-
-	// Use the mount service to start the RC server (non-blocking for config save)
-	go func() {
-		if err := s.mountService.StartRCServer(ctx); err != nil {
-			slog.ErrorContext(ctx, "Failed to start RClone RC server via mount service", "error", err)
-			return
-		}
-
-		// Now that RC server is ready, initialize RClone client in importer service if available
-		if s.importerService != nil {
-			s.importerService.SetRcloneClient(s.mountService.GetManager())
-			slog.InfoContext(ctx, "RClone client initialized in importer service")
-		}
-	}()
 }
 
 // ensureSABnzbdCategoryDirectories creates directories for all SABnzbd categories in the mount path

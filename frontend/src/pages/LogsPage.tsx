@@ -177,7 +177,7 @@ export function LogsPage() {
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement("a");
 		a.href = url;
-		a.download = `altmount-logs-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.txt`;
+		a.download = `tater-streamer-logs-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.txt`;
 		a.click();
 		URL.revokeObjectURL(url);
 	}, [filteredEntries]);

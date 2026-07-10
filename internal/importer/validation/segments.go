@@ -3,8 +3,8 @@ package validation
 import (
 	"fmt"
 
-	"github.com/javi11/altmount/internal/encryption/rclone"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/encryption/rclone"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
 )
 
 // ValidateSegmentsForFile performs local structural validation of file segments including size

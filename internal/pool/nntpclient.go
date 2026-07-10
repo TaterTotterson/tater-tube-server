@@ -8,7 +8,7 @@ import (
 )
 
 // NntpClient is the narrow surface of the underlying nntppool.Client that the
-// rest of AltMount calls through Manager.GetPool. Defining it here lets tests
+// rest of Tater Tube Server calls through Manager.GetPool. Defining it here lets tests
 // inject a deterministic fake (see internal/testsupport/fakepool) without
 // standing up real NNTP connections, and pins exactly which operations the
 // streaming, import, validation, and metrics paths depend on.

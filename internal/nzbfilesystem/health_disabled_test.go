@@ -7,11 +7,11 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/usenet"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/usenet"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -57,8 +57,7 @@ func setupStreamHealthEnv(t *testing.T) (*database.HealthRepository, *sql.DB, *m
 	return database.NewHealthRepository(db, database.DialectSQLite), db, metadata.NewMetadataService(t.TempDir())
 }
 
-// newStreamFailureMVF wires a MetadataVirtualFile to the given real services with a nil
-// repairCoalescer (ShouldTrigger returns true, EnqueueRefresh is a no-op).
+// newStreamFailureMVF wires a MetadataVirtualFile to the given real services.
 func newStreamFailureMVF(ctx context.Context, name string, repo *database.HealthRepository, ms *metadata.MetadataService, seg []*metapb.SegmentData, cfg *config.Config) *MetadataVirtualFile {
 	return &MetadataVirtualFile{
 		name:             name,

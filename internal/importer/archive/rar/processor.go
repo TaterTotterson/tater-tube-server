@@ -9,14 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/errors"
-	"github.com/javi11/altmount/internal/importer/archive"
-	"github.com/javi11/altmount/internal/importer/filesystem"
-	"github.com/javi11/altmount/internal/importer/parser"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/progress"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/errors"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/archive"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/filesystem"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/parser"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/progress"
 	"github.com/javi11/rardecode/v2"
 )
 

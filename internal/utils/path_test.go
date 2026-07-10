@@ -7,7 +7,7 @@ import (
 )
 
 func TestRemoveEmptyDirs(t *testing.T) {
-	tempDir := filepath.Join(os.TempDir(), "altmount-test-remove-dirs")
+	tempDir := filepath.Join(os.TempDir(), "tater-tube-server-test-remove-dirs")
 	err := os.MkdirAll(tempDir, 0755)
 	if err != nil {
 		t.Fatal(err)

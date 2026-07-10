@@ -9,10 +9,10 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -231,7 +231,6 @@ func TestTwoPassMetadataDelete(t *testing.T) {
 		healthRepo,
 		configManager.GetConfig,
 		configManager,
-		&MockRcloneClient{},
 	)
 
 	ctx := context.Background()
@@ -310,7 +309,6 @@ func TestRatioGuard_SkipsCleanupWhenOrphanRatioHigh(t *testing.T) {
 		healthRepo,
 		configManager.GetConfig,
 		configManager,
-		&MockRcloneClient{},
 	)
 
 	ctx := context.Background()
@@ -394,7 +392,6 @@ func TestWalkErrors_SkipCleanup(t *testing.T) {
 		healthRepo,
 		configManager.GetConfig,
 		configManager,
-		&MockRcloneClient{},
 	)
 
 	ctx := context.Background()

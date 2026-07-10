@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/updater"
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/updater"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

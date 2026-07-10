@@ -26,11 +26,11 @@ func TestPickAssets(t *testing.T) {
 	t.Parallel()
 
 	assets := []githubAsset{
-		{Name: "altmount-cli_v1.2.3_linux_amd64.tar.gz", BrowserDownloadURL: "https://e/linux-amd64"},
-		{Name: "altmount-cli_v1.2.3_linux_arm64.tar.gz", BrowserDownloadURL: "https://e/linux-arm64"},
-		{Name: "altmount-cli_v1.2.3_windows_amd64.zip", BrowserDownloadURL: "https://e/win"},
-		{Name: "altmount-cli_v1.2.3_darwin_amd64.tar.gz", BrowserDownloadURL: "https://e/darwin-amd64"},
-		{Name: "altmount-cli_v1.2.3_darwin_universal.tar.gz", BrowserDownloadURL: "https://e/darwin-universal"},
+		{Name: "tater-tube-server_v1.2.3_linux_amd64.tar.gz", BrowserDownloadURL: "https://e/linux-amd64"},
+		{Name: "tater-tube-server_v1.2.3_linux_arm64.tar.gz", BrowserDownloadURL: "https://e/linux-arm64"},
+		{Name: "tater-tube-server_v1.2.3_windows_amd64.zip", BrowserDownloadURL: "https://e/win"},
+		{Name: "tater-tube-server_v1.2.3_darwin_amd64.tar.gz", BrowserDownloadURL: "https://e/darwin-amd64"},
+		{Name: "tater-tube-server_v1.2.3_darwin_universal.tar.gz", BrowserDownloadURL: "https://e/darwin-universal"},
 		{Name: "checksums-cli.txt", BrowserDownloadURL: "https://e/checksums"},
 	}
 
@@ -41,10 +41,10 @@ func TestPickAssets(t *testing.T) {
 		wantArchive string
 		wantErr     bool
 	}{
-		{name: "linux amd64", goos: "linux", goarch: "amd64", wantArchive: "altmount-cli_v1.2.3_linux_amd64.tar.gz"},
-		{name: "linux arm64", goos: "linux", goarch: "arm64", wantArchive: "altmount-cli_v1.2.3_linux_arm64.tar.gz"},
-		{name: "windows amd64", goos: "windows", goarch: "amd64", wantArchive: "altmount-cli_v1.2.3_windows_amd64.zip"},
-		{name: "darwin prefers universal", goos: "darwin", goarch: "amd64", wantArchive: "altmount-cli_v1.2.3_darwin_universal.tar.gz"},
+		{name: "linux amd64", goos: "linux", goarch: "amd64", wantArchive: "tater-tube-server_v1.2.3_linux_amd64.tar.gz"},
+		{name: "linux arm64", goos: "linux", goarch: "arm64", wantArchive: "tater-tube-server_v1.2.3_linux_arm64.tar.gz"},
+		{name: "windows amd64", goos: "windows", goarch: "amd64", wantArchive: "tater-tube-server_v1.2.3_windows_amd64.zip"},
+		{name: "darwin prefers universal", goos: "darwin", goarch: "amd64", wantArchive: "tater-tube-server_v1.2.3_darwin_universal.tar.gz"},
 		{name: "unsupported os", goos: "plan9", goarch: "amd64", wantErr: true},
 	}
 
@@ -66,7 +66,7 @@ func TestPickAssets(t *testing.T) {
 func TestPickAssets_MissingChecksum(t *testing.T) {
 	t.Parallel()
 	assets := []githubAsset{
-		{Name: "altmount-cli_v1.2.3_linux_amd64.tar.gz"},
+		{Name: "tater-tube-server_v1.2.3_linux_amd64.tar.gz"},
 	}
 	_, _, err := pickAssets(assets, "linux", "amd64")
 	require.Error(t, err)
@@ -79,17 +79,17 @@ func TestVerifyChecksum(t *testing.T) {
 	data := []byte("hello world")
 	sum := sha512.Sum512(data)
 	digest := hex.EncodeToString(sum[:])
-	checksums := fmt.Sprintf("%s  altmount-cli_v1_linux_amd64.tar.gz\nbaddigest  other.tar.gz\n", digest)
+	checksums := fmt.Sprintf("%s  tater-tube-server_v1_linux_amd64.tar.gz\nbaddigest  other.tar.gz\n", digest)
 
 	t.Run("happy path", func(t *testing.T) {
 		t.Parallel()
-		err := verifyChecksum("altmount-cli_v1_linux_amd64.tar.gz", data, []byte(checksums))
+		err := verifyChecksum("tater-tube-server_v1_linux_amd64.tar.gz", data, []byte(checksums))
 		require.NoError(t, err)
 	})
 
 	t.Run("mismatch", func(t *testing.T) {
 		t.Parallel()
-		err := verifyChecksum("altmount-cli_v1_linux_amd64.tar.gz", []byte("tampered"), []byte(checksums))
+		err := verifyChecksum("tater-tube-server_v1_linux_amd64.tar.gz", []byte("tampered"), []byte(checksums))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "mismatch")
 	})
@@ -105,9 +105,9 @@ func TestExtractBinary_TarGz(t *testing.T) {
 	t.Parallel()
 
 	payload := []byte("fake-binary-contents")
-	archive := buildTarGz(t, "altmount-cli-linux-amd64", payload)
+	archive := buildTarGz(t, "tater-tube-server-linux-amd64", payload)
 
-	r, err := extractBinary("altmount-cli_v1_linux_amd64.tar.gz", archive, "altmount-cli-linux-amd64")
+	r, err := extractBinary("tater-tube-server_v1_linux_amd64.tar.gz", archive, "tater-tube-server-linux-amd64")
 	require.NoError(t, err)
 	got, err := io.ReadAll(r)
 	require.NoError(t, err)
@@ -118,9 +118,9 @@ func TestExtractBinary_Zip(t *testing.T) {
 	t.Parallel()
 
 	payload := []byte("fake-windows-binary")
-	archive := buildZip(t, "altmount-cli-windows-amd64.exe", payload)
+	archive := buildZip(t, "tater-tube-server-windows-amd64.exe", payload)
 
-	r, err := extractBinary("altmount-cli_v1_windows_amd64.zip", archive, "altmount-cli-windows-amd64.exe")
+	r, err := extractBinary("tater-tube-server_v1_windows_amd64.zip", archive, "tater-tube-server-windows-amd64.exe")
 	require.NoError(t, err)
 	got, err := io.ReadAll(r)
 	require.NoError(t, err)
@@ -130,7 +130,7 @@ func TestExtractBinary_Zip(t *testing.T) {
 func TestExtractBinary_BinaryMissing(t *testing.T) {
 	t.Parallel()
 	archive := buildTarGz(t, "unrelated-file", []byte("x"))
-	_, err := extractBinary("something_linux_amd64.tar.gz", archive, "altmount-cli-linux-amd64")
+	_, err := extractBinary("something_linux_amd64.tar.gz", archive, "tater-tube-server-linux-amd64")
 	require.Error(t, err)
 }
 
@@ -138,9 +138,9 @@ func TestDownloadAndExtract_HappyPath(t *testing.T) {
 	t.Parallel()
 
 	payload := []byte("fake-binary-contents-for-download")
-	archive := buildTarGz(t, "altmount-cli-linux-amd64", payload)
+	archive := buildTarGz(t, "tater-tube-server-linux-amd64", payload)
 	sum := sha512.Sum512(archive)
-	digestLine := fmt.Sprintf("%s  altmount-cli_v1.0.0_linux_amd64.tar.gz\n", hex.EncodeToString(sum[:]))
+	digestLine := fmt.Sprintf("%s  tater-tube-server_v1.0.0_linux_amd64.tar.gz\n", hex.EncodeToString(sum[:]))
 
 	var baseURL string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +149,7 @@ func TestDownloadAndExtract_HappyPath(t *testing.T) {
 			rel := githubRelease{
 				TagName: "v1.0.0",
 				Assets: []githubAsset{
-					{Name: "altmount-cli_v1.0.0_linux_amd64.tar.gz", BrowserDownloadURL: baseURL + "/archive"},
+					{Name: "tater-tube-server_v1.0.0_linux_amd64.tar.gz", BrowserDownloadURL: baseURL + "/archive"},
 					{Name: "checksums-cli.txt", BrowserDownloadURL: baseURL + "/checksums"},
 				},
 			}
@@ -178,9 +178,9 @@ func TestDownloadAndExtract_HappyPath(t *testing.T) {
 func TestDownloadAndExtract_ChecksumMismatch(t *testing.T) {
 	t.Parallel()
 
-	archive := buildTarGz(t, "altmount-cli-linux-amd64", []byte("real contents"))
+	archive := buildTarGz(t, "tater-tube-server-linux-amd64", []byte("real contents"))
 	// Intentionally wrong checksum.
-	digestLine := fmt.Sprintf("%s  altmount-cli_v1.0.0_linux_amd64.tar.gz\n", strings.Repeat("0", 128))
+	digestLine := fmt.Sprintf("%s  tater-tube-server_v1.0.0_linux_amd64.tar.gz\n", strings.Repeat("0", 128))
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -189,7 +189,7 @@ func TestDownloadAndExtract_ChecksumMismatch(t *testing.T) {
 			rel := githubRelease{
 				TagName: "v1.0.0",
 				Assets: []githubAsset{
-					{Name: "altmount-cli_v1.0.0_linux_amd64.tar.gz", BrowserDownloadURL: srv.URL + "/archive"},
+					{Name: "tater-tube-server_v1.0.0_linux_amd64.tar.gz", BrowserDownloadURL: srv.URL + "/archive"},
 					{Name: "checksums-cli.txt", BrowserDownloadURL: srv.URL + "/checksums"},
 				},
 			}
@@ -297,7 +297,7 @@ func (u *binaryUpdater) downloadAndExtractWith(ctx context.Context, channel, goo
 	binaryName := expectedBinaryName(goos, goarch)
 	// For non-darwin the alt fallback equals the expected name; for darwin we
 	// want to try the arch-specific binary name too.
-	alt := fmt.Sprintf("altmount-cli-%s-%s", goos, goarch)
+	alt := fmt.Sprintf("tater-tube-server-%s-%s", goos, goarch)
 	if goos == "windows" {
 		alt += ".exe"
 	}

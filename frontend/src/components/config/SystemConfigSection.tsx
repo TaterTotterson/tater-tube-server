@@ -438,7 +438,7 @@ export function SystemConfigSection({
 								type="text"
 								className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
 								value={config.database.dsn}
-								placeholder="postgres://user:pass@localhost:5432/altmount"
+								placeholder="postgres://user:pass@localhost:5432/tater_usenet_streamer"
 								disabled={isReadOnly || config.database.type !== "postgres"}
 							/>
 						</fieldset>
@@ -485,7 +485,7 @@ export function SystemConfigSection({
 
 					<div className="space-y-6">
 						<div className="min-w-0">
-							<h5 className="font-bold text-sm">AltMount API Key</h5>
+							<h5 className="font-bold text-sm">Tater Streamer API Key</h5>
 							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
 								Your personal secret key for authenticating external applications.
 							</p>

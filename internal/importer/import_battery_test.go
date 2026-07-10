@@ -11,11 +11,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/javi11/altmount/internal/importer/multifile"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/altmount/internal/testsupport/nzbbuild"
-	"github.com/javi11/altmount/internal/testsupport/par2gen"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/multifile"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/fakepool"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/nzbbuild"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/par2gen"
 	"github.com/javi11/nntppool/v4"
 	"google.golang.org/protobuf/proto"
 )

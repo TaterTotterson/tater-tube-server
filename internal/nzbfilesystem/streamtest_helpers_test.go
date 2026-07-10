@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/altmount/internal/testsupport/segments"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/fakepool"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/segments"
 	"github.com/javi11/nntppool/v4"
 )
 
@@ -114,10 +114,9 @@ func configurePoolForFile(fp *fakepool.Client, n, segSize int, behavior fakepool
 // total size n*segSize, wired to the supplied fake pool. The maxPrefetch
 // parameter mirrors production's per-reader concurrency cap.
 //
-// The file's metadataService, healthRepository, arrsService, ciphers, and
-// rcloneClient are left nil; the read paths exercised here never touch
-// them on the happy path, and leaving them nil verifies the nil-guards
-// stay in place.
+// The file's metadataService, healthRepository, arrsService, and ciphers are
+// left nil; the read paths exercised here never touch them on the happy path,
+// and leaving them nil verifies the nil-guards stay in place.
 func newTestMVF(
 	t testing.TB,
 	ctx context.Context,

@@ -332,9 +332,9 @@ export function ImportConfigSection({
 							</select>
 							<p className="label mt-2 min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs leading-relaxed">
 								{formData.import_strategy === "NONE" &&
-									"Files are only visible through the virtual FUSE/WebDAV mount."}
+									"Files are kept in streamer metadata and served through direct stream URLs."}
 								{formData.import_strategy === "SYMLINK" &&
-									"Creates real .mkv/.mp4 files in a target folder that point to AltMount."}
+									"Creates real .mkv/.mp4 files in a target folder that point to Tater Tube Server."}
 								{formData.import_strategy === "STRM" &&
 									"Generates small .strm text files containing streaming URLs."}
 							</p>

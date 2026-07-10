@@ -3,7 +3,7 @@ package api
 import (
 	"testing"
 
-	"github.com/javi11/altmount/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
 	"github.com/stretchr/testify/assert"
 )
 

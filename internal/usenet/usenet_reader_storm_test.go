@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/altmount/internal/testsupport/segments"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/fakepool"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/segments"
 	"github.com/javi11/nntppool/v4"
 )
 
@@ -71,8 +71,8 @@ func TestStorm_RetryAmplifiesPerMessageCallCount(t *testing.T) {
 func TestStorm_RetryUsesFixedDelayInsteadOfExponentialBackoff(t *testing.T) {
 	t.Parallel()
 	const (
-		segSize  = 16
-		samples  = 30 // independent failing segments
+		segSize = 16
+		samples = 30 // independent failing segments
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

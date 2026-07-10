@@ -553,7 +553,7 @@ func TestParser_Parse_Blobs_TempDBCleanedBeforeStreaming(t *testing.T) {
 		require.NoError(t, err)
 		n := 0
 		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), "altmount-nzbdav-") {
+			if strings.HasPrefix(e.Name(), "tater-tube-server-nzbdav-") {
 				n++
 			}
 		}
@@ -571,7 +571,7 @@ func TestParser_Parse_Blobs_TempDBCleanedBeforeStreaming(t *testing.T) {
 	require.NotNil(t, first)
 
 	assert.Equal(t, 0, countTempDBs(),
-		"temp DB copy should be removed before streaming begins; found %d altmount-nzbdav-* files in %s", countTempDBs(), tmpRoot)
+		"temp DB copy should be removed before streaming begins; found %d tater-tube-server-nzbdav-* files in %s", countTempDBs(), tmpRoot)
 
 	// Drain the rest so the goroutine exits cleanly.
 	_, _ = io.ReadAll(first.Content)

@@ -5,8 +5,8 @@ import (
 	"io/fs"
 	"os"
 
-	"github.com/javi11/altmount/internal/slogutil"
-	"github.com/javi11/altmount/internal/utils"
+	"github.com/TaterTotterson/tater-tube-server/internal/slogutil"
+	"github.com/TaterTotterson/tater-tube-server/internal/utils"
 	"github.com/spf13/afero"
 )
 
@@ -24,7 +24,7 @@ func NewNzbFilesystem(remoteFile *MetadataRemoteFile) *NzbFilesystem {
 
 // Name returns the filesystem name
 func (nfs *NzbFilesystem) Name() string {
-	return "altmount"
+	return "tater-tube-server"
 }
 
 // Open opens a file for reading
@@ -126,4 +126,3 @@ func (nfs *NzbFilesystem) Mkdir(ctx context.Context, name string, perm os.FileMo
 func (nfs *NzbFilesystem) MkdirAll(ctx context.Context, name string, perm os.FileMode) error {
 	return nfs.remoteFile.MkdirAll(ctx, name, perm)
 }
-

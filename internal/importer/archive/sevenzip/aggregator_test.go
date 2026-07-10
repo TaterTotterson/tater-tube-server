@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/importer/parser"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/progress"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/parser"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/progress"
 	"github.com/stretchr/testify/require"
 )
 
@@ -140,22 +140,22 @@ func TestProcessArchivePreservesInternalFolderStructure(t *testing.T) {
 			}
 
 			err := ProcessArchive(ctx, ProcessArchiveOptions{
-				VirtualDir:              tt.virtualDir,
-				ArchiveFiles:            []parser.ParsedFile{{Filename: "archive.7z"}},
-				Password:                "",
-				ReleaseDate:             0,
-				NzbPath:                 tt.nzbPath,
-				Processor:               proc,
-				MetadataService:         svc,
+				VirtualDir:             tt.virtualDir,
+				ArchiveFiles:           []parser.ParsedFile{{Filename: "archive.7z"}},
+				Password:               "",
+				ReleaseDate:            0,
+				NzbPath:                tt.nzbPath,
+				Processor:              proc,
+				MetadataService:        svc,
 				PoolManager:            nil,
 				ArchiveProgressTracker: nil,
 				AllowedFileExtensions:  nil,
 				ExtractedFiles:         extracted,
-				MaxPrefetch:             1,
-				ReadTimeout:             30 * time.Second,
-				ExpandBlurayIso:         false,
-				FilterSamples:           false,
-				RenameToNzbName:         tt.renameToNzbName,
+				MaxPrefetch:            1,
+				ReadTimeout:            30 * time.Second,
+				ExpandBlurayIso:        false,
+				FilterSamples:          false,
+				RenameToNzbName:        tt.renameToNzbName,
 			})
 			require.NoError(t, err)
 

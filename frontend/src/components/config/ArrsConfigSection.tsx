@@ -65,7 +65,7 @@ export function ArrsConfigSection({
 	const [newStuckPattern, setNewStuckPattern] = useState("");
 
 	const registerWebhooks = useRegisterArrsWebhooks();
-	const defaultWebhookUrl = `http://${config.webdav.host || "altmount"}:${config.webdav.port}`;
+	const defaultWebhookUrl = `http://${config.server.host || "tater-tube-server"}:${config.server.port}`;
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
@@ -91,12 +91,6 @@ export function ArrsConfigSection({
 	const validateForm = (data: ArrsConfig): string[] => {
 		const errors: string[] = [];
 		if (data.enabled) {
-			if (!config.mount_path) {
-				errors.push(
-					"Mount Path must be configured in General/System settings before enabling Arrs service",
-				);
-			}
-
 			const allInstances: { instance: ArrsInstanceConfig; typeLabel: string }[] = [];
 			for (const { type, label } of ARR_TYPES) {
 				const instances = data[`${type}_instances` as keyof ArrsConfig] as ArrsInstanceConfig[];
@@ -268,7 +262,7 @@ export function ArrsConfigSection({
 						<div className="min-w-0 flex-1">
 							<h4 className="break-words font-bold text-base-content text-sm">Service Engine</h4>
 							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-								Allows AltMount to talk to Radarr/Sonarr for repairs and updates.
+								Allows Tater Tube Server to talk to Radarr/Sonarr for repairs and updates.
 							</p>
 						</div>
 						<input
@@ -293,16 +287,16 @@ export function ArrsConfigSection({
 
 						<div className="space-y-6">
 							<div>
-								<h5 className="font-bold text-sm">AltMount Webhooks</h5>
+								<h5 className="font-bold text-sm">Tater Tube Server Webhooks</h5>
 								<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-									Automatically configure hooks in ARR applications to notify AltMount of upgrades
+									Automatically configure hooks in ARR applications to notify Tater Tube Server of upgrades
 									and renames.
 								</p>
 							</div>
 
 							<div className="flex flex-col gap-4 sm:flex-row sm:items-end">
 								<fieldset className="fieldset flex-1">
-									<legend className="fieldset-legend font-semibold">AltMount Callback URL</legend>
+									<legend className="fieldset-legend font-semibold">Tater Tube Server Callback URL</legend>
 									<input
 										type="url"
 										className="input input-bordered w-full bg-base-100 font-mono text-sm"

@@ -26,34 +26,34 @@ type ProviderQuotaSnapshot struct {
 
 // MetricsSnapshot represents pool metrics at a point in time with calculated values
 type MetricsSnapshot struct {
-	BytesDownloaded             int64                                `json:"bytes_downloaded"`
-	BytesUploaded               int64                                `json:"bytes_uploaded"`
-	ArticlesDownloaded          int64                                `json:"articles_downloaded"`
-	ArticlesPosted              int64                                `json:"articles_posted"`
-	TotalErrors                 int64                                `json:"total_errors"`
-	ProviderErrors              map[string]int64                     `json:"provider_errors"`
-	ProviderBytes               map[string]int64                     `json:"provider_bytes"`
-	ProviderBytes24h            map[string]int64                     `json:"provider_bytes_24h"`
-	ProviderStartedAt           map[string]time.Time                 `json:"provider_started_at"`
-	ProviderQuotas              map[string]ProviderQuotaSnapshot     `json:"provider_quotas,omitempty"`
-	DownloadSpeedBytesPerSec    float64                              `json:"download_speed_bytes_per_sec"`
-	MaxDownloadSpeedBytesPerSec float64                              `json:"max_download_speed_bytes_per_sec"`
-	UploadSpeedBytesPerSec      float64                              `json:"upload_speed_bytes_per_sec"`
-	Timestamp                   time.Time                            `json:"timestamp"`
-	StartedAt                   time.Time                            `json:"started_at"`
-	ProviderMissingRates        map[string]float64                   `json:"provider_missing_rates"`
-	ProviderMissingWarning      map[string]bool                      `json:"provider_missing_warning"`
-	ProviderSpeeds              map[string]float64                   `json:"provider_speeds"`
+	BytesDownloaded             int64                            `json:"bytes_downloaded"`
+	BytesUploaded               int64                            `json:"bytes_uploaded"`
+	ArticlesDownloaded          int64                            `json:"articles_downloaded"`
+	ArticlesPosted              int64                            `json:"articles_posted"`
+	TotalErrors                 int64                            `json:"total_errors"`
+	ProviderErrors              map[string]int64                 `json:"provider_errors"`
+	ProviderBytes               map[string]int64                 `json:"provider_bytes"`
+	ProviderBytes24h            map[string]int64                 `json:"provider_bytes_24h"`
+	ProviderStartedAt           map[string]time.Time             `json:"provider_started_at"`
+	ProviderQuotas              map[string]ProviderQuotaSnapshot `json:"provider_quotas,omitempty"`
+	DownloadSpeedBytesPerSec    float64                          `json:"download_speed_bytes_per_sec"`
+	MaxDownloadSpeedBytesPerSec float64                          `json:"max_download_speed_bytes_per_sec"`
+	UploadSpeedBytesPerSec      float64                          `json:"upload_speed_bytes_per_sec"`
+	Timestamp                   time.Time                        `json:"timestamp"`
+	StartedAt                   time.Time                        `json:"started_at"`
+	ProviderMissingRates        map[string]float64               `json:"provider_missing_rates"`
+	ProviderMissingWarning      map[string]bool                  `json:"provider_missing_warning"`
+	ProviderSpeeds              map[string]float64               `json:"provider_speeds"`
 }
 
 // MetricsTracker tracks pool metrics over time and calculates rates
 type MetricsTracker struct {
-	pool              *nntppool.Client
-	repo              StatsRepository
-	mu                sync.RWMutex
-	startedAt         time.Time
-	samples           []metricsample
-	providerIDMap     map[string]string
+	pool          *nntppool.Client
+	repo          StatsRepository
+	mu            sync.RWMutex
+	startedAt     time.Time
+	samples       []metricsample
+	providerIDMap map[string]string
 
 	sampleInterval    time.Duration
 	retentionPeriod   time.Duration
@@ -92,19 +92,19 @@ type metricsample struct {
 // NewMetricsTracker creates a new metrics tracker
 func NewMetricsTracker(pool *nntppool.Client, repo StatsRepository) *MetricsTracker {
 	mt := &MetricsTracker{
-		pool:                  pool,
-		repo:                  repo,
-		samples:               make([]metricsample, 0, 60), // Preallocate for 60 samples
-		initialProviderErrors: make(map[string]int64),
-		initialProviderBytes:  make(map[string]int64),
+		pool:                     pool,
+		repo:                     repo,
+		samples:                  make([]metricsample, 0, 60), // Preallocate for 60 samples
+		initialProviderErrors:    make(map[string]int64),
+		initialProviderBytes:     make(map[string]int64),
 		initialProviderStartedAt: make(map[string]time.Time),
-		lastSavedProviderBytes: make(map[string]int64),
-		sampleInterval:        2 * time.Second, // Match playback sampling for "live" feel
-		retentionPeriod:       60 * time.Second,
-		calculationWindow:     10 * time.Second,   // Use 10s window for more accurate real-time speeds
-		persistenceThreshold:  1024 * 1024 * 1024, // Save every 1GB downloaded
-		startedAt:             time.Now(),
-		logger:                slog.Default().With("component", "metrics-tracker"),
+		lastSavedProviderBytes:   make(map[string]int64),
+		sampleInterval:           2 * time.Second, // Match playback sampling for "live" feel
+		retentionPeriod:          60 * time.Second,
+		calculationWindow:        10 * time.Second,   // Use 10s window for more accurate real-time speeds
+		persistenceThreshold:     1024 * 1024 * 1024, // Save every 1GB downloaded
+		startedAt:                time.Now(),
+		logger:                   slog.Default().With("component", "metrics-tracker"),
 	}
 
 	return mt
@@ -510,7 +510,7 @@ func (mt *MetricsTracker) saveStats(ctx context.Context) {
 		for poolName, speedBytes := range snapshot.ProviderSpeeds {
 			if speedBytes > 1024*1024 { // Only record if speed > 1MB/s to show active performance
 				speedMbps := speedBytes / (1024 * 1024)
-				
+
 				// Map pool name to config ID
 				id := poolName
 				mt.mu.RLock()

@@ -186,7 +186,7 @@ export function StremioConfigSection({
 						<div className="min-w-0 flex-1">
 							<h5 className="break-words font-bold text-sm">Enable Stremio Integration</h5>
 							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-								Activates the Stremio addon endpoints and the{" "}
+								Activates the Tater Stremio addon endpoints and the{" "}
 								<code className="rounded bg-base-300 px-1 py-0.5 font-mono text-[10px]">
 									POST /api/nzb/streams
 								</code>{" "}
@@ -208,7 +208,7 @@ export function StremioConfigSection({
 							<input
 								type="url"
 								className="input w-full min-w-0 max-w-full"
-								placeholder="https://altmount.example.com"
+								placeholder="https://streamer.example.com"
 								value={formData.base_url ?? ""}
 								disabled={isReadOnly}
 								onChange={(e) => update({ base_url: e.target.value })}
@@ -246,7 +246,7 @@ export function StremioConfigSection({
 							<div className="h-px flex-1 bg-primary/20" />
 						</div>
 						<p className="min-w-0 break-words text-base-content/60 text-xs">
-							Install this URL in Stremio to enable automatic Usenet streaming via Prowlarr.
+							Install this URL in Stremio to enable Tater Tube Server streaming.
 						</p>
 						<div className="flex min-w-0 flex-wrap items-center gap-2">
 							<code className="min-w-0 flex-1 basis-0 truncate rounded-lg bg-base-300 px-3 py-2 font-mono text-[11px]">
@@ -282,17 +282,17 @@ export function StremioConfigSection({
 					<div className="flex items-center gap-2">
 						<Tv className="h-4 w-4 text-base-content/60" />
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-							Prowlarr Indexer
+							Indexer Search
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
 					<div className="flex items-center justify-between gap-4">
 						<div className="min-w-0 flex-1">
-							<h5 className="break-words font-bold text-sm">Enable Prowlarr Search</h5>
+							<h5 className="break-words font-bold text-sm">Enable Prowlarr-Compatible Search</h5>
 							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-								When enabled, the Stremio addon automatically searches Prowlarr for NZBs by IMDB ID
-								and queues the best result.
+								When enabled, the Stremio addon automatically searches your indexer by IMDB ID and
+								queues the selected result.
 							</p>
 						</div>
 						<input

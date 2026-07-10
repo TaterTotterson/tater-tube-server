@@ -4,13 +4,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/fakepool"
 	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/nzbparser"
 )
 
 // TestParseNzbSkipsFileThatFailsNormalization is the regression test for
-// https://github.com/javi11/altmount/issues/681.
+// https://github.com/TaterTotterson/tater-tube-server/issues/681.
 //
 // When a file's segment sizes cannot be normalized — here because the second
 // segment (needed to learn the part size, since the total file size is unknown)

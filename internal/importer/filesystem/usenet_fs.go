@@ -16,12 +16,12 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/javi11/altmount/internal/importer/parser"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/progress"
-	"github.com/javi11/altmount/internal/slogutil"
-	"github.com/javi11/altmount/internal/usenet"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/parser"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/progress"
+	"github.com/TaterTotterson/tater-tube-server/internal/slogutil"
+	"github.com/TaterTotterson/tater-tube-server/internal/usenet"
 )
 
 // Compile-time interface checks
@@ -165,7 +165,7 @@ func (uf *UsenetFile) Stat() (fs.FileInfo, error) {
 }
 
 func (uf *UsenetFile) Read(p []byte) (n int, err error) {
-	// Yield CPU to prevent starvation of other goroutines (e.g. WebDAV server)
+	// Yield CPU to prevent starvation of other goroutines (e.g. Server server)
 	// during heavy processing loops by external libraries (like rardecode)
 	runtime.Gosched()
 

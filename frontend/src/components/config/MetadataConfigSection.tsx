@@ -310,7 +310,7 @@ export function MetadataConfigSection({
 									Purge Source NZB
 								</span>
 								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
-									Delete original NZB file when metadata is manually removed from AltMount.
+									Delete original NZB file when metadata is manually removed from Tater Tube Server.
 								</span>
 							</div>
 						</label>
