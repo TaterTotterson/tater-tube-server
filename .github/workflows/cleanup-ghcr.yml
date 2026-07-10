@@ -1,0 +1,68 @@
+name: Cleanup GHCR
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep_tag:
+        description: 'Container tag to keep'
+        required: true
+        default: latest
+      dry_run:
+        description: 'List what would be deleted without deleting'
+        type: boolean
+        default: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Delete package versions without kept tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          PACKAGE: ${{ github.event.repository.name }}
+          KEEP_TAG: ${{ inputs.keep_tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          package_lc="$(printf '%s' "$PACKAGE" | tr '[:upper:]' '[:lower:]')"
+          versions_json="$(mktemp)"
+          gh api --paginate "/users/${OWNER}/packages/container/${package_lc}/versions?per_page=100" > "$versions_json"
+
+          keep_id="$(
+            jq -r --arg keep_tag "$KEEP_TAG" '
+              map(select((.metadata.container.tags // []) | index($keep_tag)))
+              | sort_by(.updated_at)
+              | reverse
+              | .[0].id // empty
+            ' "$versions_json"
+          )"
+
+          if [ -z "$keep_id" ]; then
+            echo "No GHCR package version currently has tag '$KEEP_TAG'. Refusing to delete anything."
+            jq -r '.[] | "\(.id)\t\((.metadata.container.tags // []) | join(","))\t\(.updated_at)"' "$versions_json"
+            exit 1
+          fi
+
+          echo "Keeping package version ${keep_id} with tag '${KEEP_TAG}'"
+          delete_ids="$(jq -r --arg keep_id "$keep_id" '.[] | select((.id | tostring) != $keep_id) | .id' "$versions_json")"
+
+          if [ -z "$delete_ids" ]; then
+            echo "No package versions to delete."
+            exit 0
+          fi
+
+          echo "$delete_ids" | while read -r version_id; do
+            [ -z "$version_id" ] && continue
+            tags="$(jq -r --arg id "$version_id" '.[] | select((.id | tostring) == $id) | (.metadata.container.tags // []) | join(",")' "$versions_json")"
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "Would delete package version ${version_id} tags=[${tags}]"
+            else
+              echo "Deleting package version ${version_id} tags=[${tags}]"
+              gh api --method DELETE "/users/${OWNER}/packages/container/${package_lc}/versions/${version_id}"
+            fi
+          done
