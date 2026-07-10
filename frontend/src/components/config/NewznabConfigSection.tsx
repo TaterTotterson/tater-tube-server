@@ -167,8 +167,8 @@ export function NewznabConfigSection({
 							Player Setup
 						</div>
 						<div className="mt-1 break-words text-[11px] leading-relaxed opacity-80">
-							In Tater Tube, enter this server URL and the server download key. Indexer details stay
-							on the server.
+							In Tater Tube, enter this server URL and a pairing PIN from the Tater Tube Players page.
+							Indexer details stay on the server.
 						</div>
 					</div>
 				</div>

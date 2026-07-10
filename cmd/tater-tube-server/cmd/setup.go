@@ -368,6 +368,7 @@ func createHTTPServer(apiServer *api.Server, app *fiber.App, streamHandler *api.
 
 	// Convert Fiber app to HTTP handler for all other routes
 	fiberHTTPHandler := adaptor.FiberApp(app)
+	localStreamHTTPHandler := api.NewLocalStreamHandler(configGetter).GetHTTPHandler()
 
 	// Create a handler that routes between Stream and Fiber
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -390,6 +391,10 @@ func createHTTPServer(apiServer *api.Server, app *fiber.App, streamHandler *api.
 		// Route stream requests directly to stream handler
 		if strings.HasPrefix(path, "/api/files/stream") {
 			streamHTTPHandler.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(path, "/api/tater/local/stream") {
+			localStreamHTTPHandler.ServeHTTP(w, r)
 			return
 		}
 

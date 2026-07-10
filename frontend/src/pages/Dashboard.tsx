@@ -1,10 +1,7 @@
-import { Check, Copy, List, Radio, Settings, Tv, Wifi } from "lucide-react";
-import { useMemo, useState } from "react";
+import { List, Radio, Settings, Tv, Wifi } from "lucide-react";
 import { Link } from "react-router-dom";
-import { useToast } from "../contexts/ToastContext";
 import { usePoolMetrics, useQueueStats } from "../hooks/useApi";
 import { useConfig } from "../hooks/useConfig";
-import { copyToClipboard } from "../lib/utils";
 
 function StatusCard({
 	icon: Icon,
@@ -39,31 +36,11 @@ export function Dashboard() {
 	const { data: config } = useConfig();
 	const { data: queueStats } = useQueueStats();
 	const { data: poolMetrics } = usePoolMetrics();
-	const { showToast } = useToast();
-	const [copied, setCopied] = useState(false);
-
-	const addonURL = useMemo(() => {
-		if (!config?.stremio?.enabled || !config.download_key) return "";
-		const baseURL = (config.stremio.base_url || window.location.origin).replace(/\/$/, "");
-		return `${baseURL}/stremio/${config.download_key}/manifest.json`;
-	}, [config]);
 
 	const activeQueueCount = queueStats
 		? queueStats.total_processing +
 			Math.max(0, queueStats.total_queued - queueStats.total_processing - queueStats.total_completed)
 		: 0;
-
-	const handleCopyAddonURL = async () => {
-		if (!addonURL) return;
-		const ok = await copyToClipboard(addonURL);
-		setCopied(ok);
-		showToast({
-			type: ok ? "success" : "error",
-			title: ok ? "Copied" : "Copy Failed",
-			message: ok ? "Stremio addon URL copied." : "Unable to copy addon URL.",
-		});
-		if (ok) setTimeout(() => setCopied(false), 1800);
-	};
 
 	return (
 		<div className="space-y-6">
@@ -72,21 +49,21 @@ export function Dashboard() {
 					<div className="card-body gap-6 p-6 sm:p-8">
 						<div className="space-y-3">
 							<div className="text-primary text-xs uppercase tracking-[0.25em]">
-								Stremio Usenet Bridge
+								Tater Tube Stream Server
 							</div>
 							<h1 className="font-bold text-3xl leading-tight sm:text-4xl">
 								Tater Tube Server
 							</h1>
 							<p className="max-w-2xl text-base-content/70">
-								Add an NNTP provider, enable the Stremio endpoint, then use the addon URL in
-								Stremio or apps that can submit NZBs to the stream endpoint.
+								Add an NNTP provider, configure the Newznab Stream catalog, then pair Tater Tube
+								players with short-lived setup PINs.
 							</p>
 						</div>
 
 						<div className="grid gap-3 sm:grid-cols-3">
-							<Link to="/config/stremio" className="btn btn-primary">
+							<Link to="/config/players" className="btn btn-primary">
 								<Tv className="h-4 w-4" />
-								Stremio Setup
+								Pair Players
 							</Link>
 							<Link to="/config/providers" className="btn btn-outline">
 								<Radio className="h-4 w-4" />
@@ -101,23 +78,11 @@ export function Dashboard() {
 						<div className="rounded-lg border border-base-300 bg-base-100/80 p-4">
 							<div className="mb-2 flex items-center gap-2 text-base-content/60 text-xs uppercase tracking-widest">
 								<Tv className="h-4 w-4 text-primary" />
-								Addon URL
+								Player Setup
 							</div>
-							{addonURL ? (
-								<div className="flex min-w-0 flex-wrap items-center gap-2">
-									<code className="min-w-0 flex-1 truncate rounded bg-base-300 px-3 py-2 font-mono text-xs">
-										{addonURL}
-									</code>
-									<button type="button" className="btn btn-sm btn-primary" onClick={handleCopyAddonURL}>
-										{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-										Copy
-									</button>
-								</div>
-							) : (
-								<p className="text-base-content/60 text-sm">
-									Enable Stremio integration and generate an API key to show the install URL.
-								</p>
-							)}
+							<p className="text-base-content/60 text-sm">
+								Open Tater Tube Players, create a PIN, then enter this server URL and PIN on the player.
+							</p>
 						</div>
 					</div>
 				</div>
@@ -134,9 +99,9 @@ export function Dashboard() {
 			<section className="grid gap-4 md:grid-cols-3">
 				<StatusCard
 					icon={Wifi}
-					label="Stremio"
-					value={config?.stremio?.enabled ? "Enabled" : "Disabled"}
-					helper="Controls addon and NZB stream endpoints."
+					label="Players"
+					value={String(config?.players?.players?.filter((player) => !player.revoked_at).length ?? 0)}
+					helper="Paired Tater Tube players allowed to browse and stream."
 				/>
 				<StatusCard
 					icon={Radio}

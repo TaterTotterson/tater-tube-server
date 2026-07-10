@@ -50,6 +50,8 @@ type Config struct {
 	Arrs            ArrsConfig         `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
 	Stremio         StremioConfig      `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
 	Newznab         NewznabConfig      `yaml:"newznab" mapstructure:"newznab" json:"newznab"`
+	LocalMedia      LocalMediaConfig   `yaml:"local_media" mapstructure:"local_media" json:"local_media"`
+	Players         PlayersConfig      `yaml:"players" mapstructure:"players" json:"players"`
 	Fuse            FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"-"`
 	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
 	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
@@ -182,6 +184,47 @@ type NewznabConfig struct {
 	APIKey      string `yaml:"api_key" mapstructure:"api_key" json:"api_key,omitempty"`
 	Username    string `yaml:"username" mapstructure:"username" json:"username,omitempty"`
 	BrowseLimit int    `yaml:"browse_limit" mapstructure:"browse_limit" json:"browse_limit,omitempty"`
+}
+
+// LocalMediaConfig configures server-local folders exposed to Tater Tube players.
+type LocalMediaConfig struct {
+	Enabled    *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	Categories []LocalMediaCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
+}
+
+// LocalMediaCategory maps one or more host folders into a named The Tube category.
+type LocalMediaCategory struct {
+	ID          string   `yaml:"id" mapstructure:"id" json:"id"`
+	Name        string   `yaml:"name" mapstructure:"name" json:"name"`
+	LibraryType string   `yaml:"library_type" mapstructure:"library_type" json:"library_type"`
+	Paths       []string `yaml:"paths" mapstructure:"paths" json:"paths"`
+	Enabled     *bool    `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+}
+
+// PlayersConfig stores Tater Tube players paired to this server.
+type PlayersConfig struct {
+	Paired       []PlayerConfig      `yaml:"paired" mapstructure:"paired" json:"paired"`
+	PairingCodes []PlayerPairingCode `yaml:"pairing_codes" mapstructure:"pairing_codes" json:"pairing_codes"`
+}
+
+// PlayerConfig is a paired Tater Tube player. TokenHash stores the SHA256 hash
+// of the player's bearer token; the raw token is only returned once during pair.
+type PlayerConfig struct {
+	ID         string `yaml:"id" mapstructure:"id" json:"id"`
+	Name       string `yaml:"name" mapstructure:"name" json:"name"`
+	TokenHash  string `yaml:"token_hash" mapstructure:"token_hash" json:"-"`
+	CreatedAt  string `yaml:"created_at" mapstructure:"created_at" json:"created_at"`
+	LastSeenAt string `yaml:"last_seen_at,omitempty" mapstructure:"last_seen_at" json:"last_seen_at,omitempty"`
+	RevokedAt  string `yaml:"revoked_at,omitempty" mapstructure:"revoked_at" json:"revoked_at,omitempty"`
+}
+
+// PlayerPairingCode is a short-lived code created in the web UI and entered on
+// the Tater Tube player.
+type PlayerPairingCode struct {
+	ID        string `yaml:"id" mapstructure:"id" json:"id"`
+	CodeHash  string `yaml:"code_hash" mapstructure:"code_hash" json:"-"`
+	CreatedAt string `yaml:"created_at" mapstructure:"created_at" json:"created_at"`
+	ExpiresAt string `yaml:"expires_at" mapstructure:"expires_at" json:"expires_at"`
 }
 
 // AuthConfig represents authentication configuration
@@ -810,6 +853,57 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("newznab api_key is required when newznab is enabled")
 		}
 	}
+	if c.LocalMedia.Enabled == nil {
+		enabled := false
+		c.LocalMedia.Enabled = &enabled
+	}
+	seenLocalMediaIDs := make(map[string]bool, len(c.LocalMedia.Categories))
+	for i := range c.LocalMedia.Categories {
+		cat := &c.LocalMedia.Categories[i]
+		cat.Name = strings.TrimSpace(cat.Name)
+		if cat.Name == "" {
+			return fmt.Errorf("local media category name is required")
+		}
+		if cat.ID = sanitizeLocalMediaID(cat.ID); cat.ID == "" {
+			cat.ID = sanitizeLocalMediaID(cat.Name)
+		}
+		if cat.ID == "" {
+			return fmt.Errorf("local media category id is required")
+		}
+		if seenLocalMediaIDs[cat.ID] {
+			return fmt.Errorf("local media category id %q is duplicated", cat.ID)
+		}
+		seenLocalMediaIDs[cat.ID] = true
+		if cat.Enabled == nil {
+			enabled := true
+			cat.Enabled = &enabled
+		}
+		cat.LibraryType = strings.ToLower(strings.TrimSpace(cat.LibraryType))
+		if cat.LibraryType == "" {
+			cat.LibraryType = "movies"
+		}
+		switch cat.LibraryType {
+		case "movies", "tv", "folders":
+		default:
+			return fmt.Errorf("local media category %s library_type must be movies, tv, or folders", cat.Name)
+		}
+
+		cleanPaths := make([]string, 0, len(cat.Paths))
+		for _, rawPath := range cat.Paths {
+			path := strings.TrimSpace(rawPath)
+			if path == "" {
+				continue
+			}
+			if !filepath.IsAbs(path) {
+				return fmt.Errorf("local media path for %s must be absolute: %s", cat.Name, path)
+			}
+			cleanPaths = append(cleanPaths, filepath.Clean(path))
+		}
+		if c.LocalMedia.Enabled != nil && *c.LocalMedia.Enabled && cat.Enabled != nil && *cat.Enabled && len(cleanPaths) == 0 {
+			return fmt.Errorf("local media category %s needs at least one folder path", cat.Name)
+		}
+		cat.Paths = cleanPaths
+	}
 	validTranscodeProfiles := map[string]bool{
 		"crt_480p":   true,
 		"hdmi_1080p": true,
@@ -1026,6 +1120,29 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
+}
+
+func sanitizeLocalMediaID(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		isAllowed := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if isAllowed {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash && b.Len() > 0 {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	result := strings.Trim(b.String(), "-")
+	if len(result) > 64 {
+		result = strings.TrimRight(result[:64], "-")
+	}
+	return result
 }
 
 // ValidateDirectories validates that all configured directories are writable
@@ -1523,6 +1640,7 @@ func DefaultConfig(configDir ...string) *Config {
 	segmentCacheEnabled := true     // Persist decoded Usenet segments by default
 	transcodingEnabled := false     // Direct play by default; FFmpeg transcode is opt-in
 	newznabEnabled := false         // Player-facing Stream catalog disabled by default
+	localMediaEnabled := false      // Server-local media catalog disabled by default
 	prowlarrEnabled := false        // Prowlarr integration disabled by default
 	watchIntervalSeconds := 10      // Default watch interval
 	failedItemRetentionHours := 24  // Default: auto-remove failed items after 24 hours
@@ -1585,6 +1703,14 @@ func DefaultConfig(configDir ...string) *Config {
 			APIKey:      "",
 			Username:    "",
 			BrowseLimit: 100,
+		},
+		LocalMedia: LocalMediaConfig{
+			Enabled:    &localMediaEnabled,
+			Categories: []LocalMediaCategory{},
+		},
+		Players: PlayersConfig{
+			Paired:       []PlayerConfig{},
+			PairingCodes: []PlayerPairingCode{},
 		},
 		Auth: AuthConfig{
 			LoginRequired: &loginRequired,

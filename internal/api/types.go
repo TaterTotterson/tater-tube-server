@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/TaterTotterson/tater-tube-server/internal/auth"
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"github.com/TaterTotterson/tater-tube-server/internal/database"
 )
@@ -37,8 +36,9 @@ type ConfigAPIResponse struct {
 	Arrs            ArrsAPIResponse       `json:"arrs"`
 	Stremio         StremioAPIResponse    `json:"stremio"`
 	Newznab         NewznabAPIResponse    `json:"newznab"`
-	APIKey          string                `json:"api_key,omitempty"`      // User's API key for authentication
-	DownloadKey     string                `json:"download_key,omitempty"` // SHA256 of the API key, used for download/stream URLs
+	LocalMedia      LocalMediaAPIResponse `json:"local_media"`
+	Players         taterPlayersResponse  `json:"players"`
+	APIKey          string                `json:"api_key,omitempty"` // User's API key for authentication
 	ProfilerEnabled bool                  `json:"profiler_enabled"`
 }
 
@@ -164,6 +164,12 @@ type NewznabAPIResponse struct {
 	BrowseLimit int    `json:"browse_limit,omitempty"`
 }
 
+// LocalMediaAPIResponse exposes server-local media categories for the config UI.
+type LocalMediaAPIResponse struct {
+	Enabled    bool                        `json:"enabled"`
+	Categories []config.LocalMediaCategory `json:"categories"`
+}
+
 // Helper functions to create API responses from core config types
 
 // ToConfigAPIResponse converts config.Config to ConfigAPIResponse with sensitive data masked
@@ -223,11 +229,6 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	serverResp := ServerAPIResponse{
 		Port: cfg.Server.Port,
 		Host: cfg.Server.Host,
-	}
-
-	downloadKey := ""
-	if apiKey != "" {
-		downloadKey = auth.HashAPIKey(apiKey)
 	}
 
 	toArrsInstances := func(instances []config.ArrsInstanceConfig) []ArrsInstanceAPIResponse {
@@ -292,6 +293,13 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	if cfg.Newznab.APIKey != "" {
 		newznabResp.APIKey = "********"
 	}
+	localMediaResp := LocalMediaAPIResponse{
+		Enabled:    cfg.LocalMedia.Enabled != nil && *cfg.LocalMedia.Enabled,
+		Categories: cfg.LocalMedia.Categories,
+	}
+	if localMediaResp.Categories == nil {
+		localMediaResp.Categories = []config.LocalMediaCategory{}
+	}
 
 	return &ConfigAPIResponse{
 		Config:          cfg,
@@ -302,8 +310,9 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		Arrs:            arrsResp,
 		Stremio:         stremioResp,
 		Newznab:         newznabResp,
+		LocalMedia:      localMediaResp,
+		Players:         taterPlayersConfigResponse(cfg.Players, time.Now().UTC()),
 		APIKey:          apiKey,
-		DownloadKey:     downloadKey,
 		ProfilerEnabled: cfg.ProfilerEnabled,
 	}
 }

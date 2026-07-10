@@ -5,21 +5,21 @@
 </p>
 
 Tater Tube Server is the backend foundation for Tater Tube. The first supported
-server role is Usenet/NZB streaming: take an NZB, prepare it, and return
-streamable playback URLs that Tater Tube or Stremio-compatible clients can play.
+server role is Usenet/NZB streaming: Tater Tube browses a Newznab-backed Stream
+catalog on the server, selects a release, and receives a playable stream URL.
 
-This project keeps the Stremio addon and direct NZB stream endpoint from
-AltMount, then trims the app down around streaming setup, provider
-configuration, queue status, logs, and system settings. WebDAV, FUSE, and
-rclone mount workflows have been removed from the app.
+This project keeps the streaming pipeline from AltMount, then trims the app
+down around Tater Tube player setup, provider configuration, queue status, logs,
+and system settings. WebDAV, FUSE, and rclone mount workflows have been removed
+from the app.
 
 ## What It Keeps
 
-- Stremio addon manifest and stream endpoints.
-- Direct NZB-to-stream endpoint at `POST /api/nzb/streams`.
 - Tater Tube Stream catalog endpoints under `/api/tater/usenet/*`.
+- Tater Tube player pairing with short-lived PINs.
 - NNTP provider configuration.
 - Newznab indexer configuration for Tater Tube players.
+- Local Media categories that expose server or container folders to The Tube.
 - Queue/import processing used to prepare streams.
 - Direct media stream URLs through `/api/files/stream`.
 - Tater-styled web UI with mascot artwork.
@@ -37,10 +37,14 @@ release to prepare and play.
 2. Open the web UI.
 3. Add at least one NNTP provider under `Configuration -> NNTP Providers`.
 4. Add your indexer URL and API key under `Configuration -> Newznab Stream`.
-5. In Tater Tube, open the Usenet module and enter the server URL plus the
-   server download key.
-6. Optional: enable Stremio under `Configuration -> Stremio Integration` if you
-   also want the Stremio addon.
+5. Open `Configuration -> Tater Tube Players` and create a pairing PIN.
+6. In Tater Tube, open The Tube and enter the server URL plus the PIN.
+
+Local Media is optional. In Docker, mount any media folders into the container,
+then add the container paths under `Configuration -> Local Media`. Each local
+category can scan as Movies, TV Shows, or Folders. Movies are flattened into a
+clean title list, TV Shows browse as Show -> Season -> Episode, and Folders keeps
+the original directory structure.
 
 ## Local Development
 
@@ -80,7 +84,8 @@ docker run -d \
 
 The included `docker-compose.yml` uses the same image and only mounts
 `./config:/config`. Login is disabled by default. Configure Usenet providers,
-Newznab Stream, and optional Stremio from the web UI at `http://SERVER-IP:8080`.
+Newznab Stream, and paired Tater Tube players from the web UI at
+`http://SERVER-IP:8080`.
 
 Streaming does not download full media files to disk by default. It caches
 decoded Usenet segments under `/config/segment-cache` so repeated reads can
@@ -96,8 +101,7 @@ inside the container.
 ## Credits
 
 This project is based on [javi11/altmount](https://github.com/javi11/altmount).
-The streaming internals, queue/import pipeline, and Stremio endpoint foundation
-come from that project.
+The streaming internals and queue/import pipeline come from that project.
 
 ## License
 

@@ -22,14 +22,15 @@ import { ArrsConfigSection } from "../components/config/ArrsConfigSection";
 import { AuthConfigSection } from "../components/config/AuthConfigSection";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
+import { LocalMediaConfigSection } from "../components/config/LocalMediaConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { NetworkConfigSection } from "../components/config/NetworkConfigSection";
 import { NewznabConfigSection } from "../components/config/NewznabConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
-import { StremioConfigSection } from "../components/config/StremioConfigSection";
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
+import { TaterPlayersConfigSection } from "../components/config/TaterPlayersConfigSection";
 import { ImportConfigSection } from "../components/config/WorkersConfigSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
@@ -48,6 +49,7 @@ import type {
 	ConfigSection,
 	HealthConfig,
 	ImportConfig,
+	LocalMediaConfig,
 	LogFormData,
 	MetadataConfig,
 	NetworkConfig,
@@ -57,7 +59,6 @@ import type {
 	SABnzbdConfig,
 	SegmentCacheConfig,
 	StreamingConfig,
-	StremioConfig,
 	TranscodingConfig,
 } from "../types/config";
 import { CONFIG_SECTIONS } from "../types/config";
@@ -86,7 +87,7 @@ const getIconComponent = (iconName: string) => {
 const SECTION_GROUPS = [
 	{
 		title: "Streamer",
-		sections: ["newznab", "stremio", "providers", "streaming"],
+		sections: ["newznab", "local_media", "players", "providers", "streaming"],
 	},
 	{
 		title: "Processing",
@@ -251,15 +252,15 @@ export function ConfigurationPage() {
 					section: "health",
 					config: { health: data as unknown as HealthConfig },
 				});
-			} else if (section === "stremio") {
-				await updateConfigSection.mutateAsync({
-					section: "stremio",
-					config: { stremio: data as unknown as StremioConfig },
-				});
 			} else if (section === "newznab") {
 				await updateConfigSection.mutateAsync({
 					section: "newznab",
 					config: { newznab: data as unknown as NewznabConfig },
+				});
+			} else if (section === "local_media") {
+				await updateConfigSection.mutateAsync({
+					section: "local_media",
+					config: { local_media: data as unknown as LocalMediaConfig },
 				});
 			} else if (section === "providers") {
 				await updateConfigSection.mutateAsync({
@@ -519,18 +520,26 @@ export function ConfigurationPage() {
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
-								{activeSection === "stremio" && (
-									<StremioConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
 								{activeSection === "newznab" && (
 									<NewznabConfigSection
 										config={config}
 										onUpdate={handleConfigUpdate}
 										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
+								{activeSection === "local_media" && (
+									<LocalMediaConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
+								{activeSection === "players" && (
+									<TaterPlayersConfigSection
+										config={config}
+										onRefresh={async () => {
+											await refetch();
+										}}
 									/>
 								)}
 								{activeSection === "network" && (
@@ -550,8 +559,8 @@ export function ConfigurationPage() {
 									"sabnzbd",
 									"arrs",
 									"health",
-									"stremio",
 									"newznab",
+									"players",
 									"network",
 								].includes(activeSection) && (
 									<ComingSoonSection

@@ -17,6 +17,8 @@ export interface ConfigResponse {
 	arrs: ArrsConfig;
 	stremio: StremioConfig;
 	newznab: NewznabConfig;
+	local_media: LocalMediaConfig;
+	players: TaterPlayersConfig;
 	providers: ProviderConfig[];
 	nzblnk: NzblnkConfig;
 	network: NetworkConfig;
@@ -269,6 +271,7 @@ export interface ConfigUpdateRequest {
 	arrs?: ArrsConfig;
 	stremio?: Partial<StremioConfig>;
 	newznab?: Partial<NewznabConfig>;
+	local_media?: Partial<LocalMediaConfig>;
 	providers?: ProviderUpdateRequest[];
 	nzblnk?: NzblnkConfig;
 	network?: NetworkConfig;
@@ -406,6 +409,8 @@ export type ConfigSection =
 	| "arrs"
 	| "stremio"
 	| "newznab"
+	| "local_media"
+	| "players"
 	| "nzblnk"
 	| "network"
 	| "system";
@@ -505,6 +510,43 @@ export interface NewznabConfig {
 	api_key_set?: boolean;
 	username?: string;
 	browse_limit: number;
+}
+
+export interface LocalMediaCategory {
+	id: string;
+	name: string;
+	library_type?: "movies" | "tv" | "folders" | string;
+	paths: string[];
+	enabled?: boolean;
+}
+
+export interface LocalMediaConfig {
+	enabled: boolean;
+	categories: LocalMediaCategory[];
+}
+
+export interface TaterPlayer {
+	id: string;
+	name: string;
+	created_at: string;
+	last_seen_at?: string;
+	revoked_at?: string;
+}
+
+export interface TaterPairingCode {
+	id: string;
+	code?: string;
+	created_at: string;
+	expires_at: string;
+}
+
+export interface TaterPlayersConfig {
+	players: TaterPlayer[];
+	pairing_codes: TaterPairingCode[];
+}
+
+export interface TaterPairingCodeCreateResponse extends TaterPairingCode {
+	code: string;
 }
 
 // Helper type for configuration sections
@@ -643,11 +685,24 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 			"Enable the Stremio addon and direct NZB stream endpoint.",
 		icon: "Tv",
 		canEdit: true,
+		hidden: true,
 	},
 	newznab: {
 		title: "Newznab Stream",
 		description: "Configure the player-facing Stream catalog for Tater Tube.",
 		icon: "Link",
+		canEdit: true,
+	},
+	local_media: {
+		title: "Local Media",
+		description: "Expose server-local folders as The Tube categories.",
+		icon: "Folder",
+		canEdit: true,
+	},
+	players: {
+		title: "Tater Tube Players",
+		description: "Pair, view, and revoke Tater Tube player devices.",
+		icon: "Tv",
 		canEdit: true,
 	},
 	nzblnk: {
