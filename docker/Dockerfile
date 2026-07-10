@@ -15,23 +15,25 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Frontend build stage
-FROM oven/bun:1 AS frontend-builder
+FROM node:24-alpine AS frontend-builder
+
+ARG VERSION=dev
+ARG COMMIT=unknown
 
 # Set working directory for frontend
 WORKDIR /app/frontend
 
-# Copy only dependency manifests first to leverage caching for bun install
-COPY frontend/bun.lock frontend/package.json ./
+# Copy only dependency manifests first to leverage caching for npm install
+COPY frontend/package.json frontend/package-lock.json ./
 
 # Install dependencies with enhanced cache mounting
-RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
-    --mount=type=cache,target=/tmp/bun-cache,sharing=locked \
-    bun install --frozen-lockfile
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm ci
 
 # Copy the rest of the frontend sources and build with cache
 COPY frontend/ ./
-RUN --mount=type=cache,target=/tmp/bun-build-cache,sharing=locked \
-    bun run build
+RUN --mount=type=cache,target=/tmp/npm-build-cache,sharing=locked \
+    APP_VERSION=${VERSION} GIT_COMMIT=${COMMIT} npm run build
 
 # Backend build stage with native arch support (no cross-compilation)
 FROM golang:1.26-alpine AS backend-builder

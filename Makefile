@@ -79,7 +79,7 @@ docker-build-ci: build-frontend
 build-frontend:
 	@VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo "dev"); \
 	COMMIT=$$(git rev-parse --short HEAD 2>/dev/null || echo "unknown"); \
-	cd frontend && bun install --frozen-lockfile && APP_VERSION=$$VERSION GIT_COMMIT=$$COMMIT bun run build
+	cd frontend && npm ci && APP_VERSION=$$VERSION GIT_COMMIT=$$COMMIT npm run build
 
 .PHONY: build-cli
 build-cli: build-frontend
