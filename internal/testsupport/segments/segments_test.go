@@ -13,8 +13,8 @@ func TestMessageID_FormatStableAndSortable(t *testing.T) {
 	t.Parallel()
 	a := MessageID(7)
 	b := MessageID(42)
-	wantA := "altmount-test-seg-000007@fake"
-	wantB := "altmount-test-seg-000042@fake"
+	wantA := "tater-tube-server-test-seg-000007@fake"
+	wantB := "tater-tube-server-test-seg-000042@fake"
 	if a != wantA {
 		t.Errorf("MessageID(7) = %q, want %q", a, wantA)
 	}

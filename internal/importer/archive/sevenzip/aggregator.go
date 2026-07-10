@@ -12,16 +12,16 @@ import (
 
 	concpool "github.com/sourcegraph/conc/pool"
 
-	"github.com/javi11/altmount/internal/importer/archive"
-	"github.com/javi11/altmount/internal/importer/filesystem"
-	"github.com/javi11/altmount/internal/importer/parser"
-	"github.com/javi11/altmount/internal/importer/utils"
-	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
-	"github.com/javi11/altmount/internal/importer/validation"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/progress"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/archive"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/filesystem"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/parser"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/utils"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/utils/nzbtrim"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/validation"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/progress"
 )
 
 var (

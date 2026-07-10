@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/utils"
+	"github.com/TaterTotterson/tater-tube-server/internal/utils"
 	"github.com/javi11/nntppool/v4"
 	"github.com/jinzhu/copier"
 	"github.com/robfig/cron/v3"
@@ -19,7 +19,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const MountProvider = "altmount"
+const MountProvider = "tater-tube-server"
 const DefaultCategoryName = "Default"
 const DefaultCategoryDir = "complete"
 
@@ -35,26 +35,26 @@ const (
 
 // Config represents the complete application configuration
 type Config struct {
-	WebDAV          WebDAVConfig       `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
+	Server          ServerConfig       `yaml:"server" mapstructure:"server" json:"server"`
 	API             APIConfig          `yaml:"api" mapstructure:"api" json:"api"`
 	Auth            AuthConfig         `yaml:"auth" mapstructure:"auth" json:"auth"`
 	Database        DatabaseConfig     `yaml:"database" mapstructure:"database" json:"database"`
 	Metadata        MetadataConfig     `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
 	Streaming       StreamingConfig    `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
 	Health          HealthConfig       `yaml:"health" mapstructure:"health" json:"health"`
-	RClone          RCloneConfig       `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
+	RClone          RCloneConfig       `yaml:"rclone" mapstructure:"rclone" json:"-"`
 	Import          ImportConfig       `yaml:"import" mapstructure:"import" json:"import"`
 	Log             LogConfig          `yaml:"log" mapstructure:"log" json:"log"`
 	SABnzbd         SABnzbdConfig      `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
 	Arrs            ArrsConfig         `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
 	Stremio         StremioConfig      `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
-	Fuse            FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
+	Fuse            FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"-"`
 	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
 	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
 	Nzblnk          NzblnkConfig       `yaml:"nzblnk" mapstructure:"nzblnk" json:"nzblnk"`
 	Network         NetworkConfig      `yaml:"network" mapstructure:"network" json:"network"`
-	MountPath       string             `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
-	MountType       MountType          `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
+	MountPath       string             `yaml:"mount_path" mapstructure:"mount_path" json:"-"`
+	MountType       MountType          `yaml:"mount_type" mapstructure:"mount_type" json:"-"`
 	ProfilerEnabled bool               `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
 }
 
@@ -87,8 +87,8 @@ func (n NetworkConfig) GetHTTPSProxy() string { return n.HTTPSProxy }
 // GetNoProxy returns the comma-separated bypass list.
 func (n NetworkConfig) GetNoProxy() string { return n.NoProxy }
 
-// SegmentCacheConfig configures the segment-aligned disk cache shared by FUSE and WebDAV.
-// When enabled, this cache replaces the FUSE VFS disk cache and additionally benefits WebDAV.
+// SegmentCacheConfig configures the segment-aligned disk cache shared by FUSE and Server.
+// When enabled, this cache replaces the FUSE VFS disk cache and additionally benefits Server.
 // Cache key: Usenet message ID. Cache unit: ~750KB decoded segment (matches one NNTP article).
 type SegmentCacheConfig struct {
 	Enabled     *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
@@ -97,12 +97,10 @@ type SegmentCacheConfig struct {
 	ExpiryHours int    `yaml:"expiry_hours" mapstructure:"expiry_hours" json:"expiry_hours"`
 }
 
-// WebDAVConfig represents WebDAV server configuration
-type WebDAVConfig struct {
-	Port     int    `yaml:"port" mapstructure:"port" json:"port"`
-	User     string `yaml:"user" mapstructure:"user" json:"user"`
-	Password string `yaml:"password" mapstructure:"password" json:"password"`
-	Host     string `yaml:"host" mapstructure:"host" json:"host,omitempty"`
+// ServerConfig represents the HTTP server bind configuration.
+type ServerConfig struct {
+	Port int    `yaml:"port" mapstructure:"port" json:"port"`
+	Host string `yaml:"host" mapstructure:"host" json:"host,omitempty"`
 }
 
 // FuseConfig represents FUSE mount configuration
@@ -118,7 +116,7 @@ type FuseConfig struct {
 	// AsyncBufferSizeMB is the per-open-file read-ahead buffer size (MB). A
 	// background goroutine fills it ahead of the player so reads are served
 	// from memory instead of blocking on the network, mirroring the buffering
-	// rclone's VFS provides over WebDAV. 0 disables read-ahead (every read is a
+	// rclone's VFS provides over Server. 0 disables read-ahead (every read is a
 	// direct passthrough — the previous behavior).
 	AsyncBufferSizeMB int `yaml:"async_buffer_size_mb" mapstructure:"async_buffer_size_mb" json:"async_buffer_size_mb"`
 	// AsyncBufferMaxTotalMB caps total read-ahead memory across all open files
@@ -168,7 +166,7 @@ type StremioConfig struct {
 	// Set to 0 to disable expiry (cache forever). Defaults to 24 hours.
 	NzbTTLHours int `yaml:"nzb_ttl_hours" mapstructure:"nzb_ttl_hours" json:"nzb_ttl_hours,omitempty"`
 	// BaseURL is the public base URL used when building Stremio stream links
-	// (e.g. "https://altmount.example.com"). Falls back to the auto-detected
+	// (e.g. "https://streamer.example.com"). Falls back to the auto-detected
 	// request origin when not set.
 	BaseURL string `yaml:"base_url" mapstructure:"base_url" json:"base_url,omitempty"`
 	// Prowlarr configures the Prowlarr indexer used by the Stremio addon to search for NZBs.
@@ -187,7 +185,7 @@ type DatabaseConfig struct {
 	// Path is the SQLite database file path (sqlite only).
 	Path string `yaml:"path" mapstructure:"path" json:"path"`
 	// DSN is the PostgreSQL connection string (postgres only).
-	// Example: "postgres://user:password@localhost:5432/altmount?sslmode=disable"
+	// Example: "postgres://user:password@localhost:5432/tater_usenet_streamer?sslmode=disable"
 	DSN string `yaml:"dsn" mapstructure:"dsn" json:"dsn,omitempty"`
 }
 
@@ -299,21 +297,21 @@ type ImportConfig struct {
 	// end-to-end at the same time. 0 = unlimited. NNTP connection use is
 	// balanced automatically: imports share the pool's full capacity and
 	// yield to streams (priority lane + adaptive connection budget).
-	MaxConcurrentImports               int            `yaml:"max_concurrent_imports" mapstructure:"max_concurrent_imports" json:"max_concurrent_imports"`
-	MaxDownloadPrefetch                int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
-	SegmentSamplePercentage            int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
-	ReadTimeoutSeconds                 int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
-	IsoAnalyzeTimeoutSeconds           *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
-	ImportStrategy                     ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
-	ImportDir                          *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
-	WatchDir                           *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
-	WatchIntervalSeconds               *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
-	AllowNestedRarExtraction           *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
-	ExpandBlurayIso                    *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
-	RenameToNzbName                    *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
-	FilterSampleFiles                  *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
-	FailedItemRetentionHours           *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
-	HistoryRetentionDays               *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
+	MaxConcurrentImports     int            `yaml:"max_concurrent_imports" mapstructure:"max_concurrent_imports" json:"max_concurrent_imports"`
+	MaxDownloadPrefetch      int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
+	SegmentSamplePercentage  int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
+	ReadTimeoutSeconds       int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
+	IsoAnalyzeTimeoutSeconds *int           `yaml:"iso_analyze_timeout_seconds" mapstructure:"iso_analyze_timeout_seconds" json:"iso_analyze_timeout_seconds,omitempty"`
+	ImportStrategy           ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
+	ImportDir                *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
+	WatchDir                 *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
+	WatchIntervalSeconds     *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
+	AllowNestedRarExtraction *bool          `yaml:"allow_nested_rar_extraction" mapstructure:"allow_nested_rar_extraction" json:"allow_nested_rar_extraction,omitempty"`
+	ExpandBlurayIso          *bool          `yaml:"expand_bluray_iso" mapstructure:"expand_bluray_iso" json:"expand_bluray_iso,omitempty"`
+	RenameToNzbName          *bool          `yaml:"rename_to_nzb_name" mapstructure:"rename_to_nzb_name" json:"rename_to_nzb_name,omitempty"`
+	FilterSampleFiles        *bool          `yaml:"filter_sample_files" mapstructure:"filter_sample_files" json:"filter_sample_files,omitempty"`
+	FailedItemRetentionHours *int           `yaml:"failed_item_retention_hours" mapstructure:"failed_item_retention_hours" json:"failed_item_retention_hours,omitempty"`
+	HistoryRetentionDays     *int           `yaml:"history_retention_days" mapstructure:"history_retention_days" json:"history_retention_days,omitempty"`
 	// DamagePolicy governs standalone video files whose fast-fail sweep finds
 	// SMALL confirmed damage (within the playback padding caps, see
 	// internal/holes): "tolerant" (default) imports them as degraded so
@@ -446,7 +444,7 @@ type ArrsConfig struct {
 	QueueCleanupGracePeriodMinutes int                  `yaml:"queue_cleanup_grace_period_minutes" mapstructure:"queue_cleanup_grace_period_minutes" json:"queue_cleanup_grace_period_minutes,omitempty"`
 
 	// QueueCleanupMaxFailures is the per-target failure circuit breaker. After
-	// AltMount has acted on the same target (a Radarr movie or Sonarr/Whisparr
+	// Tater Tube Server has acted on the same target (a Radarr movie or Sonarr/Whisparr
 	// episode that keeps failing import) this many times — via queue cleanup,
 	// health-repair re-searches or the partial-pack reconcile — it gives up:
 	// it blocklists without re-searching and unmonitors the item in the *arr so it
@@ -456,7 +454,7 @@ type ArrsConfig struct {
 	// QueueCleanupRules matches an *arr status message for a stuck/failed import and
 	// decides the action (remove / blocklist / blocklist+search). This is the single
 	// message-rule list for queue cleanup; ghost/empty-folder detection runs alongside
-	// it in the same pass. Only items owned by AltMount's download client are touched
+	// it in the same pass. Only items owned by Tater Tube Server's download client are touched
 	// (see issue #523).
 	QueueCleanupRules []StuckCleanupRule `yaml:"queue_cleanup_rules,omitempty" mapstructure:"queue_cleanup_rules" json:"queue_cleanup_rules,omitempty"`
 
@@ -623,11 +621,11 @@ func (c *Config) GetWebhookBaseURL() string {
 	if c.Arrs.WebhookBaseURL != "" {
 		return c.Arrs.WebhookBaseURL
 	}
-	host := c.WebDAV.Host
+	host := c.Server.Host
 	if host == "" {
-		host = "altmount"
+		host = "tater-tube-server"
 	}
-	return fmt.Sprintf("http://%s:%d", host, c.WebDAV.Port)
+	return fmt.Sprintf("http://%s:%d", host, c.Server.Port)
 }
 
 // GetDownloadClientBaseURL returns the configured download client base URL or a default one based on the current port.
@@ -635,17 +633,17 @@ func (c *Config) GetDownloadClientBaseURL() string {
 	if c.SABnzbd.DownloadClientBaseURL != "" {
 		return c.SABnzbd.DownloadClientBaseURL
 	}
-	host := c.WebDAV.Host
+	host := c.Server.Host
 	if host == "" {
-		host = "altmount"
+		host = "tater-tube-server"
 	}
-	return fmt.Sprintf("http://%s:%d/sabnzbd", host, c.WebDAV.Port)
+	return fmt.Sprintf("http://%s:%d/sabnzbd", host, c.Server.Port)
 }
 
 // Validate validates the configuration
 func (c *Config) Validate() error {
-	if c.WebDAV.Port <= 0 || c.WebDAV.Port > 65535 {
-		return fmt.Errorf("webdav port must be between 1 and 65535")
+	if c.Server.Port <= 0 || c.Server.Port > 65535 {
+		return fmt.Errorf("server port must be between 1 and 65535")
 	}
 
 	if c.Streaming.MaxPrefetch <= 0 {
@@ -1305,9 +1303,9 @@ func (m *Manager) ValidateConfigUpdate(newConfig *Config) error {
 	m.mutex.RUnlock()
 
 	if currentConfig != nil {
-		// Protect WebDAV port from API changes
-		if newConfig.WebDAV.Port != currentConfig.WebDAV.Port {
-			return fmt.Errorf("webdav port cannot be changed via API - requires server restart")
+		// Protect Server port from API changes
+		if newConfig.Server.Port != currentConfig.Server.Port {
+			return fmt.Errorf("server port cannot be changed via API - requires server restart")
 		}
 
 		// Protect database path from API changes
@@ -1465,33 +1463,31 @@ func DefaultConfig(configDir ...string) *Config {
 
 	// If a config directory is provided, use it
 	if len(configDir) > 0 && configDir[0] != "" {
-		dbPath = filepath.Join(configDir[0], "altmount.db")
+		dbPath = filepath.Join(configDir[0], "tater-tube-server.db")
 		metadataPath = filepath.Join(configDir[0], "metadata")
-		logPath = filepath.Join(configDir[0], "altmount.log")
+		logPath = filepath.Join(configDir[0], "tater-tube-server.log")
 		rclonePath = configDir[0]
 		cachePath = filepath.Join(configDir[0], "cache")
 		backupPath = filepath.Join(configDir[0], "backups")
 	} else if isRunningInDocker() {
-		dbPath = "/config/altmount.db"
+		dbPath = "/config/tater-tube-server.db"
 		metadataPath = "/metadata"
-		logPath = "/config/altmount.log"
+		logPath = "/config/tater-tube-server.log"
 		rclonePath = "/config"
 		cachePath = "/config/cache"
 		backupPath = "/config/backups"
 	} else {
-		dbPath = "./altmount.db"
+		dbPath = "./tater-tube-server.db"
 		metadataPath = "./metadata"
-		logPath = "./altmount.log"
+		logPath = "./tater-tube-server.log"
 		rclonePath = "."
 		cachePath = "./cache"
 		backupPath = "./backups"
 	}
 
 	return &Config{
-		WebDAV: WebDAVConfig{
-			Port:     8080,
-			User:     "usenet",
-			Password: "usenet",
+		Server: ServerConfig{
+			Port: 8080,
 		},
 		API: APIConfig{
 			Prefix: "/api",
@@ -1834,7 +1830,7 @@ func LoadConfig(configFile string) (*Config, error) {
 	// derive log file path from config file location
 	if configFile != "" && !viper.IsSet("log.file") {
 		configDir := filepath.Dir(configFile)
-		config.Log.File = filepath.Join(configDir, "altmount.log")
+		config.Log.File = filepath.Join(configDir, "tater-tube-server.log")
 	}
 
 	// If cache_dir was not explicitly set or is empty, derive it from config file location
@@ -1853,7 +1849,7 @@ func LoadConfig(configFile string) (*Config, error) {
 		if port <= 0 || port > 65535 {
 			return nil, fmt.Errorf("invalid PORT environment variable %d: must be between 1 and 65535", port)
 		}
-		config.WebDAV.Port = port
+		config.Server.Port = port
 		slog.Info("Using PORT from environment variable", "port", port)
 	}
 

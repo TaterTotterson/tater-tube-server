@@ -48,7 +48,7 @@ export interface QueueItem {
 	file_size?: number;
 	percentage?: number; // Progress percentage (0-100), only present for items being processed
 	stage?: string; // Human-readable stage label (e.g. "Validating segments"), injected client-side from live progress
-	storage_path?: string; // Internal FUSE mount path (populated after completion)
+	storage_path?: string; // Prepared stream storage path populated after completion
 	indexer?: string;
 }
 
@@ -149,22 +149,6 @@ export interface ImportStatusResponse {
 	skipped?: number;
 	last_error?: string;
 	migration_stats?: MigrationStats;
-}
-
-export interface NzbdavMigrateSymlinksRequest {
-	library_path: string;
-	source_mount_path: string;
-	dry_run: boolean;
-}
-
-export interface NzbdavMigrateSymlinksResponse {
-	scanned: number;
-	matched: number;
-	rewritten: number;
-	skipped_wrong_prefix?: number;
-	unmatched: string[];
-	errors: string[];
-	dry_run: boolean;
 }
 
 // Health types
@@ -445,14 +429,6 @@ export interface SystemBrowseResponse {
 	current_path: string;
 	parent_path: string;
 	files: FileEntry[];
-}
-
-// FUSE types
-export interface FuseStatus {
-	status: "stopped" | "starting" | "running" | "error";
-	path: string;
-	healthy?: boolean;
-	health_error?: string;
 }
 
 export interface ProviderHistoricalStat {

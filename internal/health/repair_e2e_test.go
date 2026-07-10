@@ -8,14 +8,14 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/javi11/altmount/internal/arrs"
-	"github.com/javi11/altmount/internal/arrs/model"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/importer"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/model"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
 	nntppool "github.com/javi11/nntppool/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -166,7 +166,6 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error, configure ...
 		metadataService,
 		&mockPoolManager{},
 		configManager.GetConfig,
-		&MockRcloneClient{},
 	)
 
 	hw := NewHealthWorker(

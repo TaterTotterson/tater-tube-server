@@ -11,11 +11,11 @@ import (
 	"runtime"
 	"time"
 
-	aescipher "github.com/javi11/altmount/internal/encryption/aes"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/usenet"
-	"github.com/javi11/altmount/internal/utils"
+	aescipher "github.com/TaterTotterson/tater-tube-server/internal/encryption/aes"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/usenet"
+	"github.com/TaterTotterson/tater-tube-server/internal/utils"
 )
 
 // Compile-time interface checks

@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/auth"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/httpclient"
+	"github.com/TaterTotterson/tater-tube-server/internal/prowlarr"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/javi11/altmount/internal/auth"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/httpclient"
-	"github.com/javi11/altmount/internal/prowlarr"
 )
 
 // stremioDownloadIDPrefix marks queue items originating from the Stremio addon.
@@ -92,10 +92,10 @@ func (s *Server) handleStremioManifest(c *fiber.Ctx) error {
 	slog.InfoContext(ctx, "Stremio addon manifest requested")
 
 	return c.JSON(stremioManifest{
-		ID:          "community.altmount",
+		ID:          "community.tater.usenet-streamer",
 		Version:     "1.0.0",
-		Name:        "AltMount Usenet",
-		Description: "Stream from Usenet via Prowlarr",
+		Name:        "Tater Tube Server",
+		Description: "Stream Usenet releases through Tater-themed Stremio endpoints",
 		Resources:   []string{"stream"},
 		Types:       []string{"movie", "series"},
 		Catalogs:    []any{},
@@ -262,8 +262,8 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 
 		meta := prowlarr.InferReleaseMeta(r.Title)
 
-		// Badge: "AltMount 🇪🇸 4K"
-		badge := "AltMount"
+		// Badge: "Tater 🇪🇸 4K"
+		badge := "Tater"
 		if meta.FlagEmoji != "" {
 			badge += " " + meta.FlagEmoji
 		}
@@ -403,7 +403,7 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 		workCtx := context.WithoutCancel(ctx)
 
 		// Unique per-request staging dir so concurrent plays never share a temp file.
-		uploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
+		uploadDir := filepath.Join(os.TempDir(), "tater-tube-server-uploads")
 		if err := os.MkdirAll(uploadDir, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create upload directory: %w", err)
 		}

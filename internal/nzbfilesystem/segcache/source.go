@@ -3,8 +3,8 @@ package segcache
 import (
 	"sync/atomic"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/usenet"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/usenet"
 )
 
 // Source is a thin wrapper around an atomic Manager pointer that resolves the

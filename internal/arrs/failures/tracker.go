@@ -1,6 +1,6 @@
 // Package failures holds the in-memory per-target failure counts behind the
 // arrs circuit breaker (arrs.queue_cleanup_max_failures). The tracker is shared
-// by every producer of AltMount→arr re-acquire requests — the queue-cleanup
+// by every producer of Tater Tube Server→arr re-acquire requests — the queue-cleanup
 // worker, the health-repair re-trigger and the partial-pack reconcile sweep — so
 // a target (a Radarr movie, a Sonarr/Whisparr episode, ...) that keeps failing
 // accumulates one combined count no matter which path acted on it. Counts are

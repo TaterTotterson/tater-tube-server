@@ -239,7 +239,7 @@ func (r *ImportMigrationRepository) DeletePendingBySource(ctx context.Context, s
 
 // DeleteAllBySource removes every migration row for a source regardless of
 // status. Returns the number of rows deleted. Use to force a full re-import
-// after the imported files have been deleted from AltMount.
+// after the imported files have been deleted from Tater Tube Server.
 func (r *ImportMigrationRepository) DeleteAllBySource(ctx context.Context, source string) (int64, error) {
 	res, err := r.db.ExecContext(ctx, `DELETE FROM import_migrations WHERE source = ?`, source)
 	if err != nil {

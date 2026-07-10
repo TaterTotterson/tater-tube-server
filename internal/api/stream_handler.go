@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
-	"github.com/javi11/altmount/internal/auth"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/nzbfilesystem"
-	"github.com/javi11/altmount/internal/utils"
+	"github.com/TaterTotterson/tater-tube-server/internal/auth"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzbfilesystem"
+	"github.com/TaterTotterson/tater-tube-server/internal/utils"
 	"github.com/spf13/afero"
 )
 
@@ -113,7 +113,6 @@ func (h *StreamHandler) authenticate(r *http.Request) (*database.User, bool) {
 	return nil, false
 }
 
-
 // GetHTTPHandler returns an http.Handler that serves files from NzbFilesystem
 // This handler:
 // - Requires authentication via download_key parameter
@@ -140,7 +139,7 @@ func (h *StreamHandler) GetHTTPHandler() http.Handler {
 func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Enrich context with request metadata (similar to WebDAV adapter)
+	// Enrich context with request metadata (similar to Server adapter)
 	ctx = context.WithValue(ctx, utils.ContentLengthKey, r.Header.Get("Content-Length"))
 	ctx = context.WithValue(ctx, utils.RangeKey, r.Header.Get("Range"))
 	ctx = context.WithValue(ctx, utils.Origin, r.RequestURI)

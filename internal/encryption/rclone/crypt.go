@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/javi11/altmount/internal/encryption"
-	"github.com/javi11/altmount/internal/usenet"
-	"github.com/javi11/altmount/internal/utils"
+	"github.com/TaterTotterson/tater-tube-server/internal/encryption"
+	"github.com/TaterTotterson/tater-tube-server/internal/usenet"
+	"github.com/TaterTotterson/tater-tube-server/internal/utils"
 )
 
 var (

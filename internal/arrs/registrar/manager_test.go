@@ -2,24 +2,23 @@ package registrar
 
 import "testing"
 
-func TestIsAltmountDownloadClient(t *testing.T) {
+func TestIsTaterTubeServerDownloadClient(t *testing.T) {
 	tests := []struct {
 		name string
 		want bool
 	}{
-		{AltmountDownloadClientName, true}, // exact registered name
-		{"Altmount", true},                // common manual name
-		{"altmount", true},                // lowercase
-		{"AltMount (SABnzbd)", true},
-		{"My AltMount SAB", true},
+		{TaterTubeServerDownloadClientName, true}, // exact registered name
+		{"tater-tube-server", true},               // slug
+		{"Tater Tube Server (SABnzbd)", true},
+		{"My Tater Tube Server SAB", true},
 		{"", false},
 		{"qBittorrent", false},
 		{"SABnzbd", false},
 		{"NZBGet", false},
 	}
 	for _, tt := range tests {
-		if got := IsAltmountDownloadClient(tt.name); got != tt.want {
-			t.Errorf("IsAltmountDownloadClient(%q) = %v, want %v", tt.name, got, tt.want)
+		if got := IsTaterTubeServerDownloadClient(tt.name); got != tt.want {
+			t.Errorf("IsTaterTubeServerDownloadClient(%q) = %v, want %v", tt.name, got, tt.want)
 		}
 	}
 }

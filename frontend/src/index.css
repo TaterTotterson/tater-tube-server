@@ -38,6 +38,41 @@
 		abyss;
 }
 
+@plugin "daisyui/theme" {
+	name: "tater";
+	default: true;
+	prefersdark: true;
+	color-scheme: dark;
+	--color-base-100: #090909;
+	--color-base-200: #141414;
+	--color-base-300: #24211f;
+	--color-base-content: #f7f0e8;
+	--color-primary: #ff6a00;
+	--color-primary-content: #130804;
+	--color-secondary: #f4efe6;
+	--color-secondary-content: #111111;
+	--color-accent: #ff2f00;
+	--color-accent-content: #160500;
+	--color-neutral: #1b1917;
+	--color-neutral-content: #f7f0e8;
+	--color-info: #7aa2ff;
+	--color-info-content: #071020;
+	--color-success: #62d17f;
+	--color-success-content: #041408;
+	--color-warning: #ffc857;
+	--color-warning-content: #1c1200;
+	--color-error: #ff4d45;
+	--color-error-content: #1b0503;
+	--radius-selector: 0.25rem;
+	--radius-field: 0.35rem;
+	--radius-box: 0.5rem;
+	--size-selector: 0.25rem;
+	--size-field: 0.25rem;
+	--border: 1px;
+	--depth: 0;
+	--noise: 0;
+}
+
 /* Minimal "dark" — near-black glass theme with muted accents. */
 @plugin "daisyui/theme" {
 	name: "glass-dark";
@@ -116,6 +151,28 @@
 }
 
 @plugin "@tailwindcss/typography";
+
+[data-theme="tater"] body {
+	background:
+		linear-gradient(rgba(255, 255, 255, 0.025) 50%, rgba(0, 0, 0, 0.045) 50%),
+		radial-gradient(circle at 50% 15%, rgba(255, 106, 0, 0.12), transparent 34%),
+		#090909;
+	background-size:
+		100% 4px,
+		100% 100%,
+		100% 100%;
+}
+
+[data-theme="tater"] .card {
+	box-shadow:
+		inset 0 0 0 1px rgba(255, 106, 0, 0.08),
+		0 16px 48px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="tater"] .navbar,
+[data-theme="tater"] .drawer-side aside {
+	background-color: rgba(12, 12, 12, 0.94);
+}
 
 /* Fix <fieldset> min-inline-size default that overflows containers on mobile */
 fieldset {

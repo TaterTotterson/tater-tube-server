@@ -3,7 +3,7 @@ package importer
 import (
 	"context"
 
-	"github.com/javi11/altmount/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
 )
 
 // QueueManager manages the import queue worker lifecycle
@@ -63,8 +63,6 @@ type ImportService interface {
 
 	// Close releases all resources
 	Close() error
-	// SetRcloneClient sets the rclone client for VFS notifications
-	SetRcloneClient(client any)
 	// SetArrsService sets the ARRs service for notifications
 	SetArrsService(service any)
 	// RegisterConfigChangeHandler registers a handler for configuration changes

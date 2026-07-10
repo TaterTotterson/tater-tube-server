@@ -31,11 +31,11 @@ export default defineConfig({
 			registerType: "prompt",
 			includeAssets: ["favicon.ico", "logo.png", "apple-touch-icon-180x180.png"],
 			manifest: {
-				name: "AltMount",
-				short_name: "AltMount",
-				description: "A NZB mounting application",
-				theme_color: "#1d1d1d",
-				background_color: "#1d1d1d",
+				name: "Tater Tube Server",
+				short_name: "Tater Server",
+				description: "A Tater-themed Usenet streaming backend.",
+				theme_color: "#090909",
+				background_color: "#090909",
 				display: "standalone",
 				start_url: "/",
 				icons: [
@@ -111,7 +111,7 @@ export default defineConfig({
 	define: {
 		__APP_VERSION__: JSON.stringify(getAppVersion()),
 		__GIT_COMMIT__: JSON.stringify(getGitCommit()),
-		__GITHUB_URL__: JSON.stringify("https://github.com/javi11/altmount"),
+		__GITHUB_URL__: JSON.stringify("https://github.com/TaterTotterson/tater-tube-server"),
 	},
 	server: {
 		port: 5173,
@@ -123,10 +123,6 @@ export default defineConfig({
 				ws: true,
 			},
 			"/sabnzbd": {
-				target: "http://localhost:8080",
-				changeOrigin: true,
-			},
-			"/webdav": {
 				target: "http://localhost:8080",
 				changeOrigin: true,
 			},

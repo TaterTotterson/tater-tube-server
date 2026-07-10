@@ -19,7 +19,7 @@ import (
 // lives at the unversioned /api/* paths (queue, history, pending-imports), so we
 // talk to those directly here.
 //
-// The main management value AltMount adds for Sportarr is queue cleanup; Sportarr
+// The main management value Tater Tube Server adds for Sportarr is queue cleanup; Sportarr
 // already self-imports finished downloads on its own poll interval.
 type Sportarr struct {
 	baseURL string
@@ -36,7 +36,7 @@ type SportarrStatusMessage struct {
 
 // sportarrRef holds a Sportarr API reference value that, depending on the
 // Sportarr build, serializes either as a bare string (older) or as an object
-// like {"id":1,"name":"AltMount",...} (current). Only the name is needed.
+// like {"id":1,"name":"Tater Tube Server",...} (current). Only the name is needed.
 // A custom unmarshaller keeps the queue decode from failing outright when the
 // shape changes between versions.
 type sportarrRef struct {
@@ -227,7 +227,7 @@ func (s *Sportarr) GetQueue(ctx context.Context) ([]SportarrQueueItem, error) {
 }
 
 // DeleteQueueItem removes a queue item, also instructing Sportarr to remove the
-// download from the (AltMount) download client. It does not blocklist.
+// download from the (Tater Tube Server) download client. It does not blocklist.
 func (s *Sportarr) DeleteQueueItem(ctx context.Context, id int64) error {
 	return s.deleteQueueItem(ctx, id, false)
 }

@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/parser"
 )
 
 // TestGroupArchivesReconcilesRepostedFirstVolume reproduces the real-world failure

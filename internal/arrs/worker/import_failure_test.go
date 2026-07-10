@@ -9,9 +9,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/javi11/altmount/internal/arrs/clients"
-	"github.com/javi11/altmount/internal/arrs/instances"
-	"github.com/javi11/altmount/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/clients"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/instances"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
 )
 
 // fakeSonarrQueue serves a fixed Sonarr queue and records deletes/unmonitors.
@@ -82,7 +82,7 @@ func newImportFailureTestWorker(serverURL string, maxFailures int) *Worker {
 
 func TestHandleImportFailure_CountsBelowThreshold(t *testing.T) {
 	fake := &fakeSonarrQueue{records: []map[string]any{
-		queueRecord(101, 42, "SABnzbd_nzo_abc", "AltMount"),
+		queueRecord(101, 42, "SABnzbd_nzo_abc", "Tater Tube Server"),
 	}}
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
@@ -100,7 +100,7 @@ func TestHandleImportFailure_CountsBelowThreshold(t *testing.T) {
 
 func TestHandleImportFailure_GivesUpAtThreshold(t *testing.T) {
 	fake := &fakeSonarrQueue{records: []map[string]any{
-		queueRecord(101, 42, "SABnzbd_nzo_abc", "AltMount"),
+		queueRecord(101, 42, "SABnzbd_nzo_abc", "Tater Tube Server"),
 	}}
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
@@ -124,8 +124,8 @@ func TestHandleImportFailure_GivesUpAtThreshold(t *testing.T) {
 
 func TestHandleImportFailure_PackUnmonitorsAllTrippedEpisodes(t *testing.T) {
 	fake := &fakeSonarrQueue{records: []map[string]any{
-		queueRecord(101, 42, "SABnzbd_nzo_pack", "AltMount"),
-		queueRecord(102, 43, "SABnzbd_nzo_pack", "AltMount"),
+		queueRecord(101, 42, "SABnzbd_nzo_pack", "Tater Tube Server"),
+		queueRecord(102, 43, "SABnzbd_nzo_pack", "Tater Tube Server"),
 	}}
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
@@ -169,7 +169,7 @@ func TestHandleImportFailure_Gates(t *testing.T) {
 
 	t.Run("unknown download id: counted nothing, deleted nothing", func(t *testing.T) {
 		fake := &fakeSonarrQueue{records: []map[string]any{
-			queueRecord(101, 42, "SABnzbd_nzo_other", "AltMount"),
+			queueRecord(101, 42, "SABnzbd_nzo_other", "Tater Tube Server"),
 		}}
 		srv := httptest.NewServer(fake.handler())
 		defer srv.Close()

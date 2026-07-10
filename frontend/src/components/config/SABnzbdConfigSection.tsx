@@ -57,7 +57,7 @@ export function SABnzbdConfigSection({
 
 	const registerDownloadClient = useRegisterArrsDownloadClients();
 	const testDownloadClient = useTestArrsDownloadClients();
-	const defaultDownloadClientUrl = `http://${config.webdav.host || "altmount"}:${config.webdav.port}/sabnzbd`;
+	const defaultDownloadClientUrl = `http://${config.server.host || "tater-tube-server"}:${config.server.port}/sabnzbd`;
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {

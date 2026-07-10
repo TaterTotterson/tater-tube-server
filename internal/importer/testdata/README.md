@@ -17,7 +17,7 @@ Binary archive fixtures for `TestImportBattery_*` tests in `internal/importer`.
 
 ## Why committed binaries?
 
-altmount's archive analyzers stream real bytes through `rardecode` and `sevenzip` libraries. There are no pure-Go RAR/7z writers, so fixtures cannot be generated programmatically. Store mode (`-m0` / `-mx=0`) is required because altmount rejects compressed entries.
+tater-tube-server's archive analyzers stream real bytes through `rardecode` and `sevenzip` libraries. There are no pure-Go RAR/7z writers, so fixtures cannot be generated programmatically. Store mode (`-m0` / `-mx=0`) is required because tater-tube-server rejects compressed entries.
 
 ## Regenerating
 

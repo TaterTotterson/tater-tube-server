@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/usenet"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/usenet"
 	"github.com/javi11/nzbparser"
 )
 

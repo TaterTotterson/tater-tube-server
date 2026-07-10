@@ -15,11 +15,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/auth"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/parser/fileinfo"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/utils/nzbtrim"
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/auth"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
-	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
 	"github.com/javi11/nzbparser"
 )
 
@@ -61,7 +61,7 @@ type StremioStream struct {
 }
 
 // StremioStreamsResponse is the response returned by the Stremio stream endpoint.
-// The _queue_item_id, _queue_status, and _cached fields are AltMount extensions that Stremio ignores.
+// The _queue_item_id, _queue_status, and _cached fields are Tater Tube Server extensions that Stremio ignores.
 type StremioStreamsResponse struct {
 	Streams     []StremioStream `json:"streams"`
 	QueueItemID int64           `json:"_queue_item_id"`
@@ -116,7 +116,7 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 		downloadKey = c.Query("download_key")
 	}
 	if downloadKey == "" {
-		// Accept raw API key via X-Api-Key header (AIOStreams sends altmountApiKey here).
+		// Accept raw API key via X-Api-Key header (AIOStreams sends taterTubeServerApiKey here).
 		// Hash it so validateDownloadKey can compare against the stored hash.
 		if rawKey := c.Get("X-Api-Key"); rawKey != "" {
 			if s.validateAPIKey(c, rawKey) {
@@ -219,7 +219,7 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 	}
 
 	// --- Derive stable names before touching the filesystem ---
-	uploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
+	uploadDir := filepath.Join(os.TempDir(), "tater-tube-server-uploads")
 	safeFilename := filepath.Base(nzbFilename)
 	nzbName := nzbtrim.TrimNzbExtension(safeFilename)
 	tempPath := filepath.Join(uploadDir, safeFilename)

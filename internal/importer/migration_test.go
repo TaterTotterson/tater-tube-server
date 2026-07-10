@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/javi11/altmount/internal/nzbfile"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzbfile"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

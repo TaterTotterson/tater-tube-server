@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/javi11/altmount/internal/importer/parser"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/parser"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
 	"github.com/javi11/rardecode/v2"
 )
 

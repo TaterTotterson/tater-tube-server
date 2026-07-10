@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/altmount/internal/testsupport/par2gen"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/fakepool"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/par2gen"
 	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/nzbparser"
 )

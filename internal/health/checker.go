@@ -4,17 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/holes"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/usenet"
-	"github.com/javi11/altmount/pkg/rclonecli"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/holes"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/usenet"
 	concpool "github.com/sourcegraph/conc/pool"
 )
 
@@ -53,7 +51,6 @@ type HealthChecker struct {
 	metadataService *metadata.MetadataService
 	poolManager     pool.Manager
 	configGetter    config.ConfigGetter
-	rcloneClient    rclonecli.RcloneRcClient // Optional rclone client for VFS notifications
 }
 
 // NewHealthChecker creates a new health checker
@@ -62,14 +59,12 @@ func NewHealthChecker(
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
-	rcloneClient rclonecli.RcloneRcClient,
 ) *HealthChecker {
 	return &HealthChecker{
 		healthRepo:      healthRepo,
 		metadataService: metadataService,
 		poolManager:     poolManager,
 		configGetter:    configGetter,
-		rcloneClient:    rcloneClient,
 	}
 }
 
@@ -349,52 +344,6 @@ func (hc *HealthChecker) CheckFilesBatch(ctx context.Context, filePaths []string
 		events[i] = hc.judgeValidation(ctx, preps[i], result, valErr)
 	}
 	return events
-}
-
-// NotifyRcloneVFS notifies rclone VFS about a file status change (async, non-blocking)
-func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
-	if hc.rcloneClient == nil {
-		return // No rclone client configured
-	}
-
-	// Only notify for rclone-based mounts; FUSE and none don't use rclone VFS
-	cfg := hc.configGetter()
-	switch cfg.MountType {
-	case config.MountTypeRClone, config.MountTypeRCloneExternal:
-		// continue
-	default:
-		return
-	}
-
-	// Only notify on significant status changes (healthy <-> corrupted)
-	switch event.Type {
-	case EventTypeFileHealthy, EventTypeFileCorrupted:
-		// Continue with notification
-	default:
-		return // No notification needed for other event types
-	}
-
-	// Start async notification
-	go func() {
-		// Extract directory path from file path for VFS refresh
-		virtualDir := filepath.Dir(filePath)
-
-		// Use background context with timeout for VFS notification
-		// Increased timeout to 60 seconds as vfs/refresh can be slow
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-
-		vfsName := cfg.RClone.VFSName
-		if vfsName == "" {
-			vfsName = config.MountProvider
-		}
-
-		// Refresh cache asynchronously to avoid blocking health checks
-		err := hc.rcloneClient.RefreshDir(ctx, vfsName, []string{virtualDir})
-		if err != nil {
-			slog.ErrorContext(ctx, "Failed to notify rclone VFS about file status change", "file", filePath, "event", event.Type, "err", err)
-		}
-	}()
 }
 
 type metadataSegmentLoader struct {

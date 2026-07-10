@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/auth"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/auth"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
 )
 
 // nzbJobName returns the display name for an NZB job by stripping the .nzb or .nzb.gz
@@ -30,9 +30,8 @@ func nzbJobName(nzbPath string) string {
 // ConfigAPIResponse wraps config.Config with sensitive data handling
 type ConfigAPIResponse struct {
 	*config.Config
-	WebDAV          WebDAVAPIResponse     `json:"webdav"`
+	Server          ServerAPIResponse     `json:"server"`
 	Import          ImportAPIResponse     `json:"import"`
-	RClone          RCloneAPIResponse     `json:"rclone"`
 	SABnzbd         SABnzbdAPIResponse    `json:"sabnzbd"`
 	Providers       []ProviderAPIResponse `json:"providers"`
 	Arrs            ArrsAPIResponse       `json:"arrs"`
@@ -42,75 +41,10 @@ type ConfigAPIResponse struct {
 	ProfilerEnabled bool                  `json:"profiler_enabled"`
 }
 
-// WebDAVAPIResponse sanitizes WebDAV config for API responses
-type WebDAVAPIResponse struct {
-	Port     int    `json:"port"`
-	User     string `json:"user"`
-	Password string `json:"password"` // Masked if set
-	Host     string `json:"host"`
-}
-
-// RCloneAPIResponse sanitizes RClone config for API responses
-type RCloneAPIResponse struct {
-	// Encryption
-	PasswordSet bool `json:"password_set"`
-	SaltSet     bool `json:"salt_set"`
-
-	// RC (Remote Control) Configuration
-
-	RCEnabled bool `json:"rc_enabled"`
-
-	RCUrl string `json:"rc_url"`
-
-	VFSName string `json:"vfs_name"`
-
-	RCPort int `json:"rc_port"`
-
-	RCUser    string            `json:"rc_user"`
-	RCPassSet bool              `json:"rc_pass_set"`
-	RCOptions map[string]string `json:"rc_options"`
-
-	// Mount Configuration
-	MountEnabled bool              `json:"mount_enabled"`
-	MountOptions map[string]string `json:"mount_options"`
-
-	// Mount-Specific Settings
-	AllowOther    bool   `json:"allow_other"`
-	AllowNonEmpty bool   `json:"allow_non_empty"`
-	Links         bool   `json:"links"`
-	ReadOnly      bool   `json:"read_only"`
-	Timeout       string `json:"timeout"`
-	Syslog        bool   `json:"syslog"`
-
-	// System and filesystem options
-	LogLevel    string `json:"log_level"`
-	UID         int    `json:"uid"`
-	GID         int    `json:"gid"`
-	Umask       string `json:"umask"`
-	BufferSize  string `json:"buffer_size"`
-	AttrTimeout string `json:"attr_timeout"`
-	Transfers   int    `json:"transfers"`
-
-	// VFS Cache Settings
-	CacheDir              string `json:"cache_dir"`
-	VFSCacheMode          string `json:"vfs_cache_mode"`
-	VFSCachePollInterval  string `json:"vfs_cache_poll_interval"`
-	VFSReadChunkSize      string `json:"vfs_read_chunk_size"`
-	VFSReadChunkSizeLimit string `json:"vfs_read_chunk_size_limit"`
-	VFSCacheMaxSize       string `json:"vfs_cache_max_size"`
-	VFSCacheMaxAge        string `json:"vfs_cache_max_age"`
-	VFSReadAhead          string `json:"vfs_read_ahead"`
-	DirCacheTime          string `json:"dir_cache_time"`
-	VFSCacheMinFreeSpace  string `json:"vfs_cache_min_free_space"`
-	VFSDiskSpaceTotal     string `json:"vfs_disk_space_total"`
-	VFSReadChunkStreams   int    `json:"vfs_read_chunk_streams"`
-
-	// Advanced Settings
-	NoModTime          bool `json:"no_mod_time"`
-	NoChecksum         bool `json:"no_checksum"`
-	AsyncRead          bool `json:"async_read"`
-	VFSFastFingerprint bool `json:"vfs_fast_fingerprint"`
-	UseMmap            bool `json:"use_mmap"`
+// ServerAPIResponse exposes the HTTP server bind configuration.
+type ServerAPIResponse struct {
+	Port int    `json:"port"`
+	Host string `json:"host"`
 }
 
 // ProviderAPIResponse sanitizes Provider config for API responses
@@ -258,59 +192,6 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		}
 	}
 
-	// Create RClone response with all configuration fields
-	rcloneResp := RCloneAPIResponse{
-		PasswordSet:  cfg.RClone.Password != "",
-		SaltSet:      cfg.RClone.Salt != "",
-		RCEnabled:    cfg.RClone.RCEnabled != nil && *cfg.RClone.RCEnabled,
-		RCUrl:        cfg.RClone.RCUrl,
-		VFSName:      cfg.RClone.VFSName,
-		RCPort:       cfg.RClone.RCPort,
-		RCUser:       cfg.RClone.RCUser,
-		RCPassSet:    cfg.RClone.RCPass != "",
-		RCOptions:    cfg.RClone.RCOptions,
-		MountEnabled: cfg.RClone.MountEnabled != nil && *cfg.RClone.MountEnabled,
-		MountOptions: cfg.RClone.MountOptions,
-
-		// Mount-Specific Settings
-		AllowOther:    cfg.RClone.AllowOther,
-		AllowNonEmpty: cfg.RClone.AllowNonEmpty,
-		Links:         cfg.RClone.Links,
-		ReadOnly:      cfg.RClone.ReadOnly,
-		Timeout:       cfg.RClone.Timeout,
-		Syslog:        cfg.RClone.Syslog,
-
-		// System and filesystem options
-		LogLevel:    cfg.RClone.LogLevel,
-		UID:         cfg.RClone.UID,
-		GID:         cfg.RClone.GID,
-		Umask:       cfg.RClone.Umask,
-		BufferSize:  cfg.RClone.BufferSize,
-		AttrTimeout: cfg.RClone.AttrTimeout,
-		Transfers:   cfg.RClone.Transfers,
-
-		// VFS Cache Settings
-		CacheDir:              cfg.RClone.CacheDir,
-		VFSCacheMode:          cfg.RClone.VFSCacheMode,
-		VFSCachePollInterval:  cfg.RClone.VFSCachePollInterval,
-		VFSReadChunkSize:      cfg.RClone.VFSReadChunkSize,
-		VFSReadChunkSizeLimit: cfg.RClone.VFSReadChunkSizeLimit,
-		VFSCacheMaxSize:       cfg.RClone.VFSCacheMaxSize,
-		VFSCacheMaxAge:        cfg.RClone.VFSCacheMaxAge,
-		VFSReadAhead:          cfg.RClone.VFSReadAhead,
-		DirCacheTime:          cfg.RClone.DirCacheTime,
-		VFSCacheMinFreeSpace:  cfg.RClone.VFSCacheMinFreeSpace,
-		VFSDiskSpaceTotal:     cfg.RClone.VFSDiskSpaceTotal,
-		VFSReadChunkStreams:   cfg.RClone.VFSReadChunkStreams,
-
-		// Advanced Settings
-		NoModTime:          cfg.RClone.NoModTime,
-		NoChecksum:         cfg.RClone.NoChecksum,
-		AsyncRead:          cfg.RClone.AsyncRead,
-		VFSFastFingerprint: cfg.RClone.VFSFastFingerprint,
-		UseMmap:            cfg.RClone.UseMmap,
-	}
-
 	// Create SABnzbd response with API key obfuscated
 	fallbackAPIKey := ""
 	if cfg.SABnzbd.FallbackAPIKey != "" {
@@ -328,11 +209,9 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		FallbackAPIKeySet:       cfg.SABnzbd.FallbackAPIKey != "",
 	}
 
-	webdavResp := WebDAVAPIResponse{
-		Port:     cfg.WebDAV.Port,
-		User:     cfg.WebDAV.User,
-		Password: "********", // Mask password
-		Host:     cfg.WebDAV.Host,
+	serverResp := ServerAPIResponse{
+		Port: cfg.Server.Port,
+		Host: cfg.Server.Host,
 	}
 
 	downloadKey := ""
@@ -393,9 +272,8 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 
 	return &ConfigAPIResponse{
 		Config:          cfg,
-		WebDAV:          webdavResp,
+		Server:          serverResp,
 		Import:          ToImportAPIResponse(cfg.Import),
-		RClone:          rcloneResp,
 		SABnzbd:         sabnzbdResp,
 		Providers:       providers,
 		Arrs:            arrsResp,

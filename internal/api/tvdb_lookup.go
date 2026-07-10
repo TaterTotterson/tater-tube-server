@@ -38,7 +38,7 @@ func resolveTVDBFromIMDb(ctx context.Context, imdbID string) (string, error) {
 		return "", fmt.Errorf("create TVDB lookup request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "altmount-stremio-tvdb-lookup")
+	req.Header.Set("User-Agent", "tater-tube-server-stremio-tvdb-lookup")
 
 	resp, err := tvmazeLookupClient.Do(req)
 	if err != nil {

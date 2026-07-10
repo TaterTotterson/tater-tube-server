@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzbfilesystem/segcache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -162,4 +162,3 @@ func TestCacheCatalogSurvivesMissingSegFiles(t *testing.T) {
 	assert.True(t, c2.Has("good@msg"))
 	assert.False(t, c2.Has("bad@msg"), "entry with missing seg file should be dropped on reload")
 }
-

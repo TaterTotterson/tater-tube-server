@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/nzb"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzb"
 )
 
 // buildStoreNZB renders a minimal store-backed NZB (no <head>), mirroring what

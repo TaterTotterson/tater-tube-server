@@ -12,16 +12,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/arrs"
-	"github.com/javi11/altmount/internal/arrs/model"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/holes"
-	"github.com/javi11/altmount/internal/importer"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/progress"
-	"github.com/javi11/altmount/internal/utils"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/model"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/holes"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/progress"
+	"github.com/TaterTotterson/tater-tube-server/internal/utils"
 	"github.com/sourcegraph/conc/pool"
 	"golang.org/x/sync/singleflight"
 )
@@ -753,9 +753,6 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string)
 		hw.broadcastHealthChanged()
 	}
 
-	// Notify rclone VFS about the status change
-	hw.healthChecker.notifyRcloneVFS(filePath, event)
-
 	// Update stats
 	hw.updateStats(func(s *WorkerStats) {
 		s.TotalFilesChecked++
@@ -899,9 +896,6 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 			resultsMu.Lock()
 			results = append(results, *updatePtr)
 			resultsMu.Unlock()
-
-			// Notify VFS
-			hw.healthChecker.notifyRcloneVFS(fh.FilePath, event)
 
 			// Update cycle progress stats
 			hw.updateStats(func(s *WorkerStats) {
@@ -1167,16 +1161,16 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, metadataStr)
 	if err != nil {
 		// ErrEpisodeAlreadySatisfied is an ID-based confirmation from the ARR (Smart Repair
-		// Guard) that this title was upgraded/replaced by a *different* file, so the AltMount
+		// Guard) that this title was upgraded/replaced by a *different* file, so the Tater Tube Server
 		// copy is genuinely redundant and safe to remove.
 		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) {
-			slog.WarnContext(ctx, "File replaced by a different file in ARR, removing redundant copy from AltMount",
+			slog.WarnContext(ctx, "File replaced by a different file in ARR, removing redundant copy from Tater Tube Server",
 				"file_path", filePath, "arr_error", err)
 			hw.cleanupZombieRecord(ctx, item)
 			return repairOutcomeDeleted, nil
 		}
 
-		// ErrPathMatchFailed only means AltMount could not match its rescan path against the
+		// ErrPathMatchFailed only means Tater Tube Server could not match its rescan path against the
 		// ARR library/queue. The ARR routinely renames and reorganizes imported files (symlink
 		// libraries, custom naming), so a path miss is NOT a reliable orphan signal: treating
 		// it as one deletes the user's library symlink and the underlying virtual file. Leave
@@ -1210,7 +1204,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 		"file_path", filePath,
 		"path_for_rescan", pathForRescan)
 
-	// Move the metadata file to the corrupted folder so FUSE/WebDAV stops showing it.
+	// Move the metadata file to the corrupted folder so FUSE/Server stops showing it.
 	// CRITICAL: We only do this if the file has already been imported (has a LibraryPath).
 	// If it hasn't been imported yet, we keep it visible so ARR can see the "Missing File"
 	// or "Empty Folder" and report its own warning, which helps the repair cycle.
@@ -1237,10 +1231,10 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath, metadataStr)
 	if err != nil {
 		// See triggerFileRepair: only an ID-confirmed replacement (ErrEpisodeAlreadySatisfied)
-		// justifies deleting the AltMount copy. ErrPathMatchFailed is an ambiguous path miss
+		// justifies deleting the Tater Tube Server copy. ErrPathMatchFailed is an ambiguous path miss
 		// (e.g. an ARR-renamed library) and must not delete the user's library file.
 		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) {
-			slog.WarnContext(ctx, "File replaced by a different file in ARR, removing redundant copy from AltMount",
+			slog.WarnContext(ctx, "File replaced by a different file in ARR, removing redundant copy from Tater Tube Server",
 				"file_path", filePath, "arr_error", err)
 			hw.cleanupZombieRecord(ctx, item)
 			return repairOutcomeDeleted, nil

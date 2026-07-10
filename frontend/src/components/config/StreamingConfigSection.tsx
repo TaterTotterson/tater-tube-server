@@ -65,7 +65,7 @@ export function StreamingConfigSection({
 			<div>
 				<h3 className="font-bold text-base-content text-lg">Playback Tuning</h3>
 				<p className="text-base-content/50 text-sm">
-					Optimize how AltMount streams media to your players.
+					Optimize how Tater Tube Server sends media to your players.
 				</p>
 			</div>
 
@@ -133,8 +133,8 @@ export function StreamingConfigSection({
 					Cache decoded Usenet segments on disk so repeated reads avoid network round-trips.
 				</p>
 				<p className="mt-1 text-base-content/60 text-sm">
-					The segment cache applies regardless of the mount option chosen. It is recommended to
-					disable it if rclone VFS cache is also enabled.
+					The segment cache applies to direct stream playback and can help repeated reads avoid
+					network round-trips.
 				</p>
 			</div>
 
@@ -144,7 +144,7 @@ export function StreamingConfigSection({
 					<div className="min-w-0">
 						<h4 className="font-bold text-base-content text-sm">Enable Segment Cache</h4>
 						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-							When enabled, decoded segments are stored on disk and shared by FUSE and WebDAV.
+							When enabled, decoded segments are stored on disk and reused by the streaming engine.
 						</p>
 					</div>
 					<input
@@ -172,7 +172,7 @@ export function StreamingConfigSection({
 								className="input input-bordered w-full"
 								value={cacheData.cache_path}
 								disabled={isReadOnly}
-								placeholder="/tmp/altmount-segcache"
+								placeholder="/tmp/tater-tube-server-cache"
 								onChange={(e) => handleCacheChange("cache_path", e.target.value)}
 							/>
 						</div>

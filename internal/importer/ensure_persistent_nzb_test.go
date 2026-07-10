@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
 )
 
 // newMinimalServiceForPersistTest builds just enough of *Service to exercise
@@ -103,8 +103,8 @@ func TestEnsurePersistentNzb_UsesOSTempQueueDir(t *testing.T) {
 	// always runs even if an assertion fails).
 	t.Cleanup(func() { os.Remove(item.NzbPath) })
 
-	// Assert: item.NzbPath must be inside os.TempDir()/.altmount-queue/
-	expected := filepath.Join(os.TempDir(), ".altmount-queue")
+	// Assert: item.NzbPath must be inside os.TempDir()/.tater-tube-server-queue/
+	expected := filepath.Join(os.TempDir(), ".tater-tube-server-queue")
 	assert.True(t, strings.HasPrefix(item.NzbPath, expected),
 		"expected OS temp queue dir prefix %q, got %q", expected, item.NzbPath)
 	assert.False(t, strings.Contains(item.NzbPath, ".nzbs"),
@@ -117,7 +117,7 @@ func TestEnsurePersistentNzb_UsesOSTempQueueDir(t *testing.T) {
 
 func TestEnsurePersistentNzb_AlreadyInTempQueueDir_IsNoop(t *testing.T) {
 	// Arrange: NZB is already in the target queue dir — should be a no-op.
-	queueDir := filepath.Join(os.TempDir(), ".altmount-queue")
+	queueDir := filepath.Join(os.TempDir(), ".tater-tube-server-queue")
 	require.NoError(t, os.MkdirAll(queueDir, 0755))
 
 	existingPath := filepath.Join(queueDir, "movie.nzb")

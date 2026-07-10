@@ -1,18 +1,16 @@
 import {
 	Activity,
-	AlertTriangle,
 	Bug,
 	Database,
 	ExternalLink,
-	Folder,
-	Heart,
 	Home,
 	List,
 	ScrollText,
 	Settings,
+	Tv,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
-import { useHealthStats, useQueueStats } from "../../hooks/useApi";
+import { useQueueStats } from "../../hooks/useApi";
 import { useAuth } from "../../hooks/useAuth";
 
 const navigation = [
@@ -25,16 +23,6 @@ const navigation = [
 		name: "Queue",
 		href: "/queue",
 		icon: List,
-	},
-	{
-		name: "Health",
-		href: "/health",
-		icon: Heart,
-	},
-	{
-		name: "Files",
-		href: "/files",
-		icon: Folder,
 	},
 	{
 		name: "Logs",
@@ -52,7 +40,6 @@ const navigation = [
 export function Sidebar() {
 	const { user, loginRequired } = useAuth();
 	const { data: queueStats } = useQueueStats();
-	const { data: healthStats } = useHealthStats();
 
 	const visibleNavigation = navigation.filter(
 		(item) => !item.adminOnly || !loginRequired || (user?.is_admin ?? false),
@@ -62,8 +49,6 @@ export function Sidebar() {
 		switch (path) {
 			case "/queue":
 				return queueStats ? queueStats.total_processing + queueStats.total_failed : 0;
-			case "/health":
-				return healthStats ? healthStats.corrupted : 0;
 			default:
 				return 0;
 		}
@@ -78,8 +63,6 @@ export function Sidebar() {
 				}
 				return queueStats && queueStats.total_processing > 0 ? "badge-warning" : "badge-info";
 			}
-			case "/health":
-				return "badge-warning";
 			default:
 				return "badge-info";
 		}
@@ -92,11 +75,15 @@ export function Sidebar() {
 				<div className="mb-8 flex items-center space-x-3">
 					<div className="avatar placeholder">
 						<div className="flex h-12 w-12 items-center justify-center overflow-hidden">
-							<img src="/logo.png" alt="AltMount Logo" className="h-12 w-12 object-contain" />
+							<img
+								src="/logo.png"
+								alt="Tater Tube Server"
+								className="h-12 w-12 object-contain"
+							/>
 						</div>
 					</div>
 					<div>
-						<h2 className="font-bold text-lg">AltMount</h2>
+						<h2 className="font-bold text-lg leading-tight">Tater Streamer</h2>
 					</div>
 				</div>
 
@@ -132,8 +119,8 @@ export function Sidebar() {
 					<div className="space-y-4">
 						<div className="flex items-center justify-between">
 							<div className="flex items-center space-x-2">
-								<Activity className="h-4 w-4 text-success" />
-								<span className="text-sm">Status</span>
+								<Tv className="h-4 w-4 text-primary" />
+								<span className="text-sm">Streamer</span>
 							</div>
 							<div className="badge badge-success badge-sm">Online</div>
 						</div>
@@ -162,15 +149,13 @@ export function Sidebar() {
 							</div>
 						)}
 
-						{healthStats && healthStats.corrupted > 0 && (
-							<div className="flex items-center justify-between">
-								<div className="flex items-center space-x-2">
-									<AlertTriangle className="h-4 w-4 text-error" />
-									<span className="text-sm">Issues</span>
-								</div>
-								<div className="text-error text-sm">{healthStats.corrupted}</div>
+						<div className="flex items-center justify-between">
+							<div className="flex items-center space-x-2">
+								<Activity className="h-4 w-4 text-success" />
+								<span className="text-sm">Status</span>
 							</div>
-						)}
+							<div className="text-base-content/70 text-sm">ready</div>
+						</div>
 					</div>
 				</div>
 

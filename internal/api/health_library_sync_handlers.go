@@ -3,8 +3,8 @@ package api
 import (
 	"log/slog"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/health"
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/health"
 )
 
 // LibrarySyncHandlers holds the library sync-related request handlers

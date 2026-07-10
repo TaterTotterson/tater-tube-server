@@ -1,6 +1,5 @@
-// Package postprocessor handles all post-import processing steps including
-// symlink creation, STRM file generation, VFS notifications, health check
-// scheduling, and ARR notifications.
+// Package postprocessor handles post-import processing steps including symlink
+// creation, STRM file generation, health check scheduling, and ARR notifications.
 package postprocessor
 
 import (
@@ -9,14 +8,12 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
-	"time"
 
-	"github.com/javi11/altmount/internal/arrs"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/errors"
-	"github.com/javi11/altmount/internal/metadata"
-	"github.com/javi11/altmount/pkg/rclonecli"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/errors"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
 )
 
 // Coordinator orchestrates all post-import processing steps
@@ -24,7 +21,6 @@ type Coordinator struct {
 	mu              sync.RWMutex
 	configGetter    config.ConfigGetter
 	metadataService *metadata.MetadataService
-	rcloneClient    rclonecli.RcloneRcClient
 	healthRepo      *database.HealthRepository
 	arrsService     *arrs.Service
 	userRepo        *database.UserRepository
@@ -35,7 +31,6 @@ type Coordinator struct {
 type Config struct {
 	ConfigGetter    config.ConfigGetter
 	MetadataService *metadata.MetadataService
-	RcloneClient    rclonecli.RcloneRcClient
 	HealthRepo      *database.HealthRepository
 	ArrsService     *arrs.Service
 	UserRepo        *database.UserRepository
@@ -46,19 +41,11 @@ func NewCoordinator(cfg Config) *Coordinator {
 	return &Coordinator{
 		configGetter:    cfg.ConfigGetter,
 		metadataService: cfg.MetadataService,
-		rcloneClient:    cfg.RcloneClient,
 		healthRepo:      cfg.HealthRepo,
 		arrsService:     cfg.ArrsService,
 		userRepo:        cfg.UserRepo,
 		log:             slog.Default().With("component", "postprocessor"),
 	}
-}
-
-// SetRcloneClient updates the rclone client (called when config changes)
-func (c *Coordinator) SetRcloneClient(client rclonecli.RcloneRcClient) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.rcloneClient = client
 }
 
 // SetArrsService updates the ARRs service (called after initialization)
@@ -72,7 +59,6 @@ func (c *Coordinator) SetArrsService(service *arrs.Service) {
 type ProcessingResult struct {
 	SymlinksCreated bool
 	StrmCreated     bool
-	VFSNotified     bool
 	HealthScheduled bool
 	ARRNotified     bool
 	Errors          []error
@@ -83,26 +69,12 @@ type ProcessingResult struct {
 // resultingPath); multi-file imports (season packs) get a per-file health check.
 func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string, writtenPaths []string) (*ProcessingResult, error) {
 	c.mu.RLock()
-	rcloneClient := c.rcloneClient
 	arrsService := c.arrsService
 	c.mu.RUnlock()
 
 	result := &ProcessingResult{}
 
-	// 1. Notify VFS (blocking to ensure visibility)
-	c.notifyVFSWith(ctx, rcloneClient, resultingPath, false)
-	result.VFSNotified = true
-
-	// Small delay to allow FUSE mount propagation through kernel and into other containers
-	// This helps prevent race conditions where Sonarr tries to probe the file before it's visible.
-	select {
-	case <-ctx.Done():
-		return result, ctx.Err()
-	case <-time.After(1 * time.Second):
-		// Continue
-	}
-
-	// 2 & 3. Create symlinks and STRM files if configured
+	// Create symlinks and STRM files if configured
 	if shouldSkipPostImportLinks(item) {
 		c.log.DebugContext(ctx, "Skipping symlink/STRM creation (post-import links disabled)",
 			"queue_id", item.ID,
@@ -129,7 +101,7 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 		}
 	}
 
-	// 4. Schedule health check
+	// Schedule health check
 	if err := c.ScheduleHealthCheck(ctx, item, resultingPath, writtenPaths); err != nil {
 		c.log.WarnContext(ctx, "Failed to schedule health check",
 			"path", resultingPath,
@@ -139,7 +111,7 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 		result.HealthScheduled = true
 	}
 
-	// 5. Notify ARR applications
+	// Notify ARR applications
 	if shouldSkipARRNotification(item) {
 		c.log.DebugContext(ctx, "ARR notification skipped (requested by caller)",
 			"queue_id", item.ID,

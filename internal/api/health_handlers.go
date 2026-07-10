@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/utils"
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/utils"
 )
 
 // handleListHealth handles GET /api/health
@@ -1435,7 +1435,7 @@ func (s *Server) handleRegenerateLibraryFiles(c *fiber.Ctx) error {
 		var creationErr error
 		if cfg.Import.ImportStrategy == config.ImportStrategySTRM {
 			if s.importerService != nil && s.importerService.GetPostProcessor() != nil {
-				creationErr = s.importerService.GetPostProcessor().CreateSingleStrmFile(ctx, libraryPath, file.FilePath, cfg.WebDAV.Port)
+				creationErr = s.importerService.GetPostProcessor().CreateSingleStrmFile(ctx, libraryPath, file.FilePath, cfg.Server.Port)
 			} else {
 				creationErr = fmt.Errorf("importer service or post-processor not available")
 			}

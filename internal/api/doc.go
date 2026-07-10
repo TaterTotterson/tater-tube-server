@@ -1,12 +1,10 @@
-// Package api provides the AltMount REST API.
+// Package api provides the Tater Tube Server REST API.
 //
-//	@title			AltMount API
+//	@title			Tater Tube Server API
 //	@version		1.0
-//	@description	REST API for AltMount — Usenet WebDAV server with NZB queue, health monitoring, ARR integration, FUSE/rclone mounting, and Stremio addon.
-//	@termsOfService	http://altmount.kipsilabs.top
+//	@description	REST API for Tater Tube Server — Usenet/NZB stream preparation, queue management, provider setup, and Stremio-compatible playback.
 //
-//	@contact.name	AltMount
-//	@contact.url	https://github.com/javi11/altmount/issues
+//	@contact.name	Tater Tube
 //
 //	@license.name	MIT
 //
@@ -37,8 +35,6 @@
 //	@tag.description	Configuration management
 //	@tag.name			System
 //	@tag.description	System stats, health, and maintenance
-//	@tag.name			FUSE
-//	@tag.description	FUSE mount management
 //	@tag.name			Stremio
 //	@tag.description	Stremio addon and NZB stream endpoints
 //	@tag.name			Auth

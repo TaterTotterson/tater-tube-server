@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// SymlinkLookup looks up the final AltMount path for a given source and external ID.
+// SymlinkLookup looks up the final Tater Tube Server path for a given source and external ID.
 type SymlinkLookup interface {
 	LookupFinalPath(ctx context.Context, source, externalID string) (finalPath string, found bool, err error)
 	MarkSymlinksMigrated(ctx context.Context, ids []int64) error
@@ -17,25 +17,25 @@ type SymlinkLookup interface {
 
 // RewriteReport summarizes results of a symlink rewrite operation.
 type RewriteReport struct {
-	Scanned             int
-	Matched             int
-	Rewritten           int
-	SkippedWrongPrefix  int      // symlinks whose target didn't point at sourceMountPath/.ids/ — usually a misconfigured mount path
-	Unmatched           []string // symlink paths that had no matching migration row
-	Errors              []string // errors encountered (non-fatal)
+	Scanned            int
+	Matched            int
+	Rewritten          int
+	SkippedWrongPrefix int      // symlinks whose target didn't point at sourceMountPath/.ids/ — usually a misconfigured mount path
+	Unmatched          []string // symlink paths that had no matching migration row
+	Errors             []string // errors encountered (non-fatal)
 }
 
 // RewriteLibrarySymlinks walks libraryPath, finds symlinks (real OS symlinks or
 // rclone .rclonelink text files) whose target starts with sourceMountPath+"/.ids/",
 // looks up the GUID in the lookup, and rewrites the target to
-// filepath.Join(altmountPath, finalPath).
+// filepath.Join(serverPath, finalPath).
 //
 // If dryRun is true, no filesystem changes are made but the report is populated.
 func RewriteLibrarySymlinks(
 	ctx context.Context,
 	libraryPath string,
 	sourceMountPath string,
-	altmountPath string,
+	serverPath string,
 	source string,
 	lookup SymlinkLookup,
 	dryRun bool,
@@ -116,7 +116,7 @@ func RewriteLibrarySymlinks(
 		}
 
 		// Build the new target path.
-		newTarget := filepath.Join(altmountPath, strings.TrimPrefix(finalPath, "/"))
+		newTarget := filepath.Join(serverPath, strings.TrimPrefix(finalPath, "/"))
 
 		if isSymlink {
 			// Atomic rewrite via temp file + rename.

@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/arrs/clients"
-	"github.com/javi11/altmount/internal/arrs/data"
-	"github.com/javi11/altmount/internal/arrs/failures"
-	"github.com/javi11/altmount/internal/arrs/instances"
-	"github.com/javi11/altmount/internal/arrs/model"
-	"github.com/javi11/altmount/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/clients"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/data"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/failures"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/instances"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/model"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"golang.org/x/sync/singleflight"
 	"golift.io/starr"
 	"golift.io/starr/lidarr"
@@ -723,7 +723,7 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 						sceneName = movie.MovieFile.SceneName
 					} else {
 						// Re-added movie holds a DIFFERENT healthy file. Deleting it would
-						// destroy a good file; report satisfied so the redundant AltMount copy
+						// destroy a good file; report satisfied so the redundant Tater Tube Server copy
 						// is cleaned up without any delete against Radarr.
 						slog.InfoContext(ctx, "Radarr TMDB-id fallback found a different healthy file; not deleting",
 							"instance", instanceName, "tmdb_id", metadata.Movie.TmdbId,

@@ -71,7 +71,7 @@ temp/
 **/.nyc_output/
 
 # Databases and runtime
-altmount.db*
+tater-tube-server.db*
 
 # Docker
 **/docker-compose*.yml

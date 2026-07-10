@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -51,7 +51,7 @@ func newFailedFolderTestService(t *testing.T) (*Service, string) {
 		log: slog.Default(),
 		configGetter: func() *config.Config {
 			return &config.Config{
-				Database: config.DatabaseConfig{Path: filepath.Join(configDir, "altmount.db")},
+				Database: config.DatabaseConfig{Path: filepath.Join(configDir, "tater-tube-server.db")},
 			}
 		},
 	}

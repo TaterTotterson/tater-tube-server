@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -115,7 +115,7 @@ func TestCreateStrmFiles_HostConfiguration(t *testing.T) {
 				Metadata: config.MetadataConfig{
 					RootPath: metadataDir,
 				},
-				WebDAV: config.WebDAVConfig{
+				Server: config.ServerConfig{
 					Port: 8080,
 					Host: tt.host,
 				},

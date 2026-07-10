@@ -12,8 +12,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/javi11/altmount/internal/httpclient"
-	"github.com/javi11/altmount/internal/nzbfile"
+	"github.com/TaterTotterson/tater-tube-server/internal/httpclient"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzbfile"
 )
 
 // SABnzbdClient handles communication with external SABnzbd instances

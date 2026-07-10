@@ -23,14 +23,12 @@ import { AuthConfigSection } from "../components/config/AuthConfigSection";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
-import { MountConfigSection } from "../components/config/MountConfigSection";
 import { NetworkConfigSection } from "../components/config/NetworkConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
 import { StremioConfigSection } from "../components/config/StremioConfigSection";
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
-import { WebDAVConfigSection } from "../components/config/WebDAVConfigSection";
 import { ImportConfigSection } from "../components/config/WorkersConfigSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
@@ -39,10 +37,8 @@ import { useConfirm } from "../contexts/ModalContext";
 import { useAuth } from "../hooks/useAuth";
 import {
 	useConfig,
-	useLibrarySyncNeeded,
 	useReloadConfig,
 	useRestartServer,
-	useTriggerLibrarySync,
 	useUpdateConfigSection,
 } from "../hooks/useConfig";
 import type {
@@ -60,7 +56,6 @@ import type {
 	SegmentCacheConfig,
 	StreamingConfig,
 	StremioConfig,
-	WebDAVConfig,
 } from "../types/config";
 import { CONFIG_SECTIONS } from "../types/config";
 
@@ -87,22 +82,26 @@ const getIconComponent = (iconName: string) => {
 // Define section groups for modern organization
 const SECTION_GROUPS = [
 	{
-		title: "Core Services",
-		sections: ["webdav", "mount", "providers"],
+		title: "Streamer",
+		sections: ["stremio", "providers", "streaming"],
 	},
 	{
-		title: "Media Management",
-		sections: ["metadata", "streaming"],
+		title: "Processing",
+		sections: ["import", "metadata"],
 	},
 	{
-		title: "Automation",
-		sections: ["sabnzbd", "arrs", "health", "stremio", "import"],
+		title: "Access",
+		sections: ["auth", "network"],
 	},
 	{
 		title: "System",
-		sections: ["auth", "network", "system"],
+		sections: ["system"],
 	},
 ];
+
+const STREAMER_CONFIG_SECTIONS = new Set<ConfigSection | "system">(
+	SECTION_GROUPS.flatMap((group) => group.sections) as (ConfigSection | "system")[],
+);
 
 export function ConfigurationPage() {
 	const { data: config, isLoading, error, refetch } = useConfig();
@@ -110,33 +109,28 @@ export function ConfigurationPage() {
 	const restartServer = useRestartServer();
 	const updateConfigSection = useUpdateConfigSection();
 	const { recheckAuth } = useAuth();
-	const { data: syncNeeded } = useLibrarySyncNeeded();
-	const triggerLibrarySync = useTriggerLibrarySync();
 	const { confirmAction } = useConfirm();
 	const navigate = useNavigate();
 	const { section } = useParams<{ section: string }>();
 
-	// Get active section from URL parameter, default to webdav
+	// Get active section from URL parameter, default to Stremio setup.
 	const activeSection = (() => {
-		if (!section) return "webdav";
-		// Redirect legacy rclone/fuse paths to mount
-		if (section === "rclone" || section === "fuse") return "mount" as ConfigSection;
+		if (!section) return "stremio";
 		// NZBLNK settings now live inside the Network section
 		if (section === "nzblnk") return "network" as ConfigSection;
-		const validSections = Object.keys(CONFIG_SECTIONS) as (ConfigSection | "system")[];
-		return validSections.includes(section as ConfigSection | "system")
+		return STREAMER_CONFIG_SECTIONS.has(section as ConfigSection | "system")
 			? (section as ConfigSection | "system")
-			: "webdav";
+			: "stremio";
 	})();
 
-	// Redirect to default section if no section is specified, or legacy paths
+	// Redirect to default section if no section is specified, or hidden legacy paths are requested.
 	useEffect(() => {
 		if (!section) {
-			navigate("/config/webdav", { replace: true });
-		} else if (section === "rclone" || section === "fuse") {
-			navigate("/config/mount", { replace: true });
+			navigate("/config/stremio", { replace: true });
 		} else if (section === "nzblnk") {
 			navigate("/config/network", { replace: true });
+		} else if (!STREAMER_CONFIG_SECTIONS.has(section as ConfigSection | "system")) {
+			navigate("/config/stremio", { replace: true });
 		}
 	}, [section, navigate]);
 
@@ -204,15 +198,7 @@ export function ConfigurationPage() {
 	// biome-ignore lint/suspicious/noExplicitAny: accepts various config types
 	const handleConfigUpdate = async (section: string, data: any) => {
 		try {
-			if (section === "webdav" && config) {
-				const webdavData = data as unknown as WebDAVConfig;
-				const portChanged = webdavData.port !== config.webdav.port;
-				await updateConfigSection.mutateAsync({
-					section: "webdav",
-					config: { webdav: webdavData },
-				});
-				if (portChanged) addRestartRequiredConfig("WebDAV Port");
-			} else if (section === "auth") {
+			if (section === "auth") {
 				await updateConfigSection.mutateAsync({
 					section: "auth",
 					config: { auth: data as unknown as AuthConfig },
@@ -242,11 +228,6 @@ export function ConfigurationPage() {
 					config: { metadata: metadataData },
 				});
 				if (rootPathChanged) addRestartRequiredConfig("Metadata Root Path");
-			} else if (section === "mount") {
-				await updateConfigSection.mutateAsync({
-					section: "mount",
-					config: data,
-				});
 			} else if (section === "sabnzbd") {
 				await updateConfigSection.mutateAsync({
 					section: "sabnzbd",
@@ -344,7 +325,7 @@ export function ConfigurationPage() {
 							Configuration
 						</h1>
 						<p className="text-base-content/60 text-xs sm:text-sm">
-							System settings and preferences.
+							Streamer setup and service settings.
 						</p>
 					</div>
 				</div>
@@ -381,24 +362,6 @@ export function ConfigurationPage() {
 				onDismiss={handleDismissRestartBanner}
 				isDismissed={isRestartBannerDismissed}
 			/>
-
-			{syncNeeded?.needs_sync && (
-				<div className="alert alert-warning rounded-2xl border border-warning/20 bg-warning/5 shadow-sm">
-					<AlertTriangle className="h-6 w-6" />
-					<div className="flex-1">
-						<div className="font-bold">Library Sync Required</div>
-						<div className="text-sm opacity-80">Mount path has been updated. Update symlinks?</div>
-					</div>
-					<button
-						type="button"
-						className="btn btn-primary btn-sm px-6"
-						onClick={() => triggerLibrarySync.mutate()}
-						disabled={triggerLibrarySync.isPending}
-					>
-						{triggerLibrarySync.isPending ? <LoadingSpinner size="sm" /> : "Run Now"}
-					</button>
-				</div>
-			)}
 
 			<div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
 				{/* Modern Sidebar (Stacks on mobile, exactly like Import) */}
@@ -477,13 +440,6 @@ export function ConfigurationPage() {
 							<div
 								className={`mx-auto w-full min-w-0 ${activeSection === "providers" ? "max-w-none" : "max-w-4xl"}`}
 							>
-								{activeSection === "webdav" && (
-									<WebDAVConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
 								{activeSection === "auth" && (
 									<AuthConfigSection
 										config={config}
@@ -529,13 +485,6 @@ export function ConfigurationPage() {
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
-								{activeSection === "mount" && (
-									<MountConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
 								{activeSection === "sabnzbd" && (
 									<SABnzbdConfigSection
 										config={config}
@@ -572,14 +521,12 @@ export function ConfigurationPage() {
 									/>
 								)}
 								{![
-									"webdav",
 									"auth",
 									"import",
 									"metadata",
 									"streaming",
 									"system",
 									"providers",
-									"mount",
 									"sabnzbd",
 									"arrs",
 									"health",

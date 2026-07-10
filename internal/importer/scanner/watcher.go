@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/importer/utils/nzbtrim"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer/utils/nzbtrim"
 )
 
 // WatchQueueAdder interface for adding items to the import queue from directory watcher
@@ -19,7 +19,6 @@ type WatchQueueAdder interface {
 	AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority, metadata *string, downloadID *string, indexer *string) (*database.ImportQueueItem, error)
 	IsFileInQueue(ctx context.Context, filePath string) (bool, error)
 }
-
 
 // Watcher handles monitoring a directory for new NZB files
 type Watcher struct {

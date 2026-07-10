@@ -7,9 +7,9 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/holes"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/holes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -122,8 +122,8 @@ func TestPrepareUpdateForResultDeleteOnCorruption(t *testing.T) {
 	require.NoError(t, env.metadataService.WriteFileMetadata(filePath, meta))
 
 	fh := database.FileHealth{
-		FilePath:  filePath,
-		Status:    database.HealthStatusPending,
+		FilePath:   filePath,
+		Status:     database.HealthStatusPending,
 		RetryCount: 99,
 	}
 	event := HealthEvent{

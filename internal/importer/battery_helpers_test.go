@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/testsupport/fakepool"
-	"github.com/javi11/altmount/internal/testsupport/nzbbuild"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/fakepool"
+	"github.com/TaterTotterson/tater-tube-server/internal/testsupport/nzbbuild"
 	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/nzbparser"
 )
@@ -26,7 +26,7 @@ type batteryEnv struct {
 	cfg       *config.Config
 	proc      *Processor
 	metaRoot  string
-	configDir string // temp dir used as the config directory (Database.Path = configDir/altmount.db)
+	configDir string // temp dir used as the config directory (Database.Path = configDir/tater-tube-server.db)
 }
 
 // newBatteryEnv creates a fresh test environment backed by an in-memory fakepool.
@@ -38,7 +38,7 @@ func newBatteryEnv(t *testing.T) *batteryEnv {
 	metaRoot := t.TempDir()
 	configDir := t.TempDir()
 	cfg := config.DefaultConfig()
-	cfg.Database.Path = filepath.Join(configDir, "altmount.db")
+	cfg.Database.Path = filepath.Join(configDir, "tater-tube-server.db")
 	cfg.Import.SegmentSamplePercentage = 100
 	cfg.Import.AllowedFileExtensions = append(cfg.Import.AllowedFileExtensions, ".bin")
 	svc := metadata.NewMetadataService(metaRoot)

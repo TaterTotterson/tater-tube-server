@@ -9,23 +9,22 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs"
+	"github.com/TaterTotterson/tater-tube-server/internal/auth"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/health"
+	"github.com/TaterTotterson/tater-tube-server/internal/importer"
+	"github.com/TaterTotterson/tater-tube-server/internal/metadata"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzbfilesystem"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzbfilesystem/segcache"
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
+	"github.com/TaterTotterson/tater-tube-server/internal/progress"
+	"github.com/TaterTotterson/tater-tube-server/internal/updater"
+	"github.com/TaterTotterson/tater-tube-server/internal/version"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/gofiber/fiber/v2/middleware/recover"
-	"github.com/javi11/altmount/internal/arrs"
-	"github.com/javi11/altmount/internal/auth"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/health"
-	"github.com/javi11/altmount/internal/importer"
-	"github.com/javi11/altmount/internal/metadata"
-	"github.com/javi11/altmount/internal/nzbfilesystem"
-	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
-	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/progress"
-	"github.com/javi11/altmount/internal/rclone"
-	"github.com/javi11/altmount/internal/updater"
-	"github.com/javi11/altmount/internal/version"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -57,11 +56,9 @@ type Server struct {
 	importerService     *importer.Service
 	poolManager         pool.Manager
 	arrsService         *arrs.Service
-	mountService        *rclone.MountService
 	startTime           time.Time
 	progressBroadcaster *progress.ProgressBroadcaster
 	streamTracker       *StreamTracker
-	fuseManager         *FuseManager
 	cacheSource         *segcache.Source
 	logFilePath         string
 	migrationRepo       *database.ImportMigrationRepository
@@ -89,7 +86,6 @@ func NewServer(
 	poolManager pool.Manager,
 	importService *importer.Service,
 	arrsService *arrs.Service,
-	mountService *rclone.MountService,
 	progressBroadcaster *progress.ProgressBroadcaster,
 	streamTracker *StreamTracker,
 	cacheSource *segcache.Source,
@@ -111,13 +107,11 @@ func NewServer(
 		importerService:     importService, // Will be set later via SetImporterService
 		poolManager:         poolManager,
 		arrsService:         arrsService,
-		mountService:        mountService,
 		startTime:           time.Now(),
 		progressBroadcaster: progressBroadcaster,
 		streamTracker:       streamTracker,
 		cacheSource:         cacheSource,
 		speedtest:           newSpeedtestCoordinator(),
-		fuseManager:         NewFuseManager(newMountFactory(nzbFilesystem, configManager, streamTracker)),
 		updater:             updater.Default(),
 	}
 
@@ -183,6 +177,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/import/file", s.handleManualImportFile)
 	api.Post("/arrs/webhook", s.handleArrsWebhook)
 	api.Post("/nzb/streams", s.handleNzbStreams)
+	api.Get("/tater/server", s.handleTaterServerInfo)
+	api.Post("/tater/usenet/streams", s.handleNzbStreams)
 
 	cfg := s.configManager.GetConfig()
 
@@ -230,15 +226,6 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 			api.Use(auth.RequireAuthWithSkip(tokenService, s.userRepo, skipPaths))
 		}
 	}
-
-	// NZBDav Imports (now protected by JWT auth)
-	api.Post("/import/nzbdav", s.handleImportNzbdav)
-	api.Post("/import/nzbdav/reset", s.handleResetNzbdavImportStatus)
-	api.Get("/import/nzbdav/status", s.handleGetNzbdavImportStatus)
-	api.Delete("/import/nzbdav", s.handleCancelNzbdavImport)
-	api.Delete("/import/nzbdav/pending-migrations", s.handleClearPendingNzbdavMigrations)
-	api.Delete("/import/nzbdav/migrations", s.handleClearAllNzbdavMigrations)
-	api.Post("/import/nzbdav/migrate-symlinks", s.handleMigrateNzbdavSymlinks)
 
 	// Queue endpoints
 	api.Get("/queue", s.handleListQueue)
@@ -330,12 +317,6 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/config/reload", s.handleReloadConfig)
 	api.Post("/config/validate", s.handleValidateConfig)
 
-	// FUSE endpoints
-	api.Post("/fuse/start", s.handleStartFuseMount)
-	api.Post("/fuse/stop", s.handleStopFuseMount)
-	api.Post("/fuse/force-stop", s.handleForceStopFuseMount)
-	api.Get("/fuse/status", s.handleGetFuseStatus)
-
 	// Provider management endpoints
 	api.Post("/providers/test", s.handleTestProvider)
 	api.Post("/providers/:id/speedtest", s.handleTestProviderSpeed)
@@ -384,9 +365,6 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 
 // Shutdown shuts down the API server and its managed resources
 func (s *Server) Shutdown(ctx context.Context) {
-	if s.fuseManager != nil {
-		s.fuseManager.Stop()
-	}
 	if s.speedtest != nil {
 		s.speedtest.shutdown()
 	}
@@ -415,8 +393,7 @@ func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 	if filterType == "file" {
 		filteredStreams := make([]nzbfilesystem.ActiveStream, 0)
 		for _, stream := range streams {
-			// Assuming "API" and "WebDAV" are the desired "file being streams"
-			if stream.Source == "API" || stream.Source == "WebDAV" {
+			if stream.Source == "API" || stream.Source == "Stremio" {
 				filteredStreams = append(filteredStreams, stream)
 			}
 		}

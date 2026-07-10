@@ -58,7 +58,7 @@ export function LoginPage() {
 				<Logo width={48} height={48} />
 				<div className="text-center">
 					<h2 className="mt-6 font-extrabold text-3xl text-base-content">
-						{showRegister ? "Create Admin Account" : "Sign in to Altmount"}
+						{showRegister ? "Create Admin Account" : "Sign in to Tater Tube Server"}
 					</h2>
 					<p className="mt-2 text-base-content/70 text-sm">
 						{hasConnectionError

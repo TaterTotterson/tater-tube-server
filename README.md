@@ -1,104 +1,76 @@
-# AltMount
+# Tater Tube Server
 
 <p align="center">
-  <img src="./docs/static/img/logo.png" alt="AltMount Logo" width="150" height="150" />
+  <img src="./frontend/public/tater-tube-logo.png" alt="Tater Tube" width="520" />
 </p>
 
-A WebDAV server backed by NZB/Usenet that provides seamless access to Usenet content through standard WebDAV protocols.
+Tater Tube Server is the backend foundation for Tater Tube. The first supported
+server role is Usenet/NZB streaming: take an NZB, prepare it, and return
+streamable playback URLs that Tater Tube or Stremio-compatible clients can play.
 
-<p align="center">
-  <a href="https://discord.gg/vCWwuvm3F3"><img src="https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white&style=for-the-badge" alt="Discord" /></a>
-</p>
+This project keeps the Stremio addon and direct NZB stream endpoint from
+AltMount, then trims the app down around streaming setup, provider
+configuration, queue status, logs, and system settings. WebDAV, FUSE, and
+rclone mount workflows have been removed from the app.
 
-[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/qbt52hh7sjd)
+## What It Keeps
 
-## 📖 Documentation
+- Stremio addon manifest and stream endpoints.
+- Direct NZB-to-stream endpoint at `POST /api/nzb/streams`.
+- NNTP provider configuration.
+- Queue/import processing used to prepare streams.
+- Direct media stream URLs through `/api/files/stream`.
+- Tater-styled web UI with mascot artwork.
 
-**[View Full Documentation →](https://javi11.github.io/altmount/)**
+## Backend Direction
 
-Complete setup guides, configuration options, API reference, and troubleshooting information.
+The original AltMount project is a full virtual filesystem application. Tater
+Tube Server is intended to become a normal media backend instead: Tater Tube can
+ask it what Usenet-backed titles are playable, then launch stream URLs from that
+server. For now, the working surface is the stream endpoint and Stremio addon.
 
-## Quick Start
+## Basic Flow
 
-### Docker (Recommended)
+1. Start the server.
+2. Open the web UI.
+3. Add at least one NNTP provider under `Configuration -> NNTP Providers`.
+4. Enable Stremio under `Configuration -> Stremio Integration`.
+5. Copy the addon URL from the dashboard or Stremio settings.
+6. Install that URL in Stremio.
 
-```bash
-services:
-  altmount:
-    extra_hosts:
-      - "host.docker.internal:host-gateway" # Optional if you rclone is outside the container
-    image: ghcr.io/javi11/altmount:latest
-    container_name: altmount
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - PORT=8080
-      - JWT_SECRET=change-me-to-a-strong-random-secret # Required when login is enabled (auth.login_required: true)
-      - COOKIE_DOMAIN=localhost # Must match the domain/IP where web interface is accessed
-    volumes:
-      - ./config:/config
-      - /mnt:/mnt:rshared
-      - /metadata:/metadata # This is optional you can still use /mnt
-      - /var/run/docker.sock:/var/run/docker.sock # Required for the auto-update feature
-    group_add:
-      - "999" # GID of the docker group on the host (run `getent group docker | cut -d: -f3` to find yours)
-    ports:
-      - "8080:8080"
-    restart: unless-stopped
-    devices:
-      - /dev/fuse:/dev/fuse:rwm
-    cap_add:
-      - SYS_ADMIN
-    security_opt:
-      - apparmor:unconfined
-```
-
-### CLI Installation
+## Local Development
 
 ```bash
-go install github.com/javi11/altmount@latest
-altmount serve --config config.yaml
+go run ./cmd/tater-tube-server serve --config ./config.yaml
 ```
 
-## Windows: Enable Long Path Support
+Frontend development:
 
-The Windows AltMount binaries are built with a long-path-aware manifest, which
-opts the process in to paths longer than the legacy `MAX_PATH` (260 character)
-limit. However, Windows also requires the matching system-wide setting to be
-enabled before long paths actually work — without it, you may see errors like
-`The filename or extension is too long` when accessing deeply nested releases.
-
-Enable it once per machine in an **elevated PowerShell** prompt (Run as
-administrator), then restart AltMount:
-
-```powershell
-New-ItemProperty `
-  -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
-  -Name "LongPathsEnabled" `
-  -Value 1 `
-  -PropertyType DWORD `
-  -Force
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
-Equivalent via Group Policy: `Computer Configuration → Administrative Templates
-→ System → Filesystem → Enable Win32 long paths`.
+The frontend dev server proxies API requests to `http://localhost:8080`.
 
-This setting requires Windows 10 version 1607 (build 14393) or newer. A reboot
-is not strictly required, but any already-running process — including AltMount
-and your file manager — needs to be restarted to pick up the change.
+## Docker
 
-## Links
+The release workflow publishes a multi-architecture image to GitHub Container
+Registry:
 
-- 📚 [Documentation](https://altmount.kipsilabs.top)
-- 🐛 [Issues](https://github.com/javi11/altmount/issues)
-- 💬 [Discussions](https://github.com/javi11/altmount/discussions)
-- 🎮 [Discord](https://discord.gg/vCWwuvm3F3)
+```bash
+docker pull ghcr.io/tatertotterson/tater-tube-server:latest
+```
 
-## Contributing
+The included `docker-compose.yml` uses the same image by default.
 
-See the [Development Guide](https://altmount.kipsilabs.top/docs/Development/setup). Development/setup for information on setting up a development environment and contributing to the project.
+## Credits
+
+This project is based on [javi11/altmount](https://github.com/javi11/altmount).
+The streaming internals, queue/import pipeline, and Stremio endpoint foundation
+come from that project.
 
 ## License
 
-This project is licensed under the terms specified in the [LICENSE](LICENSE) file.
- 
+This project keeps the upstream license terms in [LICENSE](LICENSE).

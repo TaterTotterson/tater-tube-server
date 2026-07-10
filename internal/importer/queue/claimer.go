@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
 	"github.com/avast/retry-go/v4"
-	"github.com/javi11/altmount/internal/database"
 )
 
 // QueueRepository defines the interface for queue database operations

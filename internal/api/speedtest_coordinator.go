@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"github.com/javi11/nntppool/v4"
 	"golang.org/x/sync/singleflight"
 )

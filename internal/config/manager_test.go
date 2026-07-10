@@ -18,11 +18,11 @@ func TestConfig_Validate_MountPaths(t *testing.T) {
 			name: "mount type fuse - ok",
 			config: &Config{
 				MountType: MountTypeFuse,
-				MountPath: "/mnt/remotes/altmount",
+				MountPath: "/mnt/remotes/tater-tube-server",
 				Metadata: MetadataConfig{
 					RootPath: "/metadata",
 				},
-				WebDAV: WebDAVConfig{
+				Server: ServerConfig{
 					Port: 8080,
 				},
 				Streaming: StreamingConfig{
@@ -48,11 +48,11 @@ func TestConfig_Validate_MountPaths(t *testing.T) {
 			name: "mount type rclone - ok",
 			config: &Config{
 				MountType: MountTypeRClone,
-				MountPath: "/mnt/remotes/altmount",
+				MountPath: "/mnt/remotes/tater-tube-server",
 				Metadata: MetadataConfig{
 					RootPath: "/metadata",
 				},
-				WebDAV: WebDAVConfig{
+				Server: ServerConfig{
 					Port: 8080,
 				},
 				Streaming: StreamingConfig{
@@ -81,7 +81,7 @@ func TestConfig_Validate_MountPaths(t *testing.T) {
 				Metadata: MetadataConfig{
 					RootPath: "/metadata",
 				},
-				WebDAV: WebDAVConfig{
+				Server: ServerConfig{
 					Port: 8080,
 				},
 				Streaming: StreamingConfig{
@@ -127,7 +127,7 @@ func TestConfig_Validate_QueueCleanupRuleAction(t *testing.T) {
 		return &Config{
 			MountType: MountTypeNone,
 			Metadata:  MetadataConfig{RootPath: "/metadata"},
-			WebDAV:    WebDAVConfig{Port: 8080},
+			Server:    ServerConfig{Port: 8080},
 			Streaming: StreamingConfig{MaxPrefetch: 30},
 			Import: ImportConfig{
 				MaxProcessorWorkers:            2,
@@ -173,7 +173,7 @@ func TestConfig_GetWebhookBaseURL(t *testing.T) {
 				Arrs: ArrsConfig{
 					WebhookBaseURL: "http://custom:1234",
 				},
-				WebDAV: WebDAVConfig{
+				Server: ServerConfig{
 					Port: 8080,
 				},
 			},
@@ -185,11 +185,11 @@ func TestConfig_GetWebhookBaseURL(t *testing.T) {
 				Arrs: ArrsConfig{
 					WebhookBaseURL: "",
 				},
-				WebDAV: WebDAVConfig{
+				Server: ServerConfig{
 					Port: 8080,
 				},
 			},
-			expected: "http://altmount:8080",
+			expected: "http://tater-tube-server:8080",
 		},
 		{
 			name: "default with port 8084",
@@ -197,11 +197,11 @@ func TestConfig_GetWebhookBaseURL(t *testing.T) {
 				Arrs: ArrsConfig{
 					WebhookBaseURL: "",
 				},
-				WebDAV: WebDAVConfig{
+				Server: ServerConfig{
 					Port: 8084,
 				},
 			},
-			expected: "http://altmount:8084",
+			expected: "http://tater-tube-server:8084",
 		},
 	}
 
@@ -224,7 +224,7 @@ func TestConfig_GetDownloadClientBaseURL(t *testing.T) {
 				SABnzbd: SABnzbdConfig{
 					DownloadClientBaseURL: "http://custom:1234/sab",
 				},
-				WebDAV: WebDAVConfig{
+				Server: ServerConfig{
 					Port: 8080,
 				},
 			},
@@ -236,11 +236,11 @@ func TestConfig_GetDownloadClientBaseURL(t *testing.T) {
 				SABnzbd: SABnzbdConfig{
 					DownloadClientBaseURL: "",
 				},
-				WebDAV: WebDAVConfig{
+				Server: ServerConfig{
 					Port: 8080,
 				},
 			},
-			expected: "http://altmount:8080/sabnzbd",
+			expected: "http://tater-tube-server:8080/sabnzbd",
 		},
 		{
 			name: "default with port 8084",
@@ -248,11 +248,11 @@ func TestConfig_GetDownloadClientBaseURL(t *testing.T) {
 				SABnzbd: SABnzbdConfig{
 					DownloadClientBaseURL: "",
 				},
-				WebDAV: WebDAVConfig{
+				Server: ServerConfig{
 					Port: 8084,
 				},
 			},
-			expected: "http://altmount:8084/sabnzbd",
+			expected: "http://tater-tube-server:8084/sabnzbd",
 		},
 	}
 

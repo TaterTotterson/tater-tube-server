@@ -3,7 +3,7 @@ package model
 import (
 	"fmt"
 
-	"github.com/javi11/altmount/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
 )
 
 var (

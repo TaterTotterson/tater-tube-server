@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/arrs/clients"
-	"github.com/javi11/altmount/internal/arrs/failures"
-	"github.com/javi11/altmount/internal/arrs/instances"
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/database"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/clients"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/failures"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/instances"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
 	"golift.io/starr"
 )
 
@@ -36,7 +36,7 @@ type Worker struct {
 	firstSeen   map[string]time.Time
 	firstSeenMu sync.RWMutex
 
-	// breaker counts how many times AltMount has acted on a given target (an
+	// breaker counts how many times Tater Tube Server has acted on a given target (an
 	// episode/movie/album/book that keeps failing import), keyed by a stable
 	// identity that survives re-grabs. The tracker is shared with the scanner so
 	// queue-cleanup actions and repair re-triggers accumulate one combined count.
@@ -226,7 +226,7 @@ func (w *Worker) captureSportarrIndexer(ctx context.Context, downloadID, indexer
 }
 
 // checkGhostByImportHistory checks if a queue item has already been imported
-// by looking up AltMount's import history. Returns true if confirmed ghost
+// by looking up Tater Tube Server's import history. Returns true if confirmed ghost
 // (i.e., the file has been moved to the library).
 func (w *Worker) checkGhostByImportHistory(ctx context.Context, outputPath string, cfg *config.Config, instanceName, title string) bool {
 	if outputPath == "" {

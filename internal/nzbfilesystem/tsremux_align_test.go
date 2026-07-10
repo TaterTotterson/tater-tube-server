@@ -5,7 +5,7 @@ import (
 	"io"
 	"testing"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	metapb "github.com/TaterTotterson/tater-tube-server/internal/metadata/proto"
 )
 
 // buildTwoClipMeta builds a synthetic byte-concatenation of two clips of BDAV

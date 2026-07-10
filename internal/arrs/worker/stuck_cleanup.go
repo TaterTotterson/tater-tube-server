@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/arrs/failures"
-	"github.com/javi11/altmount/internal/arrs/model"
-	"github.com/javi11/altmount/internal/arrs/registrar"
-	"github.com/javi11/altmount/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/failures"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/model"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/registrar"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"golift.io/starr"
 	"golift.io/starr/radarr"
 	"golift.io/starr/sonarr"
@@ -38,7 +38,7 @@ type stuckItem struct {
 	Unmonitor func(ctx context.Context) error
 }
 
-// CleanupStuckQueue scans every enabled *arr instance for items AltMount sent that
+// CleanupStuckQueue scans every enabled *arr instance for items Tater Tube Server sent that
 // are stuck importing for a known reason, then removes and blocklists them so the
 // release is not grabbed again and the *arr searches for a replacement.
 //
@@ -131,7 +131,7 @@ func stuckRuleFor(item stuckItem, cfg *config.Config) *config.StuckCleanupRule {
 	return matchStuckRule(item.Messages, cfg.Arrs.QueueCleanupRules)
 }
 
-// selectStuckActions filters AltMount-owned queue items to those that should be
+// selectStuckActions filters Tater Tube Server-owned queue items to those that should be
 // cleaned now, carrying each item's action. Ghost/empty-folder items (already
 // imported, or source path gone) are removed first, grace-free. The remainder are
 // matched against the message rules: an item must have been observed stuck for the
@@ -145,9 +145,9 @@ func (w *Worker) selectStuckActions(ctx context.Context, instance *model.ConfigI
 	maxFailures := cfg.Arrs.QueueCleanupMaxFailures
 
 	for _, item := range items {
-		// Only ever touch items owned by AltMount's download client — other
-		// clients may reference paths AltMount cannot see (see issue #523).
-		if !registrar.IsAltmountDownloadClient(item.DownloadClient) {
+		// Only ever touch items owned by Tater Tube Server's download client — other
+		// clients may reference paths Tater Tube Server cannot see (see issue #523).
+		if !registrar.IsTaterTubeServerDownloadClient(item.DownloadClient) {
 			continue
 		}
 
@@ -238,7 +238,7 @@ func (w *Worker) applyBreaker(ctx context.Context, item stuckItem, baseAction st
 }
 
 // starrDeleteOpts maps a stuck action to starr queue-delete options. The item is
-// always removed from AltMount's download client. blocklist blocks the release;
+// always removed from Tater Tube Server's download client. blocklist blocks the release;
 // SkipRedownload is false only for blocklist_search so the *arr re-searches.
 func starrDeleteOpts(action string) *starr.QueueDeleteOpts {
 	removeFromClient := true
@@ -501,7 +501,7 @@ func (w *Worker) cleanupStuckSportarr(ctx context.Context, instance *model.Confi
 	items := make([]stuckItem, 0, len(queue))
 	for _, q := range queue {
 		// Capture the indexer from Sportarr's native queue. Sportarr is not
-		// starr-compatible, so AltMount cannot auto-register its Grab/Import webhook
+		// starr-compatible, so Tater Tube Server cannot auto-register its Grab/Import webhook
 		// (the path that supplies the indexer for Radarr/Sonarr/etc.). Its native queue
 		// record is the only place the indexer is exposed, so persist it here against
 		// the download ID — otherwise these imports show up in indexer health as

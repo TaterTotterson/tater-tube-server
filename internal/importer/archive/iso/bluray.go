@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/javi11/altmount/internal/progress"
+	"github.com/TaterTotterson/tater-tube-server/internal/progress"
 )
 
 // MainFeaturePlaylist is the result of analysing a Blu-ray's BDMV.

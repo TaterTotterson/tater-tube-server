@@ -5,10 +5,10 @@
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1d1d1d" />
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f0e8" />
-    <title>AltMount</title>
-    <meta name="description" content="A nzb mounting application" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#090909" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#090909" />
+    <title>Tater Tube Server</title>
+    <meta name="description" content="A Tater-themed Usenet streaming bridge for Stremio." />
     <!-- Theme detection script - must run before React -->
     <script>
       (function() {
@@ -19,14 +19,14 @@
         const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 
         // Apply theme: saved preference > system preference > default (retro)
-        const theme = savedTheme || (prefersDark ? 'business' : 'retro');
+        const theme = savedTheme || 'tater';
         document.documentElement.setAttribute('data-theme', theme);
 
         // Listen for system theme changes
         window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
           if (!localStorage.getItem('theme')) {
             // Only auto-switch if user hasn't set a manual preference
-            document.documentElement.setAttribute('data-theme', e.matches ? 'business' : 'retro');
+            document.documentElement.setAttribute('data-theme', 'tater');
           }
         });
       })();

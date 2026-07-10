@@ -30,7 +30,7 @@ func TestGetQueue_CurrentSportarrShape(t *testing.T) {
 	    "indexer": "MyIndexer",
 	    "status": 3,
 	    "protocol": "usenet",
-	    "downloadClient": {"id": 2, "name": "AltMount", "postImportCategory": "sports"},
+	    "downloadClient": {"id": 2, "name": "Tater Tube Server", "postImportCategory": "sports"},
 	    "statusMessages": ["Automatic import is not possible", "Check your settings"]
 	  }
 	]`
@@ -54,8 +54,8 @@ func TestGetQueue_CurrentSportarrShape(t *testing.T) {
 	if q.Status != "completed" {
 		t.Errorf("Status = %q, want completed (enum 3)", q.Status)
 	}
-	if q.DownloadClient.Name != "AltMount" {
-		t.Errorf("DownloadClient.Name = %q, want AltMount", q.DownloadClient.Name)
+	if q.DownloadClient.Name != "Tater Tube Server" {
+		t.Errorf("DownloadClient.Name = %q, want Tater Tube Server", q.DownloadClient.Name)
 	}
 	if len(q.StatusMessages) != 2 || q.StatusMessages[0].Messages[0] != "Automatic import is not possible" {
 		t.Errorf("StatusMessages not normalized from string array: %+v", q.StatusMessages)
@@ -71,7 +71,7 @@ func TestGetQueue_LegacyServarrShape(t *testing.T) {
 	    "downloadId": "legacy-9",
 	    "indexer": "OldIndexer",
 	    "status": "completed",
-	    "downloadClient": "AltMount",
+	    "downloadClient": "Tater Tube Server",
 	    "statusMessages": [{"title": "t", "messages": ["m1", "m2"]}]
 	  }
 	]}`
@@ -92,8 +92,8 @@ func TestGetQueue_LegacyServarrShape(t *testing.T) {
 	if q.Status != "completed" {
 		t.Errorf("Status = %q, want completed", q.Status)
 	}
-	if q.DownloadClient.Name != "AltMount" {
-		t.Errorf("DownloadClient.Name = %q, want AltMount", q.DownloadClient.Name)
+	if q.DownloadClient.Name != "Tater Tube Server" {
+		t.Errorf("DownloadClient.Name = %q, want Tater Tube Server", q.DownloadClient.Name)
 	}
 	if len(q.StatusMessages) != 1 || q.StatusMessages[0].Title != "t" {
 		t.Errorf("StatusMessages object shape not preserved: %+v", q.StatusMessages)

@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/javi11/altmount/internal/arrs/failures"
+	"github.com/TaterTotterson/tater-tube-server/internal/arrs/failures"
 	"golift.io/starr/radarr"
 	"golift.io/starr/sonarr"
 )
