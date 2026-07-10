@@ -22,17 +22,16 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      # checkout
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: ./.github/actions/test
+
   build-frontend:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      # checkout
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -45,12 +44,10 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      # Install frontend dependencies
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
 
-      # Extract version info for frontend
       - name: Extract version info for frontend
         id: frontend-version
         run: |
@@ -64,7 +61,6 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "commit=$COMMIT" >> $GITHUB_OUTPUT
 
-      # Build frontend for embedding
       - name: Build frontend
         working-directory: frontend
         env:
@@ -72,7 +68,6 @@ jobs:
           GIT_COMMIT: ${{ steps.frontend-version.outputs.commit }}
         run: npm run build
 
-      # Upload built frontend as artifact
       - name: Upload frontend build
         uses: actions/upload-artifact@v6
         with:
@@ -138,36 +133,36 @@ jobs:
       release-tag: ${{ needs.prepare-release.outputs.release_tag }}
       prerelease: false
 
-  build-image-amd64:
+  build-image:
+    name: Build Docker Image
     runs-on: ubuntu-latest
-    needs: [test, build-frontend]
+    needs: [prepare-release, build-frontend]
     if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_docker }}
     permissions:
-      contents: write
+      contents: read
       packages: write
     steps:
-      # checkout
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # Download frontend build
       - name: Download frontend build
         uses: actions/download-artifact@v8
         with:
           name: frontend-build
           path: frontend/dist/
 
-      # Normalize image name to lowercase for GHCR (required)
       - name: Normalize image name
         run: |
           echo "IMAGE_NAME_LC=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # docker login
       - name: Docker login (GHCR)
         uses: docker/login-action@v4
         with:
@@ -175,170 +170,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Extract metadata for tags and labels
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}
-          tags: |
-            type=ref,event=tag,suffix=-amd64-temp
-            type=semver,pattern={{version}},suffix=-amd64-temp
-
-      # build and push amd64 image
-      - name: Build and push AMD64 image
-        id: build
+      - name: Build and push Docker image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./docker/Dockerfile.ci
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=amd64
-          cache-to: type=gha,mode=max,scope=amd64
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:latest
+          labels: |
+            org.opencontainers.image.title=Tater Tube Server
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.prepare-release.outputs.version }}
+          cache-from: type=gha,scope=release-multiarch
+          cache-to: type=gha,mode=max,scope=release-multiarch
           provenance: false
           sbom: false
-
-  build-image-arm64:
-    runs-on: ubuntu-24.04-arm
-    needs: [test, build-frontend]
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_docker }}
-    permissions:
-      contents: write
-      packages: write
-    steps:
-      # checkout
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # Download frontend build
-      - name: Download frontend build
-        uses: actions/download-artifact@v8
-        with:
-          name: frontend-build
-          path: frontend/dist/
-
-      # Normalize image name to lowercase for GHCR (required)
-      - name: Normalize image name
-        run: |
-          echo "IMAGE_NAME_LC=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      # docker login
-      - name: Docker login (GHCR)
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Extract metadata for tags and labels
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}
-          tags: |
-            type=ref,event=tag,suffix=-arm64-temp
-            type=semver,pattern={{version}},suffix=-arm64-temp
-
-      # build and push arm64 image
-      - name: Build and push ARM64 image
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./docker/Dockerfile.ci
-          platforms: linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=arm64
-          cache-to: type=gha,mode=max,scope=arm64
-          provenance: false
-          sbom: false
-
-  create-manifest:
-    runs-on: ubuntu-latest
-    needs: [build-image-amd64, build-image-arm64]
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_docker }}
-    permissions:
-      contents: write
-      packages: write
-    steps:
-      # checkout for version extraction
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # Normalize image name to lowercase for GHCR (required)
-      - name: Normalize image name
-        run: |
-          echo "IMAGE_NAME_LC=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-      # docker login
-      - name: Docker login (GHCR)
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Extract version from tag
-      - name: Extract version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ inputs.tag }}"
-            VERSION="${TAG#v}"
-          else
-            VERSION="${GITHUB_REF#refs/tags/v}"
-          fi
-          MAJOR=$(echo $VERSION | cut -d. -f1)
-          MINOR=$(echo $VERSION | cut -d. -f2)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "major=$MAJOR" >> $GITHUB_OUTPUT
-          echo "minor=$MINOR" >> $GITHUB_OUTPUT
-
-      # Create and push multi-platform manifests using temporary tags
-      - name: Create multi-platform manifest (GHCR)
-        run: |
-          AMD64_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:v${{ steps.version.outputs.version }}-amd64-temp"
-          ARM64_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:v${{ steps.version.outputs.version }}-arm64-temp"
-          GHCR="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}"
-
-          docker manifest create ${GHCR}:v${{ steps.version.outputs.version }} $AMD64_IMAGE $ARM64_IMAGE
-          docker manifest push ${GHCR}:v${{ steps.version.outputs.version }}
-
-          docker manifest create ${GHCR}:${{ steps.version.outputs.version }} $AMD64_IMAGE $ARM64_IMAGE
-          docker manifest push ${GHCR}:${{ steps.version.outputs.version }}
-
-          docker manifest create ${GHCR}:v${{ steps.version.outputs.major }} $AMD64_IMAGE $ARM64_IMAGE
-          docker manifest push ${GHCR}:v${{ steps.version.outputs.major }}
-
-          docker manifest create ${GHCR}:${{ steps.version.outputs.major }} $AMD64_IMAGE $ARM64_IMAGE
-          docker manifest push ${GHCR}:${{ steps.version.outputs.major }}
-
-          docker manifest create ${GHCR}:v${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }} $AMD64_IMAGE $ARM64_IMAGE
-          docker manifest push ${GHCR}:v${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }}
-
-          docker manifest create ${GHCR}:${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }} $AMD64_IMAGE $ARM64_IMAGE
-          docker manifest push ${GHCR}:${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }}
-
-          docker manifest create ${GHCR}:latest $AMD64_IMAGE $ARM64_IMAGE
-          docker manifest push ${GHCR}:latest
-
-      # Clean up temporary tags
-      - name: Clean up temporary tags
-        run: |
-          docker manifest rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:v${{ steps.version.outputs.version }}-amd64-temp || true
-          docker manifest rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:v${{ steps.version.outputs.version }}-arm64-temp || true
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VERSION=${{ needs.prepare-release.outputs.version }}
+            COMMIT=${{ needs.prepare-release.outputs.commit }}
