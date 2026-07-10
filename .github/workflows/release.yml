@@ -38,25 +38,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Install Bun for frontend build
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          bun-version: latest
-
-      # Cache frontend dependencies
-      - name: Cache frontend dependencies
-        uses: actions/cache@v5
-        with:
-          path: frontend/node_modules
-          key: frontend-deps-${{ runner.os }}-${{ hashFiles('frontend/bun.lock') }}
-          restore-keys: |
-            frontend-deps-${{ runner.os }}-
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       # Install frontend dependencies
       - name: Install frontend dependencies
         working-directory: frontend
-        run: bun install --frozen-lockfile
+        run: npm ci
 
       # Extract version info for frontend
       - name: Extract version info for frontend
@@ -78,7 +70,7 @@ jobs:
         env:
           npm_package_version: ${{ steps.frontend-version.outputs.version }}
           GIT_COMMIT: ${{ steps.frontend-version.outputs.commit }}
-        run: bun run build
+        run: npm run build
 
       # Upload built frontend as artifact
       - name: Upload frontend build

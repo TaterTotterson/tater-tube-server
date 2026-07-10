@@ -24,10 +24,6 @@ runs:
         go env
       # test
 
-    # Install Bun
-    - name: Install Bun
-      uses: oven-sh/setup-bun@v2
-
     - name: Tests
       shell: bash
       run: |
