@@ -8,6 +8,7 @@ export interface ConfigResponse {
 	database: DatabaseConfig;
 	metadata: MetadataConfig;
 	streaming: StreamingConfig;
+	transcoding: TranscodingConfig;
 	health: HealthConfig;
 	segment_cache: SegmentCacheConfig;
 	import: ImportConfig;
@@ -15,6 +16,7 @@ export interface ConfigResponse {
 	sabnzbd: SABnzbdConfig;
 	arrs: ArrsConfig;
 	stremio: StremioConfig;
+	newznab: NewznabConfig;
 	providers: ProviderConfig[];
 	nzblnk: NzblnkConfig;
 	network: NetworkConfig;
@@ -80,6 +82,23 @@ export interface FailureMaskingConfig {
 export interface StreamingConfig {
 	max_prefetch: number;
 	failure_masking: FailureMaskingConfig;
+}
+
+// FFmpeg transcoding configuration
+export interface TranscodingConfig {
+	enabled: boolean | null;
+	profile: "crt_480p" | "hdmi_1080p" | "hdmi_4k" | string;
+	hardware_acceleration:
+		| "none"
+		| "auto"
+		| "vaapi"
+		| "qsv"
+		| "nvenc"
+		| "videotoolbox"
+		| "v4l2m2m"
+		| string;
+	ffmpeg_path: string;
+	hardware_device?: string;
 }
 
 // Segment cache configuration
@@ -241,6 +260,7 @@ export interface ConfigUpdateRequest {
 	database?: DatabaseUpdateRequest;
 	metadata?: MetadataUpdateRequest;
 	streaming?: StreamingUpdateRequest;
+	transcoding?: Partial<TranscodingConfig>;
 	segment_cache?: Partial<SegmentCacheConfig>;
 	health?: HealthUpdateRequest;
 	import?: ImportUpdateRequest;
@@ -248,6 +268,7 @@ export interface ConfigUpdateRequest {
 	sabnzbd?: SABnzbdUpdateRequest;
 	arrs?: ArrsConfig;
 	stremio?: Partial<StremioConfig>;
+	newznab?: Partial<NewznabConfig>;
 	providers?: ProviderUpdateRequest[];
 	nzblnk?: NzblnkConfig;
 	network?: NetworkConfig;
@@ -376,6 +397,7 @@ export type ConfigSection =
 	| "auth"
 	| "metadata"
 	| "streaming"
+	| "transcoding"
 	| "segment_cache"
 	| "health"
 	| "import"
@@ -383,6 +405,7 @@ export type ConfigSection =
 	| "sabnzbd"
 	| "arrs"
 	| "stremio"
+	| "newznab"
 	| "nzblnk"
 	| "network"
 	| "system";
@@ -474,6 +497,16 @@ export interface StremioConfig {
 	prowlarr: ProwlarrConfig;
 }
 
+// Newznab catalog configuration used by Tater Tube players.
+export interface NewznabConfig {
+	enabled: boolean;
+	url: string;
+	api_key: string;
+	api_key_set?: boolean;
+	username?: string;
+	browse_limit: number;
+}
+
 // Helper type for configuration sections
 interface ConfigSectionInfo {
 	title: string;
@@ -556,6 +589,13 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		icon: "Download",
 		canEdit: true,
 	},
+	transcoding: {
+		title: "Transcoding",
+		description: "FFmpeg playback conversion profiles and hardware acceleration.",
+		icon: "Radio",
+		canEdit: true,
+		hidden: true,
+	},
 	segment_cache: {
 		title: "Segment Cache",
 		description: "Segment-aligned disk cache for smoother media playback.",
@@ -602,6 +642,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		description:
 			"Enable the Stremio addon and direct NZB stream endpoint.",
 		icon: "Tv",
+		canEdit: true,
+	},
+	newznab: {
+		title: "Newznab Stream",
+		description: "Configure the player-facing Stream catalog for Tater Tube.",
+		icon: "Link",
 		canEdit: true,
 	},
 	nzblnk: {

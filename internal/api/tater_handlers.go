@@ -24,6 +24,12 @@ func (s *Server) handleTaterServerInfo(c *fiber.Ctx) error {
 		"stream_path": "/api/files/stream",
 		"endpoints": map[string]string{
 			"server":                 "/api/tater/server",
+			"usenet_status":          "/api/tater/usenet/status",
+			"usenet_catalog":         "/api/tater/usenet/catalog",
+			"usenet_items":           "/api/tater/usenet/items",
+			"usenet_search":          "/api/tater/usenet/search",
+			"usenet_trending":        "/api/tater/usenet/trending",
+			"usenet_play":            "/api/tater/usenet/play",
 			"usenet_streams":         "/api/tater/usenet/streams",
 			"legacy_usenet_streams":  "/api/nzb/streams",
 			"stremio_manifest":       "/stremio/{key}/manifest.json",

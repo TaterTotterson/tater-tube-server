@@ -179,6 +179,12 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/nzb/streams", s.handleNzbStreams)
 	api.Get("/tater/server", s.handleTaterServerInfo)
 	api.Post("/tater/usenet/streams", s.handleNzbStreams)
+	api.Get("/tater/usenet/status", s.handleTaterUsenetStatus)
+	api.Get("/tater/usenet/catalog", s.handleTaterUsenetCatalog)
+	api.Get("/tater/usenet/items", s.handleTaterUsenetItems)
+	api.Get("/tater/usenet/search", s.handleTaterUsenetSearch)
+	api.Get("/tater/usenet/trending", s.handleTaterUsenetTrending)
+	api.Post("/tater/usenet/play", s.handleTaterUsenetPlay)
 
 	cfg := s.configManager.GetConfig()
 
@@ -196,21 +202,22 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 		corsOrigins = strings.Join(cfg.API.AllowedOrigins, ",")
 	}
 
+	loginRequired := false
+	if cfg != nil && cfg.Auth.LoginRequired != nil {
+		loginRequired = *cfg.Auth.LoginRequired
+	}
+	allowCredentials := loginRequired && corsOrigins != "*"
+
 	api.Use(cors.New(cors.Config{
 		AllowOrigins:     corsOrigins,
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
 		AllowMethods:     "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-		AllowCredentials: true,
+		AllowCredentials: allowCredentials,
 	}))
 	api.Use(recover.New())
 
 	// Apply JWT authentication middleware globally except for public auth routes
-	// Only apply if login is required (default: true)
-	loginRequired := true // Default to true if not set
-	if cfg != nil && cfg.Auth.LoginRequired != nil {
-		loginRequired = *cfg.Auth.LoginRequired
-	}
-
+	// Only apply if login is required.
 	if loginRequired && s.authService != nil && s.userRepo != nil {
 		tokenService := s.authService.TokenService()
 		if tokenService != nil {

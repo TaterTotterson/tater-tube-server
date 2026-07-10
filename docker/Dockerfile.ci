@@ -75,12 +75,11 @@ COPY --from=backend-builder /app/tater-tube-server /app/tater-tube-server
 COPY --from=backend-builder /app/frontend/dist ./frontend/dist
 
 # Install required packages for runtime (mime-support already in custom-base)
-# docker.io provides docker CLI for the auto-update feature (requires /var/run/docker.sock mount)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+        ffmpeg \
         wget \
-        ca-certificates \
-        docker.io && \
+        ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 # Make binary executable
@@ -89,19 +88,15 @@ RUN chmod +x /app/tater-tube-server
 # Copy s6-overlay service configuration
 COPY docker/root/ /
 
-# Set environment variables
-ENV PORT=8080
-ENV HOST=0.0.0.0
-
 # Expose port for web interface
 EXPOSE 8080
 
 # Volume
-VOLUME ["/config", "/metadata"]
+VOLUME ["/config"]
 
 # Health check
 HEALTHCHECK --interval=5s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT}/live || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/live || exit 1
 
 # Labels
 LABEL org.opencontainers.image.title="Tater Tube Server"

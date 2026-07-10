@@ -41,6 +41,7 @@ type Config struct {
 	Database        DatabaseConfig     `yaml:"database" mapstructure:"database" json:"database"`
 	Metadata        MetadataConfig     `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
 	Streaming       StreamingConfig    `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
+	Transcoding     TranscodingConfig  `yaml:"transcoding" mapstructure:"transcoding" json:"transcoding"`
 	Health          HealthConfig       `yaml:"health" mapstructure:"health" json:"health"`
 	RClone          RCloneConfig       `yaml:"rclone" mapstructure:"rclone" json:"-"`
 	Import          ImportConfig       `yaml:"import" mapstructure:"import" json:"import"`
@@ -48,6 +49,7 @@ type Config struct {
 	SABnzbd         SABnzbdConfig      `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
 	Arrs            ArrsConfig         `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
 	Stremio         StremioConfig      `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
+	Newznab         NewznabConfig      `yaml:"newznab" mapstructure:"newznab" json:"newznab"`
 	Fuse            FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"-"`
 	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
 	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
@@ -173,6 +175,15 @@ type StremioConfig struct {
 	Prowlarr ProwlarrConfig `yaml:"prowlarr" mapstructure:"prowlarr" json:"prowlarr"`
 }
 
+// NewznabConfig configures the player-facing Stream catalog.
+type NewznabConfig struct {
+	Enabled     *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	URL         string `yaml:"url" mapstructure:"url" json:"url,omitempty"`
+	APIKey      string `yaml:"api_key" mapstructure:"api_key" json:"api_key,omitempty"`
+	Username    string `yaml:"username" mapstructure:"username" json:"username,omitempty"`
+	BrowseLimit int    `yaml:"browse_limit" mapstructure:"browse_limit" json:"browse_limit,omitempty"`
+}
+
 // AuthConfig represents authentication configuration
 type AuthConfig struct {
 	LoginRequired *bool `yaml:"login_required" mapstructure:"login_required" json:"login_required"`
@@ -219,6 +230,16 @@ type FailureMaskingConfig struct {
 type StreamingConfig struct {
 	MaxPrefetch    int                  `yaml:"max_prefetch" mapstructure:"max_prefetch" json:"max_prefetch"`
 	FailureMasking FailureMaskingConfig `yaml:"failure_masking" mapstructure:"failure_masking" json:"failure_masking"`
+}
+
+// TranscodingConfig controls the optional FFmpeg playback transcoder used by
+// /api/files/stream. Direct play remains the default when Enabled is false.
+type TranscodingConfig struct {
+	Enabled              *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	Profile              string `yaml:"profile" mapstructure:"profile" json:"profile"`
+	HardwareAcceleration string `yaml:"hardware_acceleration" mapstructure:"hardware_acceleration" json:"hardware_acceleration"`
+	FFmpegPath           string `yaml:"ffmpeg_path" mapstructure:"ffmpeg_path" json:"ffmpeg_path"`
+	HardwareDevice       string `yaml:"hardware_device" mapstructure:"hardware_device" json:"hardware_device,omitempty"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -758,6 +779,57 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate streaming configuration
+	if c.Transcoding.Enabled == nil {
+		enabled := false
+		c.Transcoding.Enabled = &enabled
+	}
+	if c.Transcoding.Profile == "" {
+		c.Transcoding.Profile = "crt_480p"
+	}
+	if c.Transcoding.FFmpegPath == "" {
+		c.Transcoding.FFmpegPath = "ffmpeg"
+	}
+	if c.Transcoding.HardwareAcceleration == "" {
+		c.Transcoding.HardwareAcceleration = "none"
+	}
+	if c.Newznab.Enabled == nil {
+		enabled := false
+		c.Newznab.Enabled = &enabled
+	}
+	if c.Newznab.BrowseLimit <= 0 {
+		c.Newznab.BrowseLimit = 100
+	}
+	if c.Newznab.BrowseLimit > 500 {
+		c.Newznab.BrowseLimit = 500
+	}
+	if c.Newznab.Enabled != nil && *c.Newznab.Enabled {
+		if strings.TrimSpace(c.Newznab.URL) == "" {
+			return fmt.Errorf("newznab url is required when newznab is enabled")
+		}
+		if strings.TrimSpace(c.Newznab.APIKey) == "" {
+			return fmt.Errorf("newznab api_key is required when newznab is enabled")
+		}
+	}
+	validTranscodeProfiles := map[string]bool{
+		"crt_480p":   true,
+		"hdmi_1080p": true,
+		"hdmi_4k":    true,
+	}
+	if !validTranscodeProfiles[c.Transcoding.Profile] {
+		return fmt.Errorf("transcoding profile must be one of: crt_480p, hdmi_1080p, hdmi_4k")
+	}
+	validHardwareAcceleration := map[string]bool{
+		"none":         true,
+		"auto":         true,
+		"vaapi":        true,
+		"qsv":          true,
+		"nvenc":        true,
+		"videotoolbox": true,
+		"v4l2m2m":      true,
+	}
+	if !validHardwareAcceleration[c.Transcoding.HardwareAcceleration] {
+		return fmt.Errorf("transcoding hardware_acceleration must be one of: none, auto, vaapi, qsv, nvenc, videotoolbox, v4l2m2m")
+	}
 
 	// Validate health configuration (always active)
 	if c.Health.CheckIntervalSeconds <= 0 {
@@ -1446,8 +1518,11 @@ func DefaultConfig(configDir ...string) *Config {
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 	fuseEnabled := false
-	loginRequired := true           // Require login by default
+	loginRequired := false          // Login disabled by default for local appliance-style setup
 	stremioEnabled := false         // Stremio endpoint disabled by default
+	segmentCacheEnabled := true     // Persist decoded Usenet segments by default
+	transcodingEnabled := false     // Direct play by default; FFmpeg transcode is opt-in
+	newznabEnabled := false         // Player-facing Stream catalog disabled by default
 	prowlarrEnabled := false        // Prowlarr integration disabled by default
 	watchIntervalSeconds := 10      // Default watch interval
 	failedItemRetentionHours := 24  // Default: auto-remove failed items after 24 hours
@@ -1459,7 +1534,7 @@ func DefaultConfig(configDir ...string) *Config {
 	repairExponentialBackoff := true
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
-	var dbPath, metadataPath, logPath, rclonePath, cachePath, backupPath string
+	var dbPath, metadataPath, logPath, rclonePath, cachePath, segmentCachePath, backupPath string
 
 	// If a config directory is provided, use it
 	if len(configDir) > 0 && configDir[0] != "" {
@@ -1468,13 +1543,15 @@ func DefaultConfig(configDir ...string) *Config {
 		logPath = filepath.Join(configDir[0], "tater-tube-server.log")
 		rclonePath = configDir[0]
 		cachePath = filepath.Join(configDir[0], "cache")
+		segmentCachePath = filepath.Join(configDir[0], "segment-cache")
 		backupPath = filepath.Join(configDir[0], "backups")
 	} else if isRunningInDocker() {
 		dbPath = "/config/tater-tube-server.db"
-		metadataPath = "/metadata"
+		metadataPath = "/config/metadata"
 		logPath = "/config/tater-tube-server.log"
 		rclonePath = "/config"
 		cachePath = "/config/cache"
+		segmentCachePath = "/config/segment-cache"
 		backupPath = "/config/backups"
 	} else {
 		dbPath = "./tater-tube-server.db"
@@ -1482,6 +1559,7 @@ func DefaultConfig(configDir ...string) *Config {
 		logPath = "./tater-tube-server.log"
 		rclonePath = "."
 		cachePath = "./cache"
+		segmentCachePath = "./segment-cache"
 		backupPath = "./backups"
 	}
 
@@ -1500,6 +1578,13 @@ func DefaultConfig(configDir ...string) *Config {
 				Host:       "http://localhost:9696",
 				Categories: []int{2000, 2010, 2030, 2040, 2045, 2060, 5000, 5010, 5030, 5040},
 			},
+		},
+		Newznab: NewznabConfig{
+			Enabled:     &newznabEnabled,
+			URL:         "",
+			APIKey:      "",
+			Username:    "",
+			BrowseLimit: 100,
 		},
 		Auth: AuthConfig{
 			LoginRequired: &loginRequired,
@@ -1524,6 +1609,19 @@ func DefaultConfig(configDir ...string) *Config {
 				Enabled:   &failureMaskingEnabled,
 				Threshold: 3,
 			},
+		},
+		Transcoding: TranscodingConfig{
+			Enabled:              &transcodingEnabled,
+			Profile:              "crt_480p",
+			HardwareAcceleration: "none",
+			FFmpegPath:           "ffmpeg",
+			HardwareDevice:       "",
+		},
+		SegmentCache: SegmentCacheConfig{
+			Enabled:     &segmentCacheEnabled,
+			CachePath:   segmentCachePath,
+			MaxSizeGB:   10,
+			ExpiryHours: 168,
 		},
 		RClone: RCloneConfig{
 			Path:         rclonePath,

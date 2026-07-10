@@ -13,21 +13,36 @@ This directory contains container builds for the Tater Tube Server backend.
 ```bash
 docker run -d \
   --name tater-tube-server \
-  -e PUID=1000 \
-  -e PGID=1000 \
-  -e PORT=8080 \
   -p 8080:8080 \
   -v /path/to/config:/config \
-  -v /path/to/metadata:/metadata \
+  --restart unless-stopped \
   ghcr.io/tatertotterson/tater-tube-server:latest
 ```
 
 The server UI is available at `http://localhost:8080`.
+Configure NNTP providers and the Newznab Stream catalog from the web UI, then
+enter the server URL and download key in Tater Tube's Usenet module.
 
-## Volumes
+## Volume
 
-- `/config` stores `config.yaml`, the database, and logs.
-- `/metadata` stores prepared stream metadata.
+`/config` stores `config.yaml`, the database, logs, metadata, imports, and
+segment cache data. Login is disabled by default; enable it from the web UI only
+if you need it.
+
+Streaming does not persist full media downloads by default. The persistent
+stream cache stores decoded Usenet segments in `/config/segment-cache`; adjust
+its size, expiry, or path from the web UI under `Configuration -> Streaming`.
+
+FFmpeg is installed in the image for optional playback transcoding. Software
+x264 works without extra Docker flags. For VAAPI/QSV on Linux, pass the render
+device through, for example:
+
+```bash
+docker run ... --device /dev/dri/renderD128:/dev/dri/renderD128 ...
+```
+
+Then enable transcoding and select the hardware mode in
+`Configuration -> Streaming`.
 
 ## Build
 
