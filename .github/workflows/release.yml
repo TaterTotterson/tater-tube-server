@@ -121,18 +121,6 @@ jobs:
             fi
           fi
 
-  build-cli:
-    needs: [prepare-release, build-frontend]
-    permissions:
-      contents: write
-    uses: ./.github/workflows/build-cli.yml
-    with:
-      version: ${{ needs.prepare-release.outputs.version }}
-      commit: ${{ needs.prepare-release.outputs.commit }}
-      upload-to-release: true
-      release-tag: ${{ needs.prepare-release.outputs.release_tag }}
-      prerelease: false
-
   build-image:
     name: Build Docker Image (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
