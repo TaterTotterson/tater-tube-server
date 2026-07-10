@@ -56,8 +56,8 @@ The frontend dev server proxies API requests to `http://localhost:8080`.
 
 ## Docker
 
-The release workflow publishes a multi-architecture image to GitHub Container
-Registry:
+The release workflow publishes one multi-architecture image to GitHub Container
+Registry, tagged `latest`:
 
 ```bash
 docker pull ghcr.io/tatertotterson/tater-tube-server:latest
