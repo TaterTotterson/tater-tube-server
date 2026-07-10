@@ -24,6 +24,7 @@ import { ComingSoonSection } from "../components/config/ComingSoonSection";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { NetworkConfigSection } from "../components/config/NetworkConfigSection";
+import { NewznabConfigSection } from "../components/config/NewznabConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
@@ -50,12 +51,14 @@ import type {
 	LogFormData,
 	MetadataConfig,
 	NetworkConfig,
+	NewznabConfig,
 	NzblnkConfig,
 	ProviderConfig,
 	SABnzbdConfig,
 	SegmentCacheConfig,
 	StreamingConfig,
 	StremioConfig,
+	TranscodingConfig,
 } from "../types/config";
 import { CONFIG_SECTIONS } from "../types/config";
 
@@ -83,7 +86,7 @@ const getIconComponent = (iconName: string) => {
 const SECTION_GROUPS = [
 	{
 		title: "Streamer",
-		sections: ["stremio", "providers", "streaming"],
+		sections: ["newznab", "stremio", "providers", "streaming"],
 	},
 	{
 		title: "Processing",
@@ -113,24 +116,24 @@ export function ConfigurationPage() {
 	const navigate = useNavigate();
 	const { section } = useParams<{ section: string }>();
 
-	// Get active section from URL parameter, default to Stremio setup.
+	// Get active section from URL parameter, default to player Stream setup.
 	const activeSection = (() => {
-		if (!section) return "stremio";
+		if (!section) return "newznab";
 		// NZBLNK settings now live inside the Network section
 		if (section === "nzblnk") return "network" as ConfigSection;
 		return STREAMER_CONFIG_SECTIONS.has(section as ConfigSection | "system")
 			? (section as ConfigSection | "system")
-			: "stremio";
+			: "newznab";
 	})();
 
 	// Redirect to default section if no section is specified, or hidden legacy paths are requested.
 	useEffect(() => {
 		if (!section) {
-			navigate("/config/stremio", { replace: true });
+			navigate("/config/newznab", { replace: true });
 		} else if (section === "nzblnk") {
 			navigate("/config/network", { replace: true });
 		} else if (!STREAMER_CONFIG_SECTIONS.has(section as ConfigSection | "system")) {
-			navigate("/config/stremio", { replace: true });
+			navigate("/config/newznab", { replace: true });
 		}
 	}, [section, navigate]);
 
@@ -210,6 +213,11 @@ export function ConfigurationPage() {
 					section: "streaming",
 					config: { streaming: data as unknown as StreamingConfig },
 				});
+			} else if (section === "transcoding") {
+				await updateConfigSection.mutateAsync({
+					section: "transcoding",
+					config: { transcoding: data as unknown as TranscodingConfig },
+				});
 			} else if (section === "segment_cache") {
 				await updateConfigSection.mutateAsync({
 					section: "segment_cache",
@@ -247,6 +255,11 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "stremio",
 					config: { stremio: data as unknown as StremioConfig },
+				});
+			} else if (section === "newznab") {
+				await updateConfigSection.mutateAsync({
+					section: "newznab",
+					config: { newznab: data as unknown as NewznabConfig },
 				});
 			} else if (section === "providers") {
 				await updateConfigSection.mutateAsync({
@@ -513,6 +526,13 @@ export function ConfigurationPage() {
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
+								{activeSection === "newznab" && (
+									<NewznabConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
 								{activeSection === "network" && (
 									<NetworkConfigSection
 										config={config}
@@ -531,6 +551,7 @@ export function ConfigurationPage() {
 									"arrs",
 									"health",
 									"stremio",
+									"newznab",
 									"network",
 								].includes(activeSection) && (
 									<ComingSoonSection

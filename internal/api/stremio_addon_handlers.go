@@ -540,7 +540,18 @@ func (s *Server) waitAndRedirectToStream(c *fiber.Ctx, itemID int64, baseURL, do
 
 // validateDownloadKey returns true if key matches any user's hashed API key.
 func (s *Server) validateDownloadKey(ctx context.Context, key string) bool {
-	if s.userRepo == nil || key == "" {
+	if key == "" {
+		return false
+	}
+	if s.configManager != nil {
+		cfg := s.configManager.GetConfig()
+		if cfg != nil && cfg.API.KeyOverride != "" && len(cfg.API.KeyOverride) == 32 {
+			if subtle.ConstantTimeCompare([]byte(auth.HashAPIKey(cfg.API.KeyOverride)), []byte(key)) == 1 {
+				return true
+			}
+		}
+	}
+	if s.userRepo == nil {
 		return false
 	}
 	users, err := s.userRepo.GetAllUsers(ctx)

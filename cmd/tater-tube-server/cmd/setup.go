@@ -186,15 +186,15 @@ func setupRepositories(ctx context.Context, db *database.DB) *repositorySet {
 
 // setupAuthService creates and initializes the authentication service.
 // When loginRequired is true, JWT_SECRET must be set or an error is returned.
-// When loginRequired is false, a missing JWT_SECRET is logged as a warning and nil is returned.
 func setupAuthService(ctx context.Context, cfg *config.Config, userRepo *database.UserRepository, loginRequired bool) (*auth.Service, error) {
+	if !loginRequired {
+		slog.InfoContext(ctx, "Authentication disabled")
+		return nil, nil
+	}
+
 	authConfig, err := auth.LoadConfigFromEnv()
 	if err != nil {
-		if loginRequired {
-			return nil, fmt.Errorf("failed to load auth configuration: %w", err)
-		}
-		slog.WarnContext(ctx, "Auth configuration not loaded (login is disabled)", "err", err)
-		return nil, nil
+		return nil, fmt.Errorf("failed to load auth configuration: %w", err)
 	}
 
 	// Override with values from config file
@@ -220,8 +220,9 @@ func setupStreamHandler(
 	nzbFilesystem *nzbfilesystem.NzbFilesystem,
 	userRepo *database.UserRepository,
 	streamTracker *api.StreamTracker,
+	configGetter config.ConfigGetter,
 ) *api.StreamHandler {
-	return api.NewStreamHandler(nzbFilesystem, userRepo, streamTracker)
+	return api.NewStreamHandler(nzbFilesystem, userRepo, streamTracker, configGetter)
 }
 
 // setupAPIServer creates and configures the API server

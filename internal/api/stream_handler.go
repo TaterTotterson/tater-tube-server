@@ -1,16 +1,21 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"log/slog"
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/auth"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"github.com/TaterTotterson/tater-tube-server/internal/database"
 	"github.com/TaterTotterson/tater-tube-server/internal/nzbfilesystem"
 	"github.com/TaterTotterson/tater-tube-server/internal/utils"
@@ -24,6 +29,7 @@ type StreamHandler struct {
 	nzbFilesystem *nzbfilesystem.NzbFilesystem
 	userRepo      *database.UserRepository
 	streamTracker *StreamTracker
+	configGetter  config.ConfigGetter
 }
 
 // MonitoredFile wraps an afero.File to track read progress and support cancellation
@@ -61,11 +67,12 @@ func (m *MonitoredFile) Close() error {
 }
 
 // NewStreamHandler creates a new stream handler with the provided filesystem and user repository
-func NewStreamHandler(fs *nzbfilesystem.NzbFilesystem, userRepo *database.UserRepository, streamTracker *StreamTracker) *StreamHandler {
+func NewStreamHandler(fs *nzbfilesystem.NzbFilesystem, userRepo *database.UserRepository, streamTracker *StreamTracker, configGetter config.ConfigGetter) *StreamHandler {
 	return &StreamHandler{
 		nzbFilesystem: fs,
 		userRepo:      userRepo,
 		streamTracker: streamTracker,
+		configGetter:  configGetter,
 	}
 }
 
@@ -200,6 +207,11 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.shouldTranscode(r, path) {
+		h.serveTranscoded(w, r, ctx, path, file)
+		return
+	}
+
 	// Track stream if tracker is available
 	if h.streamTracker != nil {
 		// Create a cancellable context for the stream
@@ -266,4 +278,257 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 	filename := filepath.Base(path)
 	w.Header().Set("Content-Disposition", `inline; filename="`+filename+`"`)
 	http.ServeContent(w, r, filename, stat.ModTime(), file)
+}
+
+type transcodeProfile struct {
+	Name         string
+	MaxWidth     int
+	MaxHeight    int
+	VideoBitrate string
+	MaxRate      string
+	BufferSize   string
+	AudioBitrate string
+	Level        string
+}
+
+var transcodeProfiles = map[string]transcodeProfile{
+	"crt_480p": {
+		Name:         "CRT 480p",
+		MaxWidth:     640,
+		MaxHeight:    480,
+		VideoBitrate: "1400k",
+		MaxRate:      "1800k",
+		BufferSize:   "3600k",
+		AudioBitrate: "128k",
+		Level:        "3.0",
+	},
+	"hdmi_1080p": {
+		Name:         "HDMI 1080p",
+		MaxWidth:     1920,
+		MaxHeight:    1080,
+		VideoBitrate: "8000k",
+		MaxRate:      "12000k",
+		BufferSize:   "24000k",
+		AudioBitrate: "192k",
+		Level:        "4.1",
+	},
+	"hdmi_4k": {
+		Name:         "HDMI 4K",
+		MaxWidth:     3840,
+		MaxHeight:    2160,
+		VideoBitrate: "25000k",
+		MaxRate:      "35000k",
+		BufferSize:   "70000k",
+		AudioBitrate: "256k",
+		Level:        "5.1",
+	},
+}
+
+func (h *StreamHandler) shouldTranscode(r *http.Request, path string) bool {
+	if h.configGetter == nil {
+		return false
+	}
+	cfg := h.configGetter()
+	if cfg == nil || cfg.Transcoding.Enabled == nil || !*cfg.Transcoding.Enabled {
+		return false
+	}
+	if r.URL.Query().Get("direct") == "1" || r.URL.Query().Get("transcode") == "0" {
+		return false
+	}
+
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".mkv", ".mp4", ".m4v", ".mov", ".avi", ".ts", ".m2ts", ".mpg", ".mpeg", ".wmv", ".webm":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, ctx context.Context, path string, file afero.File) {
+	cfg := h.configGetter()
+	if cfg == nil {
+		http.Error(w, "Transcoding configuration unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	ffmpegPath := cfg.Transcoding.FFmpegPath
+	if ffmpegPath == "" {
+		ffmpegPath = "ffmpeg"
+	}
+	if _, err := exec.LookPath(ffmpegPath); err != nil {
+		slog.ErrorContext(ctx, "FFmpeg not available for transcoding", "path", ffmpegPath, "error", err)
+		http.Error(w, "Transcoding unavailable: ffmpeg not found", http.StatusServiceUnavailable)
+		return
+	}
+
+	profileID := r.URL.Query().Get("profile")
+	if profileID == "" {
+		profileID = cfg.Transcoding.Profile
+	}
+	profile, ok := transcodeProfiles[profileID]
+	if !ok {
+		profile = transcodeProfiles["crt_480p"]
+	}
+
+	accel := r.URL.Query().Get("hwaccel")
+	if accel == "" {
+		accel = cfg.Transcoding.HardwareAcceleration
+	}
+	if accel == "" {
+		accel = "none"
+	}
+
+	args := buildFFmpegTranscodeArgs(cfg.Transcoding, profile, accel)
+	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
+	cmd.Stdin = file
+
+	var stderr limitedBuffer
+	cmd.Stderr = &stderr
+	cmd.Stdout = flushWriter{w: w}
+
+	w.Header().Set("Content-Type", "video/mp2t")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Disposition", `inline; filename="`+filepath.Base(path)+`.ts"`)
+	w.Header().Del("Accept-Ranges")
+	w.WriteHeader(http.StatusOK)
+
+	slog.InfoContext(ctx, "Starting FFmpeg transcode stream",
+		"path", path,
+		"profile", profileID,
+		"profile_name", profile.Name,
+		"hardware_acceleration", accel)
+
+	if err := cmd.Run(); err != nil && r.Context().Err() == nil {
+		slog.ErrorContext(ctx, "FFmpeg transcode failed",
+			"path", path,
+			"profile", profileID,
+			"hardware_acceleration", accel,
+			"error", err,
+			"stderr", stderr.String())
+	}
+}
+
+func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string) []string {
+	args := []string{
+		"-hide_banner",
+		"-loglevel", "warning",
+		"-nostdin",
+	}
+
+	if accel == "vaapi" || (accel == "auto" && hasDefaultVAAPIDevice()) {
+		device := cfg.HardwareDevice
+		if device == "" {
+			device = "/dev/dri/renderD128"
+		}
+		args = append(args, "-vaapi_device", device)
+	}
+
+	args = append(args,
+		"-i", "pipe:0",
+		"-map", "0:v:0",
+		"-map", "0:a:0?",
+		"-sn",
+	)
+
+	videoCodec, filters := transcodeVideoSettings(accel, cfg.HardwareDevice, profile)
+	if filters != "" {
+		args = append(args, "-vf", filters)
+	}
+
+	args = append(args,
+		"-c:v", videoCodec,
+		"-b:v", profile.VideoBitrate,
+		"-maxrate", profile.MaxRate,
+		"-bufsize", profile.BufferSize,
+	)
+
+	switch videoCodec {
+	case "libx264":
+		args = append(args,
+			"-preset", "veryfast",
+			"-profile:v", "main",
+			"-level:v", profile.Level,
+			"-pix_fmt", "yuv420p",
+		)
+	case "h264_nvenc":
+		args = append(args, "-preset", "p4", "-profile:v", "main")
+	case "h264_videotoolbox":
+		args = append(args, "-profile:v", "main", "-allow_sw", "1")
+	}
+
+	args = append(args,
+		"-c:a", "aac",
+		"-b:a", profile.AudioBitrate,
+		"-ac", "2",
+		"-ar", "48000",
+		"-fflags", "+genpts",
+		"-muxdelay", "0",
+		"-muxpreload", "0",
+		"-f", "mpegts",
+		"pipe:1",
+	)
+
+	return args
+}
+
+func transcodeVideoSettings(accel, device string, profile transcodeProfile) (codec string, filters string) {
+	scaleFilter := "scale=w=" + strconv.Itoa(profile.MaxWidth) + ":h=" + strconv.Itoa(profile.MaxHeight) + ":force_original_aspect_ratio=decrease"
+
+	switch accel {
+	case "auto":
+		if hasDefaultVAAPIDevice() {
+			return "h264_vaapi", scaleFilter + ",format=nv12,hwupload"
+		}
+		return "libx264", scaleFilter
+	case "vaapi":
+		return "h264_vaapi", scaleFilter + ",format=nv12,hwupload"
+	case "qsv":
+		return "h264_qsv", scaleFilter
+	case "nvenc":
+		return "h264_nvenc", scaleFilter
+	case "videotoolbox":
+		return "h264_videotoolbox", scaleFilter
+	case "v4l2m2m":
+		return "h264_v4l2m2m", scaleFilter
+	default:
+		return "libx264", scaleFilter
+	}
+}
+
+func hasDefaultVAAPIDevice() bool {
+	_, err := os.Stat("/dev/dri/renderD128")
+	return err == nil
+}
+
+type flushWriter struct {
+	w http.ResponseWriter
+}
+
+func (f flushWriter) Write(p []byte) (int, error) {
+	n, err := f.w.Write(p)
+	if flusher, ok := f.w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	return n, err
+}
+
+type limitedBuffer struct {
+	buf bytes.Buffer
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	const maxBytes = 32 * 1024
+	remaining := maxBytes - b.buf.Len()
+	if remaining > 0 {
+		if len(p) > remaining {
+			_, _ = b.buf.Write(p[:remaining])
+		} else {
+			_, _ = b.buf.Write(p)
+		}
+	}
+	return len(p), nil
+}
+
+func (b *limitedBuffer) String() string {
+	return b.buf.String()
 }

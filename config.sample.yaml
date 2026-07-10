@@ -6,14 +6,14 @@ server:
   port: 8080
 
 auth:
-  login_required: true
+  login_required: false
 
 database:
   type: 'sqlite'
   path: '/config/tater-tube-server.db'
 
 metadata:
-  root_path: '/metadata'
+  root_path: '/config/metadata'
   delete_source_nzb_on_removal: true
 
 providers:
@@ -30,6 +30,13 @@ providers:
 streaming:
   max_prefetch: 4
 
+transcoding:
+  enabled: false
+  profile: 'crt_480p'
+  hardware_acceleration: 'none'
+  ffmpeg_path: 'ffmpeg'
+  hardware_device: ''
+
 stremio:
   enabled: true
   nzb_ttl_hours: 24
@@ -42,15 +49,22 @@ stremio:
     languages: []
     qualities: []
 
+newznab:
+  enabled: false
+  url: ''
+  api_key: ''
+  username: ''
+  browse_limit: 100
+
 import:
   max_processor_workers: 2
   max_unpack_workers: 2
   import_strategy: 'strm'
-  import_dir: '/metadata/imports'
+  import_dir: '/config/imports'
 
 segment_cache:
   enabled: true
-  cache_path: '/metadata/segment-cache'
+  cache_path: '/config/segment-cache'
   max_size_gb: 10
   expiry_hours: 168
 

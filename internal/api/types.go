@@ -36,6 +36,7 @@ type ConfigAPIResponse struct {
 	Providers       []ProviderAPIResponse `json:"providers"`
 	Arrs            ArrsAPIResponse       `json:"arrs"`
 	Stremio         StremioAPIResponse    `json:"stremio"`
+	Newznab         NewznabAPIResponse    `json:"newznab"`
 	APIKey          string                `json:"api_key,omitempty"`      // User's API key for authentication
 	DownloadKey     string                `json:"download_key,omitempty"` // SHA256 of the API key, used for download/stream URLs
 	ProfilerEnabled bool                  `json:"profiler_enabled"`
@@ -151,6 +152,16 @@ type ProwlarrAPIResponse struct {
 	Categories []int    `json:"categories,omitempty"`
 	Languages  []string `json:"languages,omitempty"`
 	Qualities  []string `json:"qualities,omitempty"`
+}
+
+// NewznabAPIResponse sanitizes Newznab config for API responses.
+type NewznabAPIResponse struct {
+	Enabled     bool   `json:"enabled"`
+	URL         string `json:"url,omitempty"`
+	APIKey      string `json:"api_key"`
+	APIKeySet   bool   `json:"api_key_set"`
+	Username    string `json:"username,omitempty"`
+	BrowseLimit int    `json:"browse_limit,omitempty"`
 }
 
 // Helper functions to create API responses from core config types
@@ -270,6 +281,18 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		},
 	}
 
+	newznabResp := NewznabAPIResponse{
+		Enabled:     cfg.Newznab.Enabled != nil && *cfg.Newznab.Enabled,
+		URL:         cfg.Newznab.URL,
+		APIKey:      "",
+		APIKeySet:   cfg.Newznab.APIKey != "",
+		Username:    cfg.Newznab.Username,
+		BrowseLimit: cfg.Newznab.BrowseLimit,
+	}
+	if cfg.Newznab.APIKey != "" {
+		newznabResp.APIKey = "********"
+	}
+
 	return &ConfigAPIResponse{
 		Config:          cfg,
 		Server:          serverResp,
@@ -278,6 +301,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		Providers:       providers,
 		Arrs:            arrsResp,
 		Stremio:         stremioResp,
+		Newznab:         newznabResp,
 		APIKey:          apiKey,
 		DownloadKey:     downloadKey,
 		ProfilerEnabled: cfg.ProfilerEnabled,

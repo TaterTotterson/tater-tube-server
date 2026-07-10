@@ -148,7 +148,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	apiServer.SetMigrationRepo(db.MigrationRepo)
 
 	// Create stream handler for file streaming
-	streamHandler := setupStreamHandler(fs, repos.UserRepo, streamTracker)
+	streamHandler := setupStreamHandler(fs, repos.UserRepo, streamTracker, configManager.GetConfigGetter())
 
 	// Setup SPA routes
 	setupSPARoutes(app)
