@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -12,11 +13,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/TaterTotterson/tater-tube-server/internal/auth"
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"github.com/TaterTotterson/tater-tube-server/internal/database"
 	"github.com/TaterTotterson/tater-tube-server/internal/httpclient"
@@ -45,10 +47,18 @@ type taterUsenetCategory struct {
 type taterUsenetItem struct {
 	Title       string `json:"title"`
 	NzbURL      string `json:"nzbUrl"`
+	Type        string `json:"type,omitempty"`
+	MediaType   string `json:"mediaType,omitempty"`
+	SearchQuery string `json:"searchQuery,omitempty"`
+	CategoryID  string `json:"categoryId,omitempty"`
+	SourceIndex int    `json:"sourceIndex,omitempty"`
+	Path        string `json:"path,omitempty"`
+	StreamURL   string `json:"streamUrl,omitempty"`
 	GUID        string `json:"guid,omitempty"`
 	Date        string `json:"date,omitempty"`
 	Description string `json:"description,omitempty"`
 	Category    string `json:"category,omitempty"`
+	Poster      string `json:"poster,omitempty"`
 	Files       string `json:"files,omitempty"`
 	Grabs       string `json:"grabs,omitempty"`
 	SizeBytes   int64  `json:"sizeBytes,omitempty"`
@@ -110,14 +120,31 @@ type newznabError struct {
 	Description string `xml:"description,attr"`
 }
 
+type cinemetaCatalogResponse struct {
+	Metas []cinemetaMeta `json:"metas"`
+}
+
+type cinemetaMeta struct {
+	ID          string   `json:"id"`
+	IMDBID      string   `json:"imdb_id"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Year        string   `json:"year"`
+	ReleaseInfo string   `json:"releaseInfo"`
+	Released    string   `json:"released"`
+	Description string   `json:"description"`
+	Poster      string   `json:"poster"`
+	Genre       []string `json:"genre"`
+	Genres      []string `json:"genres"`
+}
+
 func (s *Server) handleTaterUsenetStatus(c *fiber.Ctx) error {
-	cfg, downloadKey, ok := s.taterUsenetAuthorizedConfig(c)
+	cfg, _, ok := s.taterUsenetAuthorizedConfig(c)
 	if !ok {
 		return nil
 	}
 	return RespondSuccess(c, fiber.Map{
-		"configured":   taterNewznabEnabled(cfg),
-		"download_key": downloadKey,
+		"configured": taterNewznabEnabled(cfg) || taterLocalMediaEnabled(cfg),
 	})
 }
 
@@ -126,50 +153,76 @@ func (s *Server) handleTaterUsenetCatalog(c *fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
-	if !taterNewznabEnabled(cfg) {
-		return RespondServiceUnavailable(c, "Newznab Stream catalog is not configured", "")
+	if !taterNewznabEnabled(cfg) && !taterLocalMediaEnabled(cfg) {
+		return RespondServiceUnavailable(c, "Stream catalog is not configured", "")
 	}
 
-	body, err := taterFetchNewznab(c.Context(), cfg, map[string]string{"t": "caps"})
-	if err != nil {
-		return RespondServiceUnavailable(c, "Failed to load Newznab categories", err.Error())
-	}
-	children, err := parseTaterNewznabCategories(body)
-	if err != nil {
-		return RespondServiceUnavailable(c, "Failed to parse Newznab categories", err.Error())
-	}
-
-	streamChildren := []taterUsenetCategory{
-		{Type: "search", Title: "Search", Detail: "ALL MEDIA"},
-		{Type: "trendingRoot", Title: "Trending", Detail: "PROVIDER", Children: taterTrendingRows()},
-	}
-	streamChildren = append(streamChildren, children...)
-
-	return RespondSuccess(c, fiber.Map{
-		"categories": []taterUsenetCategory{{
+	categories := []taterUsenetCategory{}
+	if taterNewznabEnabled(cfg) {
+		body, err := taterFetchNewznab(c.Context(), cfg, map[string]string{"t": "caps"})
+		if err != nil {
+			return RespondServiceUnavailable(c, "Failed to load Newznab categories", err.Error())
+		}
+		children, err := parseTaterNewznabCategories(body)
+		if err != nil {
+			return RespondServiceUnavailable(c, "Failed to parse Newznab categories", err.Error())
+		}
+		streamChildren := []taterUsenetCategory{}
+		streamChildren = append(streamChildren,
+			taterUsenetCategory{Type: "search", Title: "Search", Detail: "ALL MEDIA"},
+		)
+		streamChildren = append(streamChildren,
+			taterUsenetCategory{Type: "discoverRoot", Title: "Discover", Detail: "GUIDE", Children: taterDiscoverRows()},
+			taterUsenetCategory{Type: "trendingRoot", Title: "Trending", Detail: "PROVIDER", Children: taterTrendingRows()},
+		)
+		streamChildren = append(streamChildren, children...)
+		categories = append(categories, taterUsenetCategory{
 			ID:       "stream",
 			Title:    "Stream",
-			Detail:   "SERVER",
+			Detail:   "NZB",
 			Type:     "group",
 			IsGroup:  true,
 			Children: streamChildren,
 			Count:    len(streamChildren),
-		}},
+		})
+	}
+	if taterLocalMediaEnabled(cfg) {
+		categories = append(categories, taterLocalRootRow(cfg))
+	}
+
+	return RespondSuccess(c, fiber.Map{
+		"categories": categories,
 	})
 }
 
 func (s *Server) handleTaterUsenetItems(c *fiber.Ctx) error {
-	cfg, _, ok := s.taterUsenetAuthorizedConfig(c)
+	cfg, playerToken, ok := s.taterUsenetAuthorizedConfig(c)
 	if !ok {
 		return nil
-	}
-	if !taterNewznabEnabled(cfg) {
-		return RespondServiceUnavailable(c, "Newznab Stream catalog is not configured", "")
 	}
 
 	categoryID := strings.TrimSpace(c.Query("category_id"))
 	if categoryID == "" {
 		return RespondValidationError(c, "Category is required", "category_id is empty")
+	}
+	if strings.HasPrefix(categoryID, "local:") {
+		if !taterLocalMediaEnabled(cfg) {
+			return RespondServiceUnavailable(c, "Local media is not configured", "")
+		}
+		sourceIndex := parseTaterInt(c.Query("source"), -1)
+		items, err := taterLocalMediaItems(cfg, resolveBaseURL(c, ""), playerToken, strings.TrimPrefix(categoryID, "local:"), sourceIndex, c.Query("path"))
+		if err != nil {
+			return RespondValidationError(c, "Failed to load local media", err.Error())
+		}
+		title := strings.TrimSpace(c.Query("title"))
+		if title == "" {
+			title = "Local"
+		}
+		return RespondSuccess(c, fiber.Map{"title": title, "items": items})
+	}
+
+	if !taterNewznabEnabled(cfg) {
+		return RespondServiceUnavailable(c, "Newznab Stream catalog is not configured", "")
 	}
 	title := strings.TrimSpace(c.Query("title"))
 	if title == "" {
@@ -226,6 +279,36 @@ func (s *Server) handleTaterUsenetSearch(c *fiber.Ctx) error {
 	})
 }
 
+func (s *Server) handleTaterUsenetDiscover(c *fiber.Ctx) error {
+	cfg, _, ok := s.taterUsenetAuthorizedConfig(c)
+	if !ok {
+		return nil
+	}
+	if !taterNewznabEnabled(cfg) {
+		return RespondServiceUnavailable(c, "Newznab Stream catalog is not configured", "")
+	}
+
+	catalog := strings.ToLower(strings.TrimSpace(c.Query("catalog")))
+	mediaType, catalogID, genre, title, err := taterDiscoverCatalog(catalog)
+	if err != nil {
+		return RespondValidationError(c, err.Error(), "")
+	}
+
+	body, err := taterFetchURL(c.Context(), cfg, taterCinemetaCatalogURL(mediaType, catalogID, genre))
+	if err != nil {
+		return RespondServiceUnavailable(c, "Discover load failed", err.Error())
+	}
+	items, err := parseTaterCinemetaItems(body, mediaType)
+	if err != nil {
+		return RespondServiceUnavailable(c, "Failed to parse Discover feed", err.Error())
+	}
+
+	return RespondSuccess(c, fiber.Map{
+		"title": title,
+		"items": items,
+	})
+}
+
 func (s *Server) handleTaterUsenetTrending(c *fiber.Ctx) error {
 	cfg, _, ok := s.taterUsenetAuthorizedConfig(c)
 	if !ok {
@@ -266,7 +349,7 @@ func (s *Server) handleTaterUsenetTrending(c *fiber.Ctx) error {
 
 func (s *Server) handleTaterUsenetPlay(c *fiber.Ctx) error {
 	ctx := c.Context()
-	cfg, downloadKey, ok := s.taterUsenetAuthorizedConfig(c)
+	cfg, playerToken, ok := s.taterUsenetAuthorizedConfig(c)
 	if !ok {
 		return nil
 	}
@@ -312,7 +395,7 @@ func (s *Server) handleTaterUsenetPlay(c *fiber.Ctx) error {
 		}
 	}
 	nzbName := nzbtrim.TrimNzbExtension(safeFilename)
-	baseURL := resolveBaseURL(c, cfg.Stremio.BaseURL)
+	baseURL := resolveBaseURL(c, "")
 	category := strings.TrimSpace(req.Category)
 	if category == "" {
 		category = "tater-tube"
@@ -385,42 +468,11 @@ func (s *Server) handleTaterUsenetPlay(c *fiber.Ctx) error {
 	if !ok {
 		return RespondInternalError(c, "Unexpected stream result", "")
 	}
-	return s.waitAndRespond(c, itemID, baseURL, downloadKey, nzbName, nil, req.Timeout)
+	return s.waitAndRespondWithStreamAuth(c, itemID, baseURL, "player_token", playerToken, nzbName, nil, req.Timeout)
 }
 
 func (s *Server) taterUsenetAuthorizedConfig(c *fiber.Ctx) (*config.Config, string, bool) {
-	if s.configManager == nil {
-		RespondServiceUnavailable(c, "Configuration not available", "")
-		return nil, "", false
-	}
-
-	downloadKey := strings.TrimSpace(c.Query("download_key"))
-	if downloadKey == "" {
-		downloadKey = strings.TrimSpace(c.FormValue("download_key"))
-	}
-	if downloadKey != "" {
-		if s.validateDownloadKey(c.Context(), downloadKey) {
-			return s.configManager.GetConfig(), downloadKey, true
-		}
-		if s.validateAPIKey(c, downloadKey) {
-			return s.configManager.GetConfig(), auth.HashAPIKey(downloadKey), true
-		}
-		slog.WarnContext(c.Context(), "Tater Tube Stream endpoint: invalid download key")
-		RespondUnauthorized(c, "Invalid download_key", "")
-		return nil, "", false
-	}
-
-	if rawKey := strings.TrimSpace(c.Get("X-Api-Key")); rawKey != "" {
-		if s.validateAPIKey(c, rawKey) {
-			return s.configManager.GetConfig(), auth.HashAPIKey(rawKey), true
-		}
-		slog.WarnContext(c.Context(), "Tater Tube Stream endpoint: invalid X-Api-Key")
-		RespondUnauthorized(c, "Invalid X-Api-Key", "")
-		return nil, "", false
-	}
-
-	RespondUnauthorized(c, "Authentication required", "Provide download_key or X-Api-Key")
-	return nil, "", false
+	return s.taterAuthorizedConfig(c)
 }
 
 func taterNewznabEnabled(cfg *config.Config) bool {
@@ -429,6 +481,467 @@ func taterNewznabEnabled(cfg *config.Config) bool {
 		*cfg.Newznab.Enabled &&
 		strings.TrimSpace(cfg.Newznab.URL) != "" &&
 		strings.TrimSpace(cleanTaterAPIKey(cfg.Newznab.APIKey)) != ""
+}
+
+func taterLocalMediaEnabled(cfg *config.Config) bool {
+	if cfg == nil || cfg.LocalMedia.Enabled == nil || !*cfg.LocalMedia.Enabled {
+		return false
+	}
+	for _, cat := range cfg.LocalMedia.Categories {
+		if cat.Enabled != nil && !*cat.Enabled {
+			continue
+		}
+		if strings.TrimSpace(cat.ID) != "" && strings.TrimSpace(cat.Name) != "" && len(cat.Paths) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func taterLocalRootRow(cfg *config.Config) taterUsenetCategory {
+	children := []taterUsenetCategory{}
+	for _, cat := range cfg.LocalMedia.Categories {
+		if cat.Enabled != nil && !*cat.Enabled {
+			continue
+		}
+		id := strings.TrimSpace(cat.ID)
+		name := cleanTaterText(cat.Name)
+		if id == "" || name == "" || len(cat.Paths) == 0 {
+			continue
+		}
+		children = append(children, taterUsenetCategory{
+			ID:        "local:" + id,
+			Type:      "local",
+			Title:     name,
+			Detail:    "LOCAL",
+			Group:     "Local",
+			FullTitle: "Local / " + name,
+			Category:  id,
+		})
+	}
+	return taterUsenetCategory{
+		Type:     "localRoot",
+		Title:    "Local",
+		Detail:   "SERVER",
+		Group:    "Local",
+		IsGroup:  true,
+		Count:    len(children),
+		Children: children,
+	}
+}
+
+func taterLocalMediaItems(cfg *config.Config, baseURL, playerToken, categoryID string, sourceIndex int, relPath string) ([]taterUsenetItem, error) {
+	cat, ok := taterLocalMediaCategory(cfg, categoryID)
+	if !ok {
+		return nil, fmt.Errorf("local media category not found")
+	}
+	paths := taterLocalMediaCategoryPaths(cat)
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("local media category has no folders")
+	}
+	switch strings.ToLower(strings.TrimSpace(cat.LibraryType)) {
+	case "tv":
+		return taterLocalTVItems(cat, paths, baseURL, playerToken, sourceIndex, relPath)
+	case "folders":
+		return taterLocalFolderItems(cat, paths, baseURL, playerToken, sourceIndex, relPath)
+	default:
+		return taterLocalMovieItems(cat, paths, baseURL, playerToken)
+	}
+}
+
+func taterLocalFolderItems(cat config.LocalMediaCategory, paths []string, baseURL, playerToken string, sourceIndex int, relPath string) ([]taterUsenetItem, error) {
+	if sourceIndex < 0 && strings.TrimSpace(relPath) == "" && len(paths) > 1 {
+		items := make([]taterUsenetItem, 0, len(paths))
+		for i, root := range paths {
+			title := cleanTaterText(filepath.Base(root))
+			if title == "." || title == string(filepath.Separator) || title == "" {
+				title = fmt.Sprintf("Folder %d", i+1)
+			}
+			items = append(items, taterUsenetItem{
+				Title:       title,
+				Type:        "localFolder",
+				MediaType:   "folder",
+				CategoryID:  "local:" + cat.ID,
+				SourceIndex: i,
+				Path:        "",
+				SizeText:    "FOLDER",
+			})
+		}
+		return items, nil
+	}
+
+	if sourceIndex < 0 {
+		sourceIndex = 0
+	}
+	if sourceIndex >= len(paths) {
+		return nil, fmt.Errorf("local media source not found")
+	}
+	root := paths[sourceIndex]
+	cleanRel := cleanLocalRelativePath(relPath)
+	dirPath, err := safeLocalPath(root, cleanRel)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]taterUsenetItem, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		childRel := filepath.ToSlash(filepath.Join(cleanRel, name))
+		if entry.IsDir() {
+			items = append(items, taterUsenetItem{
+				Title:       cleanLocalTitle(name),
+				Type:        "localFolder",
+				MediaType:   "folder",
+				CategoryID:  "local:" + cat.ID,
+				SourceIndex: sourceIndex,
+				Path:        childRel,
+				SizeText:    "FOLDER",
+			})
+			continue
+		}
+		if !isMediaExtension(filepath.Ext(name)) {
+			continue
+		}
+		info, _ := entry.Info()
+		size := int64(0)
+		if info != nil {
+			size = info.Size()
+		}
+		item := taterUsenetItem{
+			Title:       cleanMovieTitleFromName(strings.TrimSuffix(name, filepath.Ext(name))),
+			Type:        "localFile",
+			MediaType:   "video",
+			CategoryID:  "local:" + cat.ID,
+			SourceIndex: sourceIndex,
+			Path:        childRel,
+			StreamURL:   taterLocalStreamURL(baseURL, cat.ID, sourceIndex, childRel, playerToken),
+			SizeBytes:   size,
+		}
+		if size > 0 {
+			item.SizeText = formatTaterBytes(size)
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func taterLocalMovieItems(cat config.LocalMediaCategory, paths []string, baseURL, playerToken string) ([]taterUsenetItem, error) {
+	items := []taterUsenetItem{}
+	for sourceIndex, root := range paths {
+		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			name := entry.Name()
+			if strings.HasPrefix(name, ".") {
+				if entry.IsDir() && path != root {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			if !isMediaExtension(filepath.Ext(name)) {
+				return nil
+			}
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return nil
+			}
+			rel = filepath.ToSlash(rel)
+			info, _ := entry.Info()
+			size := int64(0)
+			if info != nil {
+				size = info.Size()
+			}
+			titleSource := movieTitleSource(root, rel)
+			title, year := cleanMovieTitleAndYear(titleSource)
+			if title == "" {
+				title = cleanMovieTitleFromName(strings.TrimSuffix(name, filepath.Ext(name)))
+			}
+			item := taterUsenetItem{
+				Title:       title,
+				Type:        "localFile",
+				MediaType:   "movie",
+				CategoryID:  "local:" + cat.ID,
+				SourceIndex: sourceIndex,
+				Path:        rel,
+				StreamURL:   taterLocalStreamURL(baseURL, cat.ID, sourceIndex, rel, playerToken),
+				Date:        year,
+				SizeBytes:   size,
+				SizeText:    localMovieDetail(year),
+			}
+			items = append(items, item)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return strings.ToLower(items[i].Title) < strings.ToLower(items[j].Title)
+	})
+	return items, nil
+}
+
+func taterLocalTVItems(cat config.LocalMediaCategory, paths []string, baseURL, playerToken string, sourceIndex int, relPath string) ([]taterUsenetItem, error) {
+	if sourceIndex < 0 && strings.TrimSpace(relPath) == "" {
+		items := []taterUsenetItem{}
+		for i, root := range paths {
+			entries, err := os.ReadDir(root)
+			if err != nil {
+				continue
+			}
+			for _, entry := range entries {
+				if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+					continue
+				}
+				items = append(items, taterUsenetItem{
+					Title:       cleanShowTitle(entry.Name()),
+					Type:        "localFolder",
+					MediaType:   "show",
+					CategoryID:  "local:" + cat.ID,
+					SourceIndex: i,
+					Path:        filepath.ToSlash(entry.Name()),
+					SizeText:    "SHOW",
+				})
+			}
+		}
+		sort.SliceStable(items, func(i, j int) bool {
+			return strings.ToLower(items[i].Title) < strings.ToLower(items[j].Title)
+		})
+		return items, nil
+	}
+	if sourceIndex < 0 {
+		sourceIndex = 0
+	}
+	if sourceIndex >= len(paths) {
+		return nil, fmt.Errorf("local media source not found")
+	}
+	root := paths[sourceIndex]
+	cleanRel := cleanLocalRelativePath(relPath)
+	dirPath, err := safeLocalPath(root, cleanRel)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return nil, err
+	}
+
+	items := []taterUsenetItem{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		childRel := filepath.ToSlash(filepath.Join(cleanRel, name))
+		if entry.IsDir() {
+			items = append(items, taterUsenetItem{
+				Title:       cleanSeasonTitle(name),
+				Type:        "localFolder",
+				MediaType:   "season",
+				CategoryID:  "local:" + cat.ID,
+				SourceIndex: sourceIndex,
+				Path:        childRel,
+				SizeText:    "SEASON",
+			})
+			continue
+		}
+		if !isMediaExtension(filepath.Ext(name)) {
+			continue
+		}
+		info, _ := entry.Info()
+		size := int64(0)
+		if info != nil {
+			size = info.Size()
+		}
+		item := taterUsenetItem{
+			Title:       cleanEpisodeTitle(strings.TrimSuffix(name, filepath.Ext(name))),
+			Type:        "localFile",
+			MediaType:   "episode",
+			CategoryID:  "local:" + cat.ID,
+			SourceIndex: sourceIndex,
+			Path:        childRel,
+			StreamURL:   taterLocalStreamURL(baseURL, cat.ID, sourceIndex, childRel, playerToken),
+			SizeBytes:   size,
+			SizeText:    "EPISODE",
+		}
+		items = append(items, item)
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return strings.ToLower(items[i].Title) < strings.ToLower(items[j].Title)
+	})
+	return items, nil
+}
+
+func taterLocalMediaCategory(cfg *config.Config, id string) (config.LocalMediaCategory, bool) {
+	id = strings.TrimPrefix(strings.TrimSpace(id), "local:")
+	for _, cat := range cfg.LocalMedia.Categories {
+		if strings.TrimSpace(cat.ID) != id {
+			continue
+		}
+		if cat.Enabled != nil && !*cat.Enabled {
+			return config.LocalMediaCategory{}, false
+		}
+		return cat, true
+	}
+	return config.LocalMediaCategory{}, false
+}
+
+func taterLocalMediaCategoryPaths(cat config.LocalMediaCategory) []string {
+	paths := make([]string, 0, len(cat.Paths))
+	for _, raw := range cat.Paths {
+		path := strings.TrimSpace(raw)
+		if path == "" {
+			continue
+		}
+		paths = append(paths, filepath.Clean(path))
+	}
+	return paths
+}
+
+func cleanLocalRelativePath(value string) string {
+	value = strings.TrimSpace(filepath.ToSlash(value))
+	if value == "" || value == "." || value == "/" {
+		return ""
+	}
+	clean := filepath.ToSlash(filepath.Clean("/" + value))
+	return strings.TrimPrefix(clean, "/")
+}
+
+var (
+	localYearPattern      = regexp.MustCompile(`\b(19[0-9]{2}|20[0-9]{2})\b`)
+	localQualityTail      = regexp.MustCompile(`(?i)\b(2160p|1080p|720p|480p|bluray|blu-ray|brrip|webrip|web-dl|webdl|hdtv|x264|x265|h264|h265|hevc|aac|dts|truehd|atmos|proper|repack|extended|remux)\b.*$`)
+	localEpisodePattern   = regexp.MustCompile(`(?i)\bS([0-9]{1,2})E([0-9]{1,3})\b`)
+	localSeasonPattern    = regexp.MustCompile(`(?i)^season[\s._-]*([0-9]{1,2})$|^s([0-9]{1,2})$`)
+	localSeparatorPattern = regexp.MustCompile(`[._]+`)
+)
+
+func movieTitleSource(root, rel string) string {
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if len(parts) > 1 {
+		parent := parts[len(parts)-2]
+		if parent != "" && parent != "." {
+			return parent
+		}
+	}
+	return strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel))
+}
+
+func cleanMovieTitleFromName(value string) string {
+	title, _ := cleanMovieTitleAndYear(value)
+	return title
+}
+
+func cleanMovieTitleAndYear(value string) (string, string) {
+	value = localSeparatorPattern.ReplaceAllString(value, " ")
+	value = strings.ReplaceAll(value, "-", " ")
+	year := ""
+	if match := localYearPattern.FindStringSubmatch(value); len(match) > 1 {
+		year = match[1]
+		value = value[:strings.Index(value, match[1])]
+	}
+	value = localQualityTail.ReplaceAllString(value, "")
+	return cleanTaterText(value), year
+}
+
+func localMovieDetail(year string) string {
+	if strings.TrimSpace(year) == "" {
+		return "MOVIE"
+	}
+	return "MOVIE " + strings.TrimSpace(year)
+}
+
+func cleanLocalTitle(value string) string {
+	value = localSeparatorPattern.ReplaceAllString(value, " ")
+	value = strings.ReplaceAll(value, "-", " ")
+	return cleanTaterText(value)
+}
+
+func cleanShowTitle(value string) string {
+	title, _ := cleanMovieTitleAndYear(value)
+	if title == "" {
+		title = cleanLocalTitle(value)
+	}
+	return title
+}
+
+func cleanSeasonTitle(value string) string {
+	value = cleanTaterText(localSeparatorPattern.ReplaceAllString(value, " "))
+	if match := localSeasonPattern.FindStringSubmatch(value); len(match) > 0 {
+		season := match[1]
+		if season == "" && len(match) > 2 {
+			season = match[2]
+		}
+		if n, err := strconv.Atoi(season); err == nil {
+			return fmt.Sprintf("Season %d", n)
+		}
+	}
+	return cleanLocalTitle(value)
+}
+
+func cleanEpisodeTitle(value string) string {
+	clean := localSeparatorPattern.ReplaceAllString(value, " ")
+	clean = strings.ReplaceAll(clean, "-", " ")
+	if match := localEpisodePattern.FindStringSubmatch(clean); len(match) >= 3 {
+		season, _ := strconv.Atoi(match[1])
+		episode, _ := strconv.Atoi(match[2])
+		idx := strings.Index(strings.ToLower(clean), strings.ToLower(match[0]))
+		tail := ""
+		if idx >= 0 {
+			tail = cleanTaterText(clean[idx+len(match[0]):])
+			tail = localQualityTail.ReplaceAllString(tail, "")
+			tail = cleanTaterText(tail)
+		}
+		prefix := fmt.Sprintf("S%02dE%02d", season, episode)
+		if tail != "" {
+			return prefix + " " + tail
+		}
+		return prefix
+	}
+	title, _ := cleanMovieTitleAndYear(value)
+	if title == "" {
+		title = cleanLocalTitle(value)
+	}
+	return title
+}
+
+func safeLocalPath(root, relPath string) (string, error) {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	targetAbs, err := filepath.Abs(filepath.Join(rootAbs, filepath.FromSlash(cleanLocalRelativePath(relPath))))
+	if err != nil {
+		return "", err
+	}
+	if targetAbs != rootAbs && !strings.HasPrefix(targetAbs, rootAbs+string(filepath.Separator)) {
+		return "", fmt.Errorf("local media path escapes category folder")
+	}
+	return targetAbs, nil
+}
+
+func taterLocalStreamURL(baseURL, categoryID string, sourceIndex int, relPath, playerToken string) string {
+	u, err := url.Parse(strings.TrimRight(baseURL, "/") + "/api/tater/local/stream")
+	if err != nil {
+		return ""
+	}
+	q := u.Query()
+	q.Set("category_id", categoryID)
+	q.Set("source", strconv.Itoa(sourceIndex))
+	q.Set("path", cleanLocalRelativePath(relPath))
+	q.Set("player_token", playerToken)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func taterBrowseLimit(cfg *config.Config) int {
@@ -678,6 +1191,127 @@ func taterTrendingRows() []taterUsenetCategory {
 	}
 }
 
+func taterDiscoverRows() []taterUsenetCategory {
+	year := strconv.Itoa(time.Now().Year())
+	return []taterUsenetCategory{
+		{Type: "discover", Title: "Popular Movies", Detail: "MOVIE", Group: "Discover", FullTitle: "Popular Movies", ID: "movie:top", Category: "movie"},
+		{Type: "discover", Title: "New Movies", Detail: year, Group: "Discover", FullTitle: "New Movies", ID: "movie:year:" + year, Category: "movie", Time: year},
+		{Type: "discover", Title: "Featured Movies", Detail: "MOVIE", Group: "Discover", FullTitle: "Featured Movies", ID: "movie:imdbrating", Category: "movie"},
+		{Type: "discover", Title: "Popular TV", Detail: "TV", Group: "Discover", FullTitle: "Popular TV", ID: "series:top", Category: "series"},
+		{Type: "discover", Title: "New TV", Detail: year, Group: "Discover", FullTitle: "New TV", ID: "series:year:" + year, Category: "series", Time: year},
+		{Type: "discover", Title: "Featured TV", Detail: "TV", Group: "Discover", FullTitle: "Featured TV", ID: "series:imdbrating", Category: "series"},
+	}
+}
+
+func taterDiscoverCatalog(catalog string) (mediaType, catalogID, genre, title string, err error) {
+	switch catalog {
+	case "movie:top":
+		return "movie", "top", "", "Popular Movies", nil
+	case "movie:imdbrating":
+		return "movie", "imdbRating", "", "Featured Movies", nil
+	case "series:top":
+		return "series", "top", "", "Popular TV", nil
+	case "series:imdbrating":
+		return "series", "imdbRating", "", "Featured TV", nil
+	}
+
+	parts := strings.Split(catalog, ":")
+	if len(parts) == 3 && (parts[0] == "movie" || parts[0] == "series") && parts[1] == "year" {
+		year := strings.TrimSpace(parts[2])
+		if len(year) != 4 {
+			return "", "", "", "", fmt.Errorf("Discover year is invalid")
+		}
+		if parts[0] == "movie" {
+			return "movie", "year", year, "New Movies", nil
+		}
+		return "series", "year", year, "New TV", nil
+	}
+
+	return "", "", "", "", fmt.Errorf("Discover catalog is invalid")
+}
+
+func taterCinemetaCatalogURL(mediaType, catalogID, genre string) string {
+	path := fmt.Sprintf("/catalog/%s/%s.json", url.PathEscape(mediaType), url.PathEscape(catalogID))
+	if genre != "" {
+		path = fmt.Sprintf("/catalog/%s/%s/genre=%s.json", url.PathEscape(mediaType), url.PathEscape(catalogID), url.PathEscape(genre))
+	}
+	u := url.URL{
+		Scheme: "https",
+		Host:   "v3-cinemeta.strem.io",
+		Path:   path,
+	}
+	return u.String()
+}
+
+func parseTaterCinemetaItems(data []byte, mediaType string) ([]taterUsenetItem, error) {
+	var catalog cinemetaCatalogResponse
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		return nil, fmt.Errorf("Discover JSON invalid")
+	}
+
+	rows := make([]taterUsenetItem, 0, len(catalog.Metas))
+	for _, meta := range catalog.Metas {
+		title := cleanTaterText(meta.Name)
+		if title == "" {
+			continue
+		}
+
+		release := cleanTaterText(meta.ReleaseInfo)
+		if release == "" {
+			release = cleanTaterText(meta.Year)
+		}
+		if release == "" && meta.Released != "" {
+			release = cleanTaterText(strings.Split(meta.Released, "T")[0])
+		}
+
+		kind := mediaType
+		if kind == "" {
+			kind = strings.ToLower(strings.TrimSpace(meta.Type))
+		}
+		label := "MOVIE"
+		searchQuery := title
+		if kind == "series" {
+			label = "TV"
+		} else if release != "" {
+			searchQuery = title + " " + release
+		}
+
+		genres := meta.Genres
+		if len(genres) == 0 {
+			genres = meta.Genre
+		}
+		genreText := cleanTaterText(strings.Join(genres, " / "))
+		category := label
+		if genreText != "" {
+			category += " / " + genreText
+		}
+
+		guid := strings.TrimSpace(meta.ID)
+		if guid == "" {
+			guid = strings.TrimSpace(meta.IMDBID)
+		}
+
+		sizeText := label
+		if release != "" {
+			sizeText += " " + release
+		}
+
+		rows = append(rows, taterUsenetItem{
+			Title:       title,
+			Type:        "discovery",
+			MediaType:   kind,
+			SearchQuery: searchQuery,
+			GUID:        guid,
+			Date:        release,
+			Description: cleanTaterText(meta.Description),
+			Category:    category,
+			Poster:      strings.TrimSpace(meta.Poster),
+			SizeText:    sizeText,
+		})
+	}
+	return rows, nil
+}
+
 func taterIsMediaCategoryGroup(id, name string) bool {
 	lower := strings.ToLower(strings.TrimSpace(name))
 	if strings.Contains(lower, "app") ||
@@ -825,6 +1459,18 @@ func parseTaterInt64(value string) int64 {
 	n, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return 0
+	}
+	return n
+}
+
+func parseTaterInt(value string, fallback int) int {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
 	}
 	return n
 }

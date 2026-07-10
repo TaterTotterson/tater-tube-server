@@ -37,24 +37,32 @@ transcoding:
   ffmpeg_path: 'ffmpeg'
   hardware_device: ''
 
-stremio:
-  enabled: true
-  nzb_ttl_hours: 24
-  base_url: ''
-  prowlarr:
-    enabled: false
-    host: ''
-    api_key: ''
-    categories: []
-    languages: []
-    qualities: []
-
 newznab:
   enabled: false
   url: ''
   api_key: ''
   username: ''
   browse_limit: 100
+
+local_media:
+  enabled: false
+  categories: []
+  # library_type can be:
+  # - movies: recursively scans video files and shows clean movie titles
+  # - tv: browses Show -> Season -> Episode folders
+  # - folders: preserves the raw folder structure
+  # Example:
+  # categories:
+  #   - id: 'movies'
+  #     name: 'Movies'
+  #     library_type: 'movies'
+  #     paths:
+  #       - '/media/movies'
+  #     enabled: true
+
+players:
+  paired: []
+  pairing_codes: []
 
 import:
   max_processor_workers: 2

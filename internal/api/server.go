@@ -160,29 +160,18 @@ func (s *Server) IsReady() bool {
 func (s *Server) SetupRoutes(app *fiber.App) {
 	app.Use("/sabnzbd", s.handleSABnzbd)
 
-	// Stremio addon endpoints — key-based auth, no JWT required.
-	// CORS must be open (*) so Stremio can install the addon from any origin.
-	stremioGroup := app.Group("/stremio", cors.New(cors.Config{
-		AllowOrigins: "*",
-		AllowHeaders: "Origin, Content-Type, Accept",
-		AllowMethods: "GET, OPTIONS",
-	}))
-	stremioGroup.Get("/:key/manifest.json", s.handleStremioManifest)
-	stremioGroup.Get("/:key/stream/:type/:id.json", s.handleStremioAddonStream)
-	stremioGroup.Get("/:key/play", s.handleStremioAddonPlay)
-
 	api := app.Group(s.config.Prefix)
 
 	// Public endpoints (authentication handled inside or not required)
 	api.Post("/import/file", s.handleManualImportFile)
 	api.Post("/arrs/webhook", s.handleArrsWebhook)
-	api.Post("/nzb/streams", s.handleNzbStreams)
 	api.Get("/tater/server", s.handleTaterServerInfo)
-	api.Post("/tater/usenet/streams", s.handleNzbStreams)
+	api.Post("/tater/players/pair", s.handleTaterPairPlayer)
 	api.Get("/tater/usenet/status", s.handleTaterUsenetStatus)
 	api.Get("/tater/usenet/catalog", s.handleTaterUsenetCatalog)
 	api.Get("/tater/usenet/items", s.handleTaterUsenetItems)
 	api.Get("/tater/usenet/search", s.handleTaterUsenetSearch)
+	api.Get("/tater/usenet/discover", s.handleTaterUsenetDiscover)
 	api.Get("/tater/usenet/trending", s.handleTaterUsenetTrending)
 	api.Post("/tater/usenet/play", s.handleTaterUsenetPlay)
 
@@ -233,6 +222,10 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 			api.Use(auth.RequireAuthWithSkip(tokenService, s.userRepo, skipPaths))
 		}
 	}
+
+	api.Get("/tater/players", s.handleTaterPlayers)
+	api.Post("/tater/players/codes", s.handleTaterCreatePairingCode)
+	api.Delete("/tater/players/:id", s.handleTaterRevokePlayer)
 
 	// Queue endpoints
 	api.Get("/queue", s.handleListQueue)

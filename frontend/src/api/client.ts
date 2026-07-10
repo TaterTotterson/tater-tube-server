@@ -36,6 +36,8 @@ import type {
 	ProviderTestRequest,
 	ProviderTestResponse,
 	ProviderUpdateRequest,
+	TaterPairingCodeCreateResponse,
+	TaterPlayersConfig,
 } from "../types/config";
 import type { UpdateChannel, UpdateStatusResponse } from "../types/update";
 
@@ -715,6 +717,23 @@ class APIClient {
 	// Configuration endpoints
 	async getConfig() {
 		return this.request<ConfigResponse>("/config");
+	}
+
+	async getTaterPlayers() {
+		return this.request<TaterPlayersConfig>("/tater/players");
+	}
+
+	async createTaterPairingCode(name?: string) {
+		return this.request<TaterPairingCodeCreateResponse>("/tater/players/codes", {
+			method: "POST",
+			body: JSON.stringify({ name: name ?? "" }),
+		});
+	}
+
+	async revokeTaterPlayer(id: string) {
+		return this.request<{ message: string }>(`/tater/players/${encodeURIComponent(id)}`, {
+			method: "DELETE",
+		});
 	}
 
 	async updateConfigSection(section: ConfigSection, config: ConfigUpdateRequest) {

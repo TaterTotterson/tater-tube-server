@@ -76,22 +76,48 @@ func NewStreamHandler(fs *nzbfilesystem.NzbFilesystem, userRepo *database.UserRe
 	}
 }
 
-// authenticate validates the download_key parameter against user API keys.
+// authenticate validates either a paired Tater Tube player token or a legacy
+// download_key parameter against user API keys.
 // When login is not required, authentication is skipped and an anonymous user is returned.
 // Returns the user and true if the download_key matches a hashed API key from any user.
 func (h *StreamHandler) authenticate(r *http.Request) (*database.User, bool) {
 	ctx := r.Context()
 
+	playerToken := strings.TrimSpace(r.URL.Query().Get("player_token"))
+	if playerToken == "" {
+		playerToken = bearerToken(r.Header.Get("Authorization"))
+	}
+	if playerToken == "" {
+		playerToken = strings.TrimSpace(r.Header.Get("X-Tater-Player-Token"))
+	}
+	if playerToken != "" {
+		if h.configGetter != nil {
+			if player, ok := findTaterPlayerByToken(h.configGetter(), playerToken); ok {
+				slog.DebugContext(ctx, "Stream authenticated by Tater Tube player token",
+					"player_id", player.ID,
+					"path", r.URL.Query().Get("path"))
+				return nil, true
+			}
+		}
+		slog.WarnContext(ctx, "Stream authentication failed - invalid player token",
+			"path", r.URL.Query().Get("path"),
+			"remote_addr", r.RemoteAddr)
+		return nil, false
+	}
+
 	// Extract download_key from query parameter
 	downloadKey := r.URL.Query().Get("download_key")
 	if downloadKey == "" {
-		slog.WarnContext(ctx, "Stream access attempt without download_key",
+		slog.WarnContext(ctx, "Stream access attempt without player_token or download_key",
 			"path", r.URL.Query().Get("path"),
 			"remote_addr", r.RemoteAddr)
 		return nil, false
 	}
 
 	// Get all users with API keys
+	if h.userRepo == nil {
+		return nil, false
+	}
 	users, err := h.userRepo.GetAllUsers(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to get users for authentication",
@@ -122,7 +148,7 @@ func (h *StreamHandler) authenticate(r *http.Request) (*database.User, bool) {
 
 // GetHTTPHandler returns an http.Handler that serves files from NzbFilesystem
 // This handler:
-// - Requires authentication via download_key parameter
+// - Requires authentication via player_token or legacy download_key parameter
 // - Preserves context for logging and health tracking
 // - Uses http.ServeContent for automatic Range request handling
 // - Supports ETag and Last-Modified for caching
@@ -133,7 +159,7 @@ func (h *StreamHandler) GetHTTPHandler() http.Handler {
 		_, ok := h.authenticate(r)
 		if !ok {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="Stream API"`)
-			http.Error(w, "Unauthorized: valid download_key required", http.StatusUnauthorized)
+			http.Error(w, "Unauthorized: valid player_token required", http.StatusUnauthorized)
 			return
 		}
 
