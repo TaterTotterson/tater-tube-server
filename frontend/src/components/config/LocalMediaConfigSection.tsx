@@ -72,13 +72,15 @@ export function LocalMediaConfigSection({
 		const count = formData.categories.length + 1;
 		update({
 			...formData,
-			categories: formData.categories.concat([{
-				id: `local-${count}`,
-				name: `Local ${count}`,
-				library_type: "movies",
-				paths: [""],
-				enabled: true,
-			}]),
+			categories: formData.categories.concat([
+				{
+					id: `local-${count}`,
+					name: `Local ${count}`,
+					library_type: "movies",
+					paths: [""],
+					enabled: true,
+				},
+			]),
 		});
 	};
 
@@ -131,7 +133,8 @@ export function LocalMediaConfigSection({
 							</h4>
 						</div>
 						<p className="max-w-2xl text-base-content/60 text-sm leading-relaxed">
-							Add server or container folder paths. These appear under Stream / Local on paired Tater Tube players.
+							Add server or container folder paths. These appear under Stream / Local on paired
+							Tater Tube players.
 						</p>
 					</div>
 					<label className="flex items-center gap-3">
@@ -153,20 +156,29 @@ export function LocalMediaConfigSection({
 						</div>
 					)}
 					{formData.categories.map((category, categoryIndex) => (
-						<div key={`${category.id}-${categoryIndex}`} className="rounded-xl border border-base-300 bg-base-100/70 p-4">
+						<div
+							key={`local-category-${categoryIndex}`}
+							className="rounded-xl border border-base-300 bg-base-100/70 p-4"
+						>
 							<div className="grid gap-3 md:grid-cols-[1fr_1fr_12rem_auto] md:items-end">
 								<label className="form-control">
-									<span className="label-text font-bold text-base-content text-sm">Category Name</span>
+									<span className="label-text font-bold text-base-content text-sm">
+										Category Name
+									</span>
 									<input
 										type="text"
 										className="input input-bordered mt-2 w-full"
 										value={category.name}
 										disabled={isReadOnly}
-										onChange={(event) => updateCategory(categoryIndex, { name: event.target.value })}
+										onChange={(event) =>
+											updateCategory(categoryIndex, { name: event.target.value })
+										}
 									/>
 								</label>
 								<label className="form-control">
-									<span className="label-text font-bold text-base-content text-sm">Category ID</span>
+									<span className="label-text font-bold text-base-content text-sm">
+										Category ID
+									</span>
 									<input
 										type="text"
 										className="input input-bordered mt-2 w-full"
@@ -176,12 +188,16 @@ export function LocalMediaConfigSection({
 									/>
 								</label>
 								<label className="form-control">
-									<span className="label-text font-bold text-base-content text-sm">Library Type</span>
+									<span className="label-text font-bold text-base-content text-sm">
+										Library Type
+									</span>
 									<select
 										className="select select-bordered mt-2 w-full"
 										value={category.library_type || "movies"}
 										disabled={isReadOnly}
-										onChange={(event) => updateCategory(categoryIndex, { library_type: event.target.value })}
+										onChange={(event) =>
+											updateCategory(categoryIndex, { library_type: event.target.value })
+										}
 									>
 										<option value="movies">Movies</option>
 										<option value="tv">TV Shows</option>
@@ -203,27 +219,34 @@ export function LocalMediaConfigSection({
 								<div className="font-bold text-base-content/50 text-xs uppercase tracking-widest">
 									Folders
 								</div>
-								{((category.paths ?? []).length > 0 ? category.paths : [""]).map((path, pathIndex) => (
-									<div key={`${category.id}-path-${pathIndex}`} className="flex gap-2">
-										<input
-											type="text"
-											className="input input-bordered w-full"
-											placeholder="/media/movies"
-											value={path}
-											disabled={isReadOnly}
-											onChange={(event) => updatePath(categoryIndex, pathIndex, event.target.value)}
-										/>
-										<button
-											type="button"
-											className="btn btn-ghost btn-square"
-											disabled={isReadOnly}
-											onClick={() => removePath(categoryIndex, pathIndex)}
-											aria-label="Remove folder"
+								{((category.paths ?? []).length > 0 ? category.paths : [""]).map(
+									(path, pathIndex) => (
+										<div
+											key={`local-category-${categoryIndex}-path-${pathIndex}`}
+											className="flex gap-2"
 										>
-											<Trash2 className="h-4 w-4" />
-										</button>
-									</div>
-								))}
+											<input
+												type="text"
+												className="input input-bordered w-full"
+												placeholder="/media/movies"
+												value={path}
+												disabled={isReadOnly}
+												onChange={(event) =>
+													updatePath(categoryIndex, pathIndex, event.target.value)
+												}
+											/>
+											<button
+												type="button"
+												className="btn btn-ghost btn-square"
+												disabled={isReadOnly}
+												onClick={() => removePath(categoryIndex, pathIndex)}
+												aria-label="Remove folder"
+											>
+												<Trash2 className="h-4 w-4" />
+											</button>
+										</div>
+									),
+								)}
 								<button
 									type="button"
 									className="btn btn-outline btn-sm"
@@ -239,7 +262,12 @@ export function LocalMediaConfigSection({
 				</div>
 
 				<div className="mt-6">
-					<button type="button" className="btn btn-outline rounded-full" disabled={isReadOnly} onClick={addCategory}>
+					<button
+						type="button"
+						className="btn btn-outline rounded-full"
+						disabled={isReadOnly}
+						onClick={addCategory}
+					>
 						<Plus className="h-4 w-4" />
 						Add Category
 					</button>
@@ -254,7 +282,11 @@ export function LocalMediaConfigSection({
 						onClick={handleSave}
 						disabled={!hasChanges || isUpdating}
 					>
-						{isUpdating ? <span className="loading loading-spinner loading-sm" /> : <Save className="h-4 w-4" />}
+						{isUpdating ? (
+							<span className="loading loading-spinner loading-sm" />
+						) : (
+							<Save className="h-4 w-4" />
+						)}
 						Save Local Media
 					</button>
 				</div>

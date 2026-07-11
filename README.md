@@ -4,6 +4,10 @@
   <img src="./frontend/public/tater-tube-logo.png" alt="Tater Tube" width="520" />
 </p>
 
+<p align="center">
+  <a href="https://tatertube.tv">tatertube.tv</a>
+</p>
+
 Tater Tube Server is the backend foundation for Tater Tube. The first supported
 server role is Usenet/NZB streaming: Tater Tube browses a Newznab-backed Stream
 catalog on the server, selects a release, and receives a playable stream URL.
