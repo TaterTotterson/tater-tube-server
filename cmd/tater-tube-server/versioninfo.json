@@ -1,13 +1,13 @@
 {
   "FixedFileInfo": {
     "FileVersion": {
-      "Major": 0,
+      "Major": 1,
       "Minor": 0,
       "Patch": 0,
       "Build": 0
     },
     "ProductVersion": {
-      "Major": 0,
+      "Major": 1,
       "Minor": 0,
       "Patch": 0,
       "Build": 0
@@ -22,14 +22,14 @@
     "Comments": "Tater Tube Server - Usenet streaming backend",
     "CompanyName": "Tater Tube Server",
     "FileDescription": "Tater Tube Server CLI",
-    "FileVersion": "",
+    "FileVersion": "1.0.0",
     "InternalName": "tater-tube-server",
     "LegalCopyright": "",
     "LegalTrademarks": "",
     "OriginalFilename": "tater-tube-server.exe",
     "PrivateBuild": "",
     "ProductName": "Tater Tube Server",
-    "ProductVersion": "",
+    "ProductVersion": "1.0.0",
     "SpecialBuild": ""
   },
   "VarFileInfo": {

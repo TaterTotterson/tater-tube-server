@@ -732,6 +732,13 @@ class APIClient {
 		});
 	}
 
+	async renameTaterPlayer(id: string, name: string) {
+		return this.request<{ id: string; name: string }>(`/tater/players/${encodeURIComponent(id)}`, {
+			method: "PATCH",
+			body: JSON.stringify({ name }),
+		});
+	}
+
 	async revokeTaterPlayer(id: string) {
 		return this.request<{ message: string }>(`/tater/players/${encodeURIComponent(id)}`, {
 			method: "DELETE",

@@ -29,6 +29,7 @@ type taterPlayerResponse struct {
 
 type taterPairingCodeResponse struct {
 	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
 	Code      string `json:"code,omitempty"`
 	CreatedAt string `json:"created_at"`
 	ExpiresAt string `json:"expires_at"`
@@ -45,6 +46,10 @@ type taterCreatePairingCodeRequest struct {
 
 type taterPairPlayerRequest struct {
 	PIN  string `json:"pin"`
+	Name string `json:"name"`
+}
+
+type taterUpdatePlayerRequest struct {
 	Name string `json:"name"`
 }
 
@@ -88,10 +93,15 @@ func (s *Server) handleTaterCreatePairingCode(c *fiber.Ctx) error {
 	if err != nil {
 		return RespondInternalError(c, "Failed to create pairing code", err.Error())
 	}
+	name := cleanTaterText(req.Name)
+	if name == "" {
+		name = "Tater Tube Player"
+	}
 
 	newCfg.Players.PairingCodes = pruneExpiredPairingCodes(newCfg.Players.PairingCodes, now)
 	newCfg.Players.PairingCodes = append(newCfg.Players.PairingCodes, config.PlayerPairingCode{
 		ID:        id,
+		Name:      name,
 		CodeHash:  hashTaterSecret(code),
 		CreatedAt: now.Format(time.RFC3339),
 		ExpiresAt: now.Add(taterPairingCodeTTL).Format(time.RFC3339),
@@ -103,6 +113,7 @@ func (s *Server) handleTaterCreatePairingCode(c *fiber.Ctx) error {
 
 	return RespondSuccess(c, taterPairingCodeResponse{
 		ID:        id,
+		Name:      name,
 		Code:      code,
 		CreatedAt: now.Format(time.RFC3339),
 		ExpiresAt: now.Add(taterPairingCodeTTL).Format(time.RFC3339),
@@ -133,9 +144,11 @@ func (s *Server) handleTaterPairPlayer(c *fiber.Ctx) error {
 
 	pairingCodes := pruneExpiredPairingCodes(newCfg.Players.PairingCodes, now)
 	matchIndex := -1
+	pairingCodeName := ""
 	for i, code := range pairingCodes {
 		if subtle.ConstantTimeCompare([]byte(code.CodeHash), []byte(codeHash)) == 1 {
 			matchIndex = i
+			pairingCodeName = code.Name
 			break
 		}
 	}
@@ -154,6 +167,9 @@ func (s *Server) handleTaterPairPlayer(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to create player", err.Error())
 	}
 	name := cleanTaterText(req.Name)
+	if name == "" {
+		name = cleanTaterText(pairingCodeName)
+	}
 	if name == "" {
 		name = "Tater Tube Player"
 	}
@@ -176,6 +192,57 @@ func (s *Server) handleTaterPairPlayer(c *fiber.Ctx) error {
 		PlayerID:   playerID,
 		PlayerName: name,
 		Token:      token,
+	})
+}
+
+func (s *Server) handleTaterUpdatePlayer(c *fiber.Ctx) error {
+	if s.configManager == nil {
+		return RespondServiceUnavailable(c, "Configuration not available", "")
+	}
+
+	playerID := strings.TrimSpace(c.Params("id"))
+	if playerID == "" {
+		return RespondValidationError(c, "Player ID is required", "")
+	}
+
+	var req taterUpdatePlayerRequest
+	if err := c.BodyParser(&req); err != nil {
+		return RespondValidationError(c, "Invalid player update", err.Error())
+	}
+	name := cleanTaterText(req.Name)
+	if name == "" {
+		return RespondValidationError(c, "Player name is required", "")
+	}
+
+	current := s.configManager.GetConfig()
+	if current == nil {
+		return RespondServiceUnavailable(c, "Configuration not available", "")
+	}
+	newCfg := current.DeepCopy()
+
+	var updated config.PlayerConfig
+	found := false
+	for i := range newCfg.Players.Paired {
+		if newCfg.Players.Paired[i].ID == playerID {
+			newCfg.Players.Paired[i].Name = name
+			updated = newCfg.Players.Paired[i]
+			found = true
+			break
+		}
+	}
+	if !found {
+		return RespondNotFound(c, "Player", playerID)
+	}
+
+	if err := s.saveUpdatedConfig(newCfg); err != nil {
+		return RespondInternalError(c, "Failed to rename player", err.Error())
+	}
+	return RespondSuccess(c, taterPlayerResponse{
+		ID:         updated.ID,
+		Name:       updated.Name,
+		CreatedAt:  updated.CreatedAt,
+		LastSeenAt: updated.LastSeenAt,
+		RevokedAt:  updated.RevokedAt,
 	})
 }
 
@@ -261,6 +328,17 @@ func findTaterPlayerByToken(cfg *config.Config, token string) (*config.PlayerCon
 	return nil, false
 }
 
+func taterPlayerDisplayName(player *config.PlayerConfig) string {
+	if player == nil {
+		return "Tater Tube Player"
+	}
+	name := strings.TrimSpace(player.Name)
+	if name == "" {
+		return "Tater Tube Player"
+	}
+	return name
+}
+
 func (s *Server) touchTaterPlayer(playerID string) {
 	current := s.configManager.GetConfig()
 	if current == nil {
@@ -311,6 +389,7 @@ func taterPlayersConfigResponse(players config.PlayersConfig, now time.Time) tat
 	for _, code := range pruneExpiredPairingCodes(players.PairingCodes, now) {
 		resp.PairingCodes = append(resp.PairingCodes, taterPairingCodeResponse{
 			ID:        code.ID,
+			Name:      code.Name,
 			CreatedAt: code.CreatedAt,
 			ExpiresAt: code.ExpiresAt,
 		})

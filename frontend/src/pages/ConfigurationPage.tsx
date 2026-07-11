@@ -2,6 +2,7 @@ import {
 	Activity,
 	AlertTriangle,
 	Cog,
+	Cpu,
 	Download,
 	Folder,
 	Globe,
@@ -31,6 +32,7 @@ import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection"
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
 import { TaterPlayersConfigSection } from "../components/config/TaterPlayersConfigSection";
+import { TranscodingConfigSection } from "../components/config/TranscodingConfigSection";
 import { ImportConfigSection } from "../components/config/WorkersConfigSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
@@ -71,6 +73,7 @@ const getIconComponent = (iconName: string) => {
 		Download,
 		Shield,
 		Cog,
+		Cpu,
 		Radio,
 		HardDrive,
 		ShieldAlert,
@@ -87,7 +90,7 @@ const getIconComponent = (iconName: string) => {
 const SECTION_GROUPS = [
 	{
 		title: "Streamer",
-		sections: ["newznab", "local_media", "players", "providers", "streaming"],
+		sections: ["players", "local_media", "newznab", "providers", "streaming", "transcoding"],
 	},
 	{
 		title: "Processing",
@@ -117,24 +120,24 @@ export function ConfigurationPage() {
 	const navigate = useNavigate();
 	const { section } = useParams<{ section: string }>();
 
-	// Get active section from URL parameter, default to player Stream setup.
+	// Get active section from URL parameter, default to player setup.
 	const activeSection = (() => {
-		if (!section) return "newznab";
+		if (!section) return "players";
 		// NZBLNK settings now live inside the Network section
 		if (section === "nzblnk") return "network" as ConfigSection;
 		return STREAMER_CONFIG_SECTIONS.has(section as ConfigSection | "system")
 			? (section as ConfigSection | "system")
-			: "newznab";
+			: "players";
 	})();
 
 	// Redirect to default section if no section is specified, or hidden legacy paths are requested.
 	useEffect(() => {
 		if (!section) {
-			navigate("/config/newznab", { replace: true });
+			navigate("/config/players", { replace: true });
 		} else if (section === "nzblnk") {
 			navigate("/config/network", { replace: true });
 		} else if (!STREAMER_CONFIG_SECTIONS.has(section as ConfigSection | "system")) {
-			navigate("/config/newznab", { replace: true });
+			navigate("/config/players", { replace: true });
 		}
 	}, [section, navigate]);
 
@@ -482,6 +485,13 @@ export function ConfigurationPage() {
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
+								{activeSection === "transcoding" && (
+									<TranscodingConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
 								{activeSection === "system" && (
 									<SystemConfigSection
 										config={config}
@@ -554,6 +564,7 @@ export function ConfigurationPage() {
 									"import",
 									"metadata",
 									"streaming",
+									"transcoding",
 									"system",
 									"providers",
 									"sabnzbd",

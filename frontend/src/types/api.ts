@@ -417,6 +417,13 @@ export interface ActiveStream {
 	status: string;
 	total_connections: number;
 	buffered_offset: number;
+	transcoded: boolean;
+	transcode_profile?: string;
+	transcode_name?: string;
+	hardware_acceleration?: string;
+	hardware_device?: string;
+	video_codec?: string;
+	hardware_active: boolean;
 }
 
 export interface PoolMetrics {

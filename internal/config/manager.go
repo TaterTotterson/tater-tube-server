@@ -222,6 +222,7 @@ type PlayerConfig struct {
 // the Tater Tube player.
 type PlayerPairingCode struct {
 	ID        string `yaml:"id" mapstructure:"id" json:"id"`
+	Name      string `yaml:"name,omitempty" mapstructure:"name" json:"name,omitempty"`
 	CodeHash  string `yaml:"code_hash" mapstructure:"code_hash" json:"-"`
 	CreatedAt string `yaml:"created_at" mapstructure:"created_at" json:"created_at"`
 	ExpiresAt string `yaml:"expires_at" mapstructure:"expires_at" json:"expires_at"`

@@ -222,7 +222,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// 9. Create HTTP server
-	customServer := createHTTPServer(apiServer, app, streamHandler, cfg.Server.Port, configManager.GetConfigGetter())
+	customServer := createHTTPServer(apiServer, app, streamHandler, streamTracker, cfg.Server.Port, configManager.GetConfigGetter())
 
 	logger.Info("Tater Tube Server started",
 		"port", cfg.Server.Port,

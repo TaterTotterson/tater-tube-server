@@ -362,13 +362,13 @@ func startHealthWorker(
 }
 
 // createHTTPServer creates the HTTP server with routing
-func createHTTPServer(apiServer *api.Server, app *fiber.App, streamHandler *api.StreamHandler, port int, configGetter config.ConfigGetter) *http.Server {
+func createHTTPServer(apiServer *api.Server, app *fiber.App, streamHandler *api.StreamHandler, streamTracker *api.StreamTracker, port int, configGetter config.ConfigGetter) *http.Server {
 	// Mount stream handler directly (no Fiber adapter needed)
 	streamHTTPHandler := streamHandler.GetHTTPHandler()
 
 	// Convert Fiber app to HTTP handler for all other routes
 	fiberHTTPHandler := adaptor.FiberApp(app)
-	localStreamHTTPHandler := api.NewLocalStreamHandler(configGetter).GetHTTPHandler()
+	localStreamHTTPHandler := api.NewLocalStreamHandler(configGetter, streamTracker).GetHTTPHandler()
 
 	// Create a handler that routes between Stream and Fiber
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

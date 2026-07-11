@@ -555,6 +555,7 @@ export interface TaterPlayer {
 
 export interface TaterPairingCode {
 	id: string;
+	name?: string;
 	code?: string;
 	created_at: string;
 	expires_at: string;
@@ -652,11 +653,11 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		canEdit: true,
 	},
 	transcoding: {
-		title: "Transcoding",
-		description: "FFmpeg playback conversion profiles and hardware acceleration.",
-		icon: "Radio",
+		title: "Hardware Transcoding",
+		description:
+			"FFmpeg playback conversion profiles and hardware acceleration for Stream and Local media.",
+		icon: "Cpu",
 		canEdit: true,
-		hidden: true,
 	},
 	segment_cache: {
 		title: "Segment Cache",

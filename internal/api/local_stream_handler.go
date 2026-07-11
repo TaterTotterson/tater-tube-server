@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"io"
 	"mime"
 	"net/http"
 	"os"
@@ -9,15 +11,17 @@ import (
 	"strings"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzbfilesystem"
 )
 
 // LocalStreamHandler serves configured host media folders to paired Tater Tube players.
 type LocalStreamHandler struct {
-	configGetter config.ConfigGetter
+	configGetter  config.ConfigGetter
+	streamTracker *StreamTracker
 }
 
-func NewLocalStreamHandler(configGetter config.ConfigGetter) *LocalStreamHandler {
-	return &LocalStreamHandler{configGetter: configGetter}
+func NewLocalStreamHandler(configGetter config.ConfigGetter, streamTracker *StreamTracker) *LocalStreamHandler {
+	return &LocalStreamHandler{configGetter: configGetter, streamTracker: streamTracker}
 }
 
 func (h *LocalStreamHandler) GetHTTPHandler() http.Handler {
@@ -39,7 +43,8 @@ func (h *LocalStreamHandler) GetHTTPHandler() http.Handler {
 		if token == "" {
 			token = strings.TrimSpace(r.Header.Get("X-Tater-Player-Token"))
 		}
-		if _, ok := findTaterPlayerByToken(cfg, token); !ok {
+		player, ok := findTaterPlayerByToken(cfg, token)
+		if !ok {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="Tater Local Stream"`)
 			http.Error(w, "Unauthorized: valid player_token required", http.StatusUnauthorized)
 			return
@@ -99,9 +104,31 @@ func (h *LocalStreamHandler) GetHTTPHandler() http.Handler {
 			return
 		}
 
-		transcoder := &StreamHandler{configGetter: h.configGetter}
+		playerName := taterPlayerDisplayName(player)
+		streamReq := r
+		var cleanup func()
+		var streamWriter http.ResponseWriter = w
+		var stream *nzbfilesystem.ActiveStream
+		if h.streamTracker != nil {
+			streamCtx, cancel := context.WithCancel(r.Context())
+			streamReq = r.WithContext(streamCtx)
+			stream = h.streamTracker.AddStream(path, "Local", playerName, r.RemoteAddr, r.UserAgent(), info.Size())
+			h.streamTracker.SetCancelFunc(stream.ID, cancel)
+			cleanup = func() {
+				cancel()
+				h.streamTracker.Remove(stream.ID)
+			}
+			defer cleanup()
+			streamWriter = &trackedResponseWriter{
+				ResponseWriter: w,
+				stream:         stream,
+				streamTracker:  h.streamTracker,
+			}
+		}
+
+		transcoder := &StreamHandler{configGetter: h.configGetter, streamTracker: h.streamTracker}
 		if transcoder.shouldTranscode(r, path) {
-			transcoder.serveTranscoded(w, r, r.Context(), path, file)
+			transcoder.serveTranscoded(streamWriter, streamReq, streamReq.Context(), path, file)
 			return
 		}
 
@@ -113,6 +140,15 @@ func (h *LocalStreamHandler) GetHTTPHandler() http.Handler {
 		w.Header().Set("Accept-Ranges", "bytes")
 		w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
 		w.Header().Set("Content-Disposition", `inline; filename="`+filepath.Base(path)+`"`)
-		http.ServeContent(w, r, filepath.Base(path), info.ModTime(), file)
+		var reader io.ReadSeeker = file
+		if stream != nil {
+			reader = &MonitoredFile{
+				file:          file,
+				stream:        stream,
+				ctx:           streamReq.Context(),
+				streamTracker: h.streamTracker,
+			}
+		}
+		http.ServeContent(w, streamReq, filepath.Base(path), info.ModTime(), reader)
 	})
 }
