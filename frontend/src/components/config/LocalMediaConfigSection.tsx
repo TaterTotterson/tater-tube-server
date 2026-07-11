@@ -133,8 +133,8 @@ export function LocalMediaConfigSection({
 							</h4>
 						</div>
 						<p className="max-w-2xl text-base-content/60 text-sm leading-relaxed">
-							Add server or container folder paths. These appear under Stream / Local on paired
-							Tater Tube players.
+							Add server or container folder paths. Movies, TV, and Folders appear under The Tube
+							Local. Music appears in Tape Deck when Tater Tube Server is selected.
 						</p>
 					</div>
 					<label className="flex items-center gap-3">
@@ -201,6 +201,7 @@ export function LocalMediaConfigSection({
 									>
 										<option value="movies">Movies</option>
 										<option value="tv">TV Shows</option>
+										<option value="music">Music</option>
 										<option value="folders">Folders</option>
 									</select>
 								</label>

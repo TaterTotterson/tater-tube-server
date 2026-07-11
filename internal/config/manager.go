@@ -885,9 +885,9 @@ func (c *Config) Validate() error {
 			cat.LibraryType = "movies"
 		}
 		switch cat.LibraryType {
-		case "movies", "tv", "folders":
+		case "movies", "tv", "music", "folders":
 		default:
-			return fmt.Errorf("local media category %s library_type must be movies, tv, or folders", cat.Name)
+			return fmt.Errorf("local media category %s library_type must be movies, tv, music, or folders", cat.Name)
 		}
 
 		cleanPaths := make([]string, 0, len(cat.Paths))

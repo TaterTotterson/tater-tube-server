@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/sha1"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
@@ -45,25 +46,34 @@ type taterUsenetCategory struct {
 }
 
 type taterUsenetItem struct {
-	Title       string `json:"title"`
-	NzbURL      string `json:"nzbUrl"`
-	Type        string `json:"type,omitempty"`
-	MediaType   string `json:"mediaType,omitempty"`
-	SearchQuery string `json:"searchQuery,omitempty"`
-	CategoryID  string `json:"categoryId,omitempty"`
-	SourceIndex int    `json:"sourceIndex,omitempty"`
-	Path        string `json:"path,omitempty"`
-	StreamURL   string `json:"streamUrl,omitempty"`
-	SeekMode    string `json:"seekMode,omitempty"`
-	GUID        string `json:"guid,omitempty"`
-	Date        string `json:"date,omitempty"`
-	Description string `json:"description,omitempty"`
-	Category    string `json:"category,omitempty"`
-	Poster      string `json:"poster,omitempty"`
-	Files       string `json:"files,omitempty"`
-	Grabs       string `json:"grabs,omitempty"`
-	SizeBytes   int64  `json:"sizeBytes,omitempty"`
-	SizeText    string `json:"sizeText,omitempty"`
+	Title           string `json:"title"`
+	Key             string `json:"key,omitempty"`
+	RatingKey       string `json:"ratingKey,omitempty"`
+	PartKey         string `json:"partKey,omitempty"`
+	NzbURL          string `json:"nzbUrl"`
+	Type            string `json:"type,omitempty"`
+	MediaType       string `json:"mediaType,omitempty"`
+	Artist          string `json:"artist,omitempty"`
+	Album           string `json:"album,omitempty"`
+	SearchQuery     string `json:"searchQuery,omitempty"`
+	CategoryID      string `json:"categoryId,omitempty"`
+	SourceIndex     int    `json:"sourceIndex,omitempty"`
+	Path            string `json:"path,omitempty"`
+	StreamURL       string `json:"streamUrl,omitempty"`
+	SeekMode        string `json:"seekMode,omitempty"`
+	GUID            string `json:"guid,omitempty"`
+	Date            string `json:"date,omitempty"`
+	Description     string `json:"description,omitempty"`
+	Category        string `json:"category,omitempty"`
+	Poster          string `json:"poster,omitempty"`
+	Files           string `json:"files,omitempty"`
+	Grabs           string `json:"grabs,omitempty"`
+	Index           int    `json:"index,omitempty"`
+	Duration        int64  `json:"duration,omitempty"`
+	LeafCount       int    `json:"leafCount,omitempty"`
+	SizeBytes       int64  `json:"sizeBytes,omitempty"`
+	SizeText        string `json:"sizeText,omitempty"`
+	DurationDisplay string `json:"durationDisplay,omitempty"`
 }
 
 type taterUsenetPlayRequest struct {
@@ -472,6 +482,52 @@ func (s *Server) handleTaterUsenetPlay(c *fiber.Ctx) error {
 	return s.waitAndRespondWithStreamAuth(c, itemID, baseURL, "player_token", playerToken, nzbName, nil, req.Timeout)
 }
 
+func (s *Server) handleTaterMusicLibraries(c *fiber.Ctx) error {
+	cfg, _, ok := s.taterUsenetAuthorizedConfig(c)
+	if !ok {
+		return nil
+	}
+	return RespondSuccess(c, fiber.Map{
+		"libraries": taterLocalMusicLibraries(cfg),
+	})
+}
+
+func (s *Server) handleTaterMusicAlbums(c *fiber.Ctx) error {
+	cfg, playerToken, ok := s.taterUsenetAuthorizedConfig(c)
+	if !ok {
+		return nil
+	}
+	categoryID := strings.TrimSpace(c.Query("category_id"))
+	if categoryID == "" {
+		return RespondValidationError(c, "Music library is required", "category_id is empty")
+	}
+	albums, err := taterLocalMusicAlbums(cfg, resolveBaseURL(c, ""), playerToken, categoryID)
+	if err != nil {
+		return RespondValidationError(c, "Failed to load music albums", err.Error())
+	}
+	return RespondSuccess(c, fiber.Map{
+		"albums": albums,
+	})
+}
+
+func (s *Server) handleTaterMusicTracks(c *fiber.Ctx) error {
+	cfg, playerToken, ok := s.taterUsenetAuthorizedConfig(c)
+	if !ok {
+		return nil
+	}
+	albumID := strings.TrimSpace(c.Query("album_id"))
+	if albumID == "" {
+		return RespondValidationError(c, "Music album is required", "album_id is empty")
+	}
+	tracks, err := taterLocalMusicTracks(cfg, resolveBaseURL(c, ""), playerToken, albumID)
+	if err != nil {
+		return RespondValidationError(c, "Failed to load music tracks", err.Error())
+	}
+	return RespondSuccess(c, fiber.Map{
+		"tracks": tracks,
+	})
+}
+
 func (s *Server) taterUsenetAuthorizedConfig(c *fiber.Ctx) (*config.Config, string, bool) {
 	return s.taterAuthorizedConfig(c)
 }
@@ -503,6 +559,9 @@ func taterLocalRootRow(cfg *config.Config) taterUsenetCategory {
 	children := []taterUsenetCategory{}
 	for _, cat := range cfg.LocalMedia.Categories {
 		if cat.Enabled != nil && !*cat.Enabled {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(cat.LibraryType)) == "music" {
 			continue
 		}
 		id := strings.TrimSpace(cat.ID)
@@ -543,6 +602,8 @@ func taterLocalMediaItems(cfg *config.Config, baseURL, playerToken, categoryID s
 	switch strings.ToLower(strings.TrimSpace(cat.LibraryType)) {
 	case "tv":
 		return taterLocalTVItems(cfg, cat, paths, baseURL, playerToken, sourceIndex, relPath)
+	case "music":
+		return taterLocalMusicAlbums(cfg, baseURL, playerToken, cat.ID)
 	case "folders":
 		return taterLocalFolderItems(cfg, cat, paths, baseURL, playerToken, sourceIndex, relPath)
 	default:
@@ -787,6 +848,226 @@ func taterLocalTVItems(cfg *config.Config, cat config.LocalMediaCategory, paths 
 	return items, nil
 }
 
+func taterLocalMusicLibraries(cfg *config.Config) []taterUsenetItem {
+	if cfg == nil || cfg.LocalMedia.Enabled == nil || !*cfg.LocalMedia.Enabled {
+		return []taterUsenetItem{}
+	}
+
+	items := []taterUsenetItem{}
+	for _, cat := range cfg.LocalMedia.Categories {
+		if cat.Enabled != nil && !*cat.Enabled {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(cat.LibraryType)) != "music" {
+			continue
+		}
+		id := strings.TrimSpace(cat.ID)
+		name := cleanTaterText(cat.Name)
+		if id == "" || name == "" || len(taterLocalMediaCategoryPaths(cat)) == 0 {
+			continue
+		}
+		items = append(items, taterUsenetItem{
+			Title:      name,
+			Key:        id,
+			RatingKey:  id,
+			Type:       "musicLibrary",
+			MediaType:  "music",
+			CategoryID: "local:" + id,
+			SizeText:   "MUSIC",
+		})
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return strings.ToLower(items[i].Title) < strings.ToLower(items[j].Title)
+	})
+	return items
+}
+
+type taterMusicAlbumScan struct {
+	ID          string
+	CategoryID  string
+	SourceIndex int
+	RelPath     string
+	Title       string
+	Artist      string
+	LeafCount   int
+	SizeBytes   int64
+}
+
+func taterLocalMusicAlbums(cfg *config.Config, baseURL, playerToken, categoryID string) ([]taterUsenetItem, error) {
+	cat, ok := taterLocalMediaCategory(cfg, categoryID)
+	if !ok {
+		return nil, fmt.Errorf("music category not found")
+	}
+	if strings.ToLower(strings.TrimSpace(cat.LibraryType)) != "music" {
+		return nil, fmt.Errorf("local media category is not music")
+	}
+	paths := taterLocalMediaCategoryPaths(cat)
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("music category has no folders")
+	}
+
+	albums := map[string]*taterMusicAlbumScan{}
+	for sourceIndex, root := range paths {
+		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			name := entry.Name()
+			if strings.HasPrefix(name, ".") {
+				if entry.IsDir() && path != root {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if entry.IsDir() || !isAudioExtension(filepath.Ext(name)) {
+				return nil
+			}
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return nil
+			}
+			rel = filepath.ToSlash(rel)
+			albumRel := cleanLocalRelativePath(filepath.ToSlash(filepath.Dir(rel)))
+			id := taterMusicAlbumID(cat.ID, sourceIndex, albumRel)
+			album, ok := albums[id]
+			if !ok {
+				title, artist := localMusicAlbumTitle(cat.Name, albumRel)
+				album = &taterMusicAlbumScan{
+					ID:          id,
+					CategoryID:  cat.ID,
+					SourceIndex: sourceIndex,
+					RelPath:     albumRel,
+					Title:       title,
+					Artist:      artist,
+				}
+				albums[id] = album
+			}
+			if info, statErr := entry.Info(); statErr == nil && info != nil {
+				album.SizeBytes += info.Size()
+			}
+			album.LeafCount++
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	items := make([]taterUsenetItem, 0, len(albums))
+	for _, album := range albums {
+		items = append(items, taterUsenetItem{
+			Title:       album.Title,
+			Key:         album.ID,
+			RatingKey:   album.ID,
+			Type:        "album",
+			MediaType:   "album",
+			Artist:      album.Artist,
+			CategoryID:  "local:" + album.CategoryID,
+			SourceIndex: album.SourceIndex,
+			Path:        album.RelPath,
+			LeafCount:   album.LeafCount,
+			SizeBytes:   album.SizeBytes,
+			SizeText:    musicAlbumDetail(album.LeafCount),
+		})
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		left := strings.ToLower(items[i].Artist + " " + items[i].Title)
+		right := strings.ToLower(items[j].Artist + " " + items[j].Title)
+		return left < right
+	})
+	return items, nil
+}
+
+func taterLocalMusicTracks(cfg *config.Config, baseURL, playerToken, albumID string) ([]taterUsenetItem, error) {
+	categoryID, sourceIndex, albumRel, ok := parseTaterMusicAlbumID(albumID)
+	if !ok {
+		return nil, fmt.Errorf("music album id is invalid")
+	}
+	cat, ok := taterLocalMediaCategory(cfg, categoryID)
+	if !ok {
+		return nil, fmt.Errorf("music category not found")
+	}
+	if strings.ToLower(strings.TrimSpace(cat.LibraryType)) != "music" {
+		return nil, fmt.Errorf("local media category is not music")
+	}
+	paths := taterLocalMediaCategoryPaths(cat)
+	if sourceIndex < 0 || sourceIndex >= len(paths) {
+		return nil, fmt.Errorf("music source not found")
+	}
+
+	root := paths[sourceIndex]
+	albumPath, err := safeLocalPath(root, albumRel)
+	if err != nil {
+		return nil, err
+	}
+	albumTitle, artist := localMusicAlbumTitle(cat.Name, albumRel)
+	tracks := []taterUsenetItem{}
+	err = filepath.WalkDir(albumPath, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") {
+			if entry.IsDir() && path != albumPath {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() || !isAudioExtension(filepath.Ext(name)) {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		info, _ := entry.Info()
+		size := int64(0)
+		if info != nil {
+			size = info.Size()
+		}
+		index, title := cleanTrackTitleAndIndex(strings.TrimSuffix(name, filepath.Ext(name)))
+		itemID := taterMusicTrackID(cat.ID, sourceIndex, rel)
+		item := taterUsenetItem{
+			Title:       title,
+			Key:         itemID,
+			RatingKey:   itemID,
+			PartKey:     rel,
+			Type:        "track",
+			MediaType:   "audio",
+			Artist:      artist,
+			Album:       albumTitle,
+			CategoryID:  "local:" + cat.ID,
+			SourceIndex: sourceIndex,
+			Path:        rel,
+			StreamURL:   taterLocalStreamURL(baseURL, cat.ID, sourceIndex, rel, playerToken),
+			Index:       index,
+			SizeBytes:   size,
+		}
+		if size > 0 {
+			item.SizeText = formatTaterBytes(size)
+		}
+		tracks = append(tracks, item)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(tracks, func(i, j int) bool {
+		if tracks[i].Index != tracks[j].Index {
+			if tracks[i].Index == 0 {
+				return false
+			}
+			if tracks[j].Index == 0 {
+				return true
+			}
+			return tracks[i].Index < tracks[j].Index
+		}
+		return strings.ToLower(tracks[i].Title) < strings.ToLower(tracks[j].Title)
+	})
+	return tracks, nil
+}
+
 func taterLocalSeekMode(cfg *config.Config, ext string) string {
 	return "client"
 }
@@ -827,12 +1108,35 @@ func cleanLocalRelativePath(value string) string {
 }
 
 var (
-	localYearPattern      = regexp.MustCompile(`\b(19[0-9]{2}|20[0-9]{2})\b`)
-	localQualityTail      = regexp.MustCompile(`(?i)\b(2160p|1080p|720p|480p|bluray|blu-ray|brrip|webrip|web-dl|webdl|hdtv|x264|x265|h264|h265|hevc|aac|dts|truehd|atmos|proper|repack|extended|remux)\b.*$`)
-	localEpisodePattern   = regexp.MustCompile(`(?i)\bS([0-9]{1,2})E([0-9]{1,3})\b`)
-	localSeasonPattern    = regexp.MustCompile(`(?i)^season[\s._-]*([0-9]{1,2})$|^s([0-9]{1,2})$`)
-	localSeparatorPattern = regexp.MustCompile(`[._]+`)
+	localYearPattern        = regexp.MustCompile(`\b(19[0-9]{2}|20[0-9]{2})\b`)
+	localQualityTail        = regexp.MustCompile(`(?i)\b(2160p|1080p|720p|480p|bluray|blu-ray|brrip|webrip|web-dl|webdl|hdtv|x264|x265|h264|h265|hevc|aac|dts|truehd|atmos|proper|repack|extended|remux)\b.*$`)
+	localEpisodePattern     = regexp.MustCompile(`(?i)\bS([0-9]{1,2})E([0-9]{1,3})\b`)
+	localSeasonPattern      = regexp.MustCompile(`(?i)^season[\s._-]*([0-9]{1,2})$|^s([0-9]{1,2})$`)
+	localSeparatorPattern   = regexp.MustCompile(`[._]+`)
+	localTrackPrefixPattern = regexp.MustCompile(`^\s*([0-9]{1,3})[\s._-]+`)
 )
+
+var localAudioExtensions = map[string]bool{
+	".aac":  true,
+	".aiff": true,
+	".alac": true,
+	".flac": true,
+	".m4a":  true,
+	".m4b":  true,
+	".mp3":  true,
+	".ogg":  true,
+	".opus": true,
+	".wav":  true,
+	".wma":  true,
+}
+
+func isAudioExtension(ext string) bool {
+	return localAudioExtensions[strings.ToLower(ext)]
+}
+
+func isLocalStreamExtension(ext string) bool {
+	return isMediaExtension(ext) || isAudioExtension(ext)
+}
 
 func movieTitleSource(root, rel string) string {
 	parts := strings.Split(filepath.ToSlash(rel), "/")
@@ -921,6 +1225,88 @@ func cleanEpisodeTitle(value string) string {
 		title = cleanLocalTitle(value)
 	}
 	return title
+}
+
+func localMusicAlbumTitle(categoryName, relPath string) (string, string) {
+	cleanRel := cleanLocalRelativePath(relPath)
+	if cleanRel == "" {
+		name := cleanTaterText(categoryName)
+		if name == "" {
+			name = "Music"
+		}
+		return name, "UNKNOWN ARTIST"
+	}
+	parts := strings.Split(cleanRel, "/")
+	album := cleanLocalTitle(parts[len(parts)-1])
+	artist := "UNKNOWN ARTIST"
+	if len(parts) > 1 {
+		artist = cleanLocalTitle(parts[len(parts)-2])
+	}
+	if album == "" {
+		album = cleanTaterText(categoryName)
+	}
+	return album, artist
+}
+
+func cleanTrackTitleAndIndex(value string) (int, string) {
+	clean := localSeparatorPattern.ReplaceAllString(value, " ")
+	clean = strings.ReplaceAll(clean, "-", " ")
+	index := 0
+	if match := localTrackPrefixPattern.FindStringSubmatch(clean); len(match) > 1 {
+		if n, err := strconv.Atoi(match[1]); err == nil {
+			index = n
+		}
+		clean = strings.TrimSpace(clean[len(match[0]):])
+	}
+	title := cleanTaterText(clean)
+	if title == "" {
+		title = cleanTaterText(value)
+	}
+	return index, title
+}
+
+func musicAlbumDetail(trackCount int) string {
+	if trackCount == 1 {
+		return "1 TRACK"
+	}
+	if trackCount > 1 {
+		return fmt.Sprintf("%d TRACKS", trackCount)
+	}
+	return "ALBUM"
+}
+
+func taterMusicAlbumID(categoryID string, sourceIndex int, relPath string) string {
+	return "music:" +
+		base64.RawURLEncoding.EncodeToString([]byte(strings.TrimSpace(categoryID))) +
+		":" + strconv.Itoa(sourceIndex) +
+		":" + base64.RawURLEncoding.EncodeToString([]byte(cleanLocalRelativePath(relPath)))
+}
+
+func parseTaterMusicAlbumID(value string) (string, int, string, bool) {
+	parts := strings.Split(value, ":")
+	if len(parts) != 4 || parts[0] != "music" {
+		return "", -1, "", false
+	}
+	categoryBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", -1, "", false
+	}
+	sourceIndex, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return "", -1, "", false
+	}
+	relBytes, err := base64.RawURLEncoding.DecodeString(parts[3])
+	if err != nil {
+		return "", -1, "", false
+	}
+	return string(categoryBytes), sourceIndex, cleanLocalRelativePath(string(relBytes)), true
+}
+
+func taterMusicTrackID(categoryID string, sourceIndex int, relPath string) string {
+	return "track:" +
+		base64.RawURLEncoding.EncodeToString([]byte(strings.TrimSpace(categoryID))) +
+		":" + strconv.Itoa(sourceIndex) +
+		":" + base64.RawURLEncoding.EncodeToString([]byte(cleanLocalRelativePath(relPath)))
 }
 
 func safeLocalPath(root, relPath string) (string, error) {

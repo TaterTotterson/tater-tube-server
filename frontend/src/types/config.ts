@@ -535,7 +535,7 @@ export interface NewznabConfig {
 export interface LocalMediaCategory {
 	id: string;
 	name: string;
-	library_type?: "movies" | "tv" | "folders" | string;
+	library_type?: "movies" | "tv" | "music" | "folders" | string;
 	paths: string[];
 	enabled?: boolean;
 }

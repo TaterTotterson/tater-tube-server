@@ -49,6 +49,7 @@ local_media:
   # library_type can be:
   # - movies: recursively scans video files and shows clean movie titles
   # - tv: browses Show -> Season -> Episode folders
+  # - music: scans Artist/Album or Album folders for audio tracks
   # - folders: preserves the raw folder structure
   # Example:
   # categories:
