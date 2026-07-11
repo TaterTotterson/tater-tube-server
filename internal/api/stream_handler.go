@@ -415,11 +415,15 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 		accel = "none"
 	}
 
-	accel = h.selectTranscodeAcceleration(r.Context(), ffmpegPath, cfg.Transcoding, profile, accel)
-	args := buildFFmpegTranscodeArgs(cfg.Transcoding, profile, accel)
-	videoCodec, _ := transcodeVideoSettings(accel, cfg.Transcoding.HardwareDevice, profile)
+	accel, selectedHardwareDevice := h.selectTranscodeAcceleration(r.Context(), ffmpegPath, cfg.Transcoding, profile, accel)
+	transcodeCfg := cfg.Transcoding
+	if selectedHardwareDevice != "" {
+		transcodeCfg.HardwareDevice = selectedHardwareDevice
+	}
+	args := buildFFmpegTranscodeArgs(transcodeCfg, profile, accel)
+	videoCodec, _ := transcodeVideoSettings(accel, transcodeCfg.HardwareDevice, profile)
 	effectiveAccel := effectiveTranscodeHardwareAccel(videoCodec)
-	hardwareDevice := effectiveTranscodeHardwareDevice(effectiveAccel, cfg.Transcoding.HardwareDevice)
+	hardwareDevice := effectiveTranscodeHardwareDevice(effectiveAccel, transcodeCfg.HardwareDevice)
 	h.markTranscodedStream(w, file, profileID, profile.Name, effectiveAccel, hardwareDevice, videoCodec)
 
 	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
@@ -524,13 +528,13 @@ func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodePro
 	return args
 }
 
-func (h *StreamHandler) selectTranscodeAcceleration(ctx context.Context, ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, requested string) string {
+func (h *StreamHandler) selectTranscodeAcceleration(ctx context.Context, ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, requested string) (string, string) {
 	requested = strings.ToLower(strings.TrimSpace(requested))
 	if requested == "" {
 		requested = "none"
 	}
 	if requested == "none" {
-		return requested
+		return requested, ""
 	}
 	if requested == "auto" {
 		detected := detectTranscodingHardware(cfg)
@@ -539,19 +543,37 @@ func (h *StreamHandler) selectTranscodeAcceleration(ctx context.Context, ffmpegP
 				"requested", requested,
 				"selected", detected.Recommended,
 				"device", detected.RecommendedDevice)
-			return detected.Recommended
+			return detected.Recommended, detected.RecommendedDevice
 		}
-		return "none"
+		return "none", ""
+	}
+
+	if strings.TrimSpace(cfg.HardwareDevice) == "" && (requested == "vaapi" || requested == "qsv") {
+		vendors := []string{"intel", "amd"}
+		if requested == "qsv" {
+			vendors = []string{"intel"}
+		}
+		device, reason, ok := probeTranscodeEncoderDevices(
+			ffmpegPath, cfg, profile, requested,
+			candidateDRIRenderDevices(detectDRMGPUVendors(), vendors, ""),
+		)
+		if ok {
+			return requested, device
+		}
+		slog.WarnContext(ctx, "Configured FFmpeg hardware acceleration is not usable",
+			"requested", requested,
+			"reason", reason)
+		return "none", ""
 	}
 
 	ok, reason := probeTranscodeEncoder(ctx, ffmpegPath, cfg, profile, requested)
 	if ok {
-		return requested
+		return requested, strings.TrimSpace(cfg.HardwareDevice)
 	}
 	slog.WarnContext(ctx, "Configured FFmpeg hardware acceleration is not usable",
 		"requested", requested,
 		"reason", reason)
-	return "none"
+	return "none", ""
 }
 
 func transcodeHardwareInitArgs(cfg config.TranscodingConfig, accel string) []string {

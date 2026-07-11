@@ -148,20 +148,11 @@ func qsvOption(ffmpegPath string, cfg config.TranscodingConfig, profile transcod
 		opt.Status = "Encoder present, /dev/dri not visible"
 		return opt
 	}
-	if len(gpus) > 0 && !hasGPUVendor(gpus, "intel") {
-		opt.Status = "Encoder present, Intel GPU not detected"
-		return opt
-	}
-	device := strings.TrimSpace(cfg.HardwareDevice)
-	if device == "" {
-		device = firstDRIRenderDeviceForVendor(gpus, "intel")
-	}
-	if device == "" {
-		device = firstDRIRenderDevice()
-	}
-	probeCfg := cfg
-	probeCfg.HardwareDevice = device
-	if ok, reason := probeTranscodeEncoder(context.Background(), ffmpegPath, probeCfg, profile, "qsv"); !ok {
+	device, reason, ok := probeTranscodeEncoderDevices(
+		ffmpegPath, cfg, profile, "qsv",
+		candidateDRIRenderDevices(gpus, []string{"intel"}, cfg.HardwareDevice),
+	)
+	if !ok {
 		opt.Status = "Encoder probe failed"
 		opt.Details = reason
 		return opt
@@ -186,17 +177,11 @@ func vaapiOption(ffmpegPath string, cfg config.TranscodingConfig, profile transc
 		opt.Status = "Encoder present, /dev/dri not visible"
 		return opt
 	}
-	if len(gpus) > 0 && !hasGPUVendor(gpus, "intel") && !hasGPUVendor(gpus, "amd") {
-		opt.Status = "Encoder present, supported DRM GPU not detected"
-		return opt
-	}
-	device := strings.TrimSpace(cfg.HardwareDevice)
-	if device == "" {
-		device = firstDRIRenderDevice()
-	}
-	probeCfg := cfg
-	probeCfg.HardwareDevice = device
-	if ok, reason := probeTranscodeEncoder(context.Background(), ffmpegPath, probeCfg, profile, "vaapi"); !ok {
+	device, reason, ok := probeTranscodeEncoderDevices(
+		ffmpegPath, cfg, profile, "vaapi",
+		candidateDRIRenderDevices(gpus, []string{"intel", "amd"}, cfg.HardwareDevice),
+	)
+	if !ok {
 		opt.Status = "Encoder probe failed"
 		opt.Details = reason
 		return opt
@@ -287,8 +272,7 @@ func pathExists(path string) bool {
 }
 
 func hasDRIRenderDevice() bool {
-	devices, _ := filepath.Glob("/dev/dri/renderD*")
-	return len(devices) > 0
+	return len(driRenderDevices()) > 0
 }
 
 func hasNvidiaDevice() bool {
@@ -351,10 +335,66 @@ func firstDRIRenderDeviceForVendor(gpus []drmGPUVendor, vendor string) string {
 	return ""
 }
 
+func candidateDRIRenderDevices(gpus []drmGPUVendor, preferredVendors []string, configuredDevice string) []string {
+	configuredDevice = strings.TrimSpace(configuredDevice)
+	if configuredDevice != "" {
+		return []string{configuredDevice}
+	}
+
+	candidates := make([]string, 0)
+	appendCandidate := func(device string) {
+		device = strings.TrimSpace(device)
+		if device == "" || !pathExists(device) {
+			return
+		}
+		for _, existing := range candidates {
+			if existing == device {
+				return
+			}
+		}
+		candidates = append(candidates, device)
+	}
+
+	for _, vendor := range preferredVendors {
+		for _, gpu := range gpus {
+			if gpu.Vendor == vendor {
+				appendCandidate(gpu.RenderDevice)
+			}
+		}
+	}
+	for _, device := range driRenderDevices() {
+		appendCandidate(device)
+	}
+	return candidates
+}
+
+func probeTranscodeEncoderDevices(ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, accel string, devices []string) (string, string, bool) {
+	if len(devices) == 0 {
+		return "", "no DRM render devices found", false
+	}
+
+	failures := make([]string, 0, len(devices))
+	for _, device := range devices {
+		probeCfg := cfg
+		probeCfg.HardwareDevice = device
+		if ok, reason := probeTranscodeEncoder(context.Background(), ffmpegPath, probeCfg, profile, accel); ok {
+			return device, "", true
+		} else {
+			failures = append(failures, device+": "+reason)
+		}
+	}
+	return "", truncateProbeReason(strings.Join(failures, " | ")), false
+}
+
 func firstDRIRenderDevice() string {
-	devices, _ := filepath.Glob("/dev/dri/renderD*")
+	devices := driRenderDevices()
 	if len(devices) == 0 {
 		return "/dev/dri/renderD128"
 	}
 	return devices[0]
+}
+
+func driRenderDevices() []string {
+	devices, _ := filepath.Glob("/dev/dri/renderD*")
+	return devices
 }

@@ -64,3 +64,26 @@ func TestFirstDRIRenderDeviceForVendorSkipsUnmappedDevice(t *testing.T) {
 
 	require.Empty(t, device)
 }
+
+func TestCandidateDRIRenderDevicesUsesConfiguredDeviceOnly(t *testing.T) {
+	candidates := candidateDRIRenderDevices(nil, []string{"intel"}, "/dev/dri/renderD130")
+
+	require.Equal(t, []string{"/dev/dri/renderD130"}, candidates)
+}
+
+func TestCandidateDRIRenderDevicesPrefersVendorDevice(t *testing.T) {
+	dir := t.TempDir()
+	intelRender := filepath.Join(dir, "renderD129")
+	amdRender := filepath.Join(dir, "renderD128")
+	require.NoError(t, os.WriteFile(intelRender, []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(amdRender, []byte{}, 0o644))
+
+	candidates := candidateDRIRenderDevices([]drmGPUVendor{
+		{RenderDevice: amdRender, Vendor: "amd"},
+		{RenderDevice: intelRender, Vendor: "intel"},
+	}, []string{"intel", "amd"}, "")
+
+	require.GreaterOrEqual(t, len(candidates), 2)
+	require.Equal(t, intelRender, candidates[0])
+	require.Equal(t, amdRender, candidates[1])
+}
