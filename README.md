@@ -87,6 +87,7 @@ services:
       - /mnt/user/appdata/tater-tube-server/config:/config
       - /mnt/user/media/movies:/media/movies:ro
       - /mnt/user/media/tv:/media/tv:ro
+      - /mnt/user/media/music:/media/music:ro
       - /mnt/user/media/home-videos:/media/home-videos:ro
     restart: unless-stopped
 ```
@@ -97,12 +98,14 @@ Then add categories like:
 | --- | --- | --- |
 | Movies | Movies | `/media/movies` |
 | TV Shows | TV Shows | `/media/tv` |
+| Music | Music | `/media/music` |
 | Home Videos | Folders | `/media/home-videos` |
 
 Library types:
 
 - `Movies` shows a clean movie title list.
 - `TV Shows` browses as show, season, then episode.
+- `Music` scans album folders for Tape Deck when Tater Tube Server is selected as its provider.
 - `Folders` keeps the original directory structure.
 
 Use container paths, not host paths, inside the Tater Tube Server web UI.

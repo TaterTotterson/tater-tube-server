@@ -174,6 +174,9 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/tater/usenet/discover", s.handleTaterUsenetDiscover)
 	api.Get("/tater/usenet/trending", s.handleTaterUsenetTrending)
 	api.Post("/tater/usenet/play", s.handleTaterUsenetPlay)
+	api.Get("/tater/music/libraries", s.handleTaterMusicLibraries)
+	api.Get("/tater/music/albums", s.handleTaterMusicAlbums)
+	api.Get("/tater/music/tracks", s.handleTaterMusicTracks)
 
 	cfg := s.configManager.GetConfig()
 

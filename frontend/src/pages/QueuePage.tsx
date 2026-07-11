@@ -768,9 +768,6 @@ export function QueuePage() {
 																</button>
 															</th>
 															<th className="font-bold text-base-content/80 text-xs uppercase tracking-widest">
-																Category
-															</th>
-															<th className="font-bold text-base-content/80 text-xs uppercase tracking-widest">
 																Size
 															</th>
 															<th className="font-bold text-base-content/80 text-xs uppercase tracking-widest">
@@ -840,15 +837,6 @@ export function QueuePage() {
 																			)}
 																		</div>
 																	</div>
-																</td>
-																<td>
-																	{item.category ? (
-																		<span className="badge badge-outline badge-xs py-2 font-semibold uppercase tracking-wide">
-																			{item.category}
-																		</span>
-																	) : (
-																		<span className="text-base-content/50">—</span>
-																	)}
 																</td>
 																<td>
 																	{item.file_size ? (

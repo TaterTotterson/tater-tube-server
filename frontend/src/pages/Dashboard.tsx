@@ -114,15 +114,15 @@ function StatTile({
 	detail: string;
 }) {
 	return (
-		<div className="rounded-lg border border-base-300 bg-base-200/70 p-4">
+		<div className="rounded-lg border border-base-300 bg-base-200/55 p-4">
 			<div className="flex items-start gap-3">
 				<div className="rounded-md bg-primary/15 p-2">
 					<Icon className="h-5 w-5 text-primary" />
 				</div>
 				<div className="min-w-0">
 					<div className="text-base-content/50 text-xs uppercase tracking-widest">{label}</div>
-					<div className="mt-1 truncate font-bold text-xl">{value}</div>
-					<div className="mt-1 text-base-content/60 text-sm">{detail}</div>
+					<div className="mt-1 truncate font-vcr text-primary text-xl">{value}</div>
+					<div className="mt-1 break-words text-base-content/60 text-sm leading-snug">{detail}</div>
 				</div>
 			</div>
 		</div>
@@ -210,41 +210,104 @@ export function Dashboard() {
 
 	return (
 		<div className="space-y-6">
-			<section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_220px]">
-				<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-					<StatTile
-						icon={Users}
-						label="Players Online"
-						value={`${onlinePlayers.length}/${players.length}`}
-						detail="paired players seen in the last five minutes"
-					/>
-					<StatTile
-						icon={Activity}
-						label="Now Playing"
-						value={String(activeStreams.length)}
-						detail={`${formatRate(poolMetrics?.download_speed_bytes_per_sec)} current server pull`}
-					/>
-					<StatTile
-						icon={Radio}
-						label="NNTP Providers"
-						value={String(providerCount)}
-						detail={`${providerMetrics.filter((provider) => provider.state === "connected").length} connected`}
-					/>
-					<StatTile
-						icon={List}
-						label="Queue"
-						value={`${activeQueueCount} active`}
-						detail={`${queueStats?.total_failed ?? 0} failed items`}
-					/>
-				</div>
+			<section className="grid gap-4 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)]">
+				<Panel title="Tater Tube Players" icon={Tv}>
+					<div className="space-y-3">
+						{players.length > 0 ? (
+							players.map((player) => {
+								const stream = streamByPlayerName.get(player.name);
+								const mode = playbackMode(stream);
+								return (
+									<div
+										key={player.id}
+										className="rounded-md border border-base-300 bg-base-100/70 p-3"
+									>
+										<div className="flex items-start justify-between gap-3">
+											<div className="min-w-0">
+												<div className="truncate font-semibold">{player.name}</div>
+												<div className="text-base-content/60 text-sm">
+													Last seen {timeAgo(player.last_seen_at)}
+												</div>
+											</div>
+											<span
+												className={`badge ${isOnline(player.last_seen_at) ? "badge-success" : "badge-ghost"}`}
+											>
+												{isOnline(player.last_seen_at) ? "Online" : "Idle"}
+											</span>
+										</div>
+										<div className="mt-2 text-base-content/70 text-sm">
+											{stream ? (
+												<div className="flex flex-wrap items-center gap-2">
+													<span className="min-w-0 truncate">
+														Playing {fileLabel(stream.file_path)}
+													</span>
+													{mode && (
+														<span className={`badge badge-sm ${mode.className}`}>{mode.label}</span>
+													)}
+												</div>
+											) : (
+												"No active stream"
+											)}
+											{mode?.detail && (
+												<div className="mt-1 text-base-content/50 text-xs">{mode.detail}</div>
+											)}
+										</div>
+									</div>
+								);
+							})
+						) : (
+							<div className="rounded-md border border-base-300 border-dashed p-4 text-base-content/60 text-sm">
+								No paired Tater Tube players yet.
+							</div>
+						)}
+					</div>
+				</Panel>
 
-				<div className="hidden place-items-center rounded-lg border border-primary/20 bg-base-200/70 p-3 xl:grid">
-					<img
-						src="/tater-tube-server-mascot.png"
-						alt="Tater Tube Server mascot"
-						className="max-h-44 w-full object-contain"
-					/>
-				</div>
+				<Panel title="Active Streams" icon={Gauge}>
+					<div className="space-y-3">
+						{activeStreams.length > 0 ? (
+							activeStreams.map((stream) => {
+								const mode = playbackMode(stream);
+								return (
+									<div
+										key={stream.id}
+										className="rounded-md border border-base-300 bg-base-100/70 p-3"
+									>
+										<div className="flex items-start justify-between gap-3">
+											<div className="min-w-0">
+												<div className="truncate font-semibold">{fileLabel(stream.file_path)}</div>
+												<div className="text-base-content/60 text-sm">
+													{stream.user_name || stream.source || "Unknown player"} -{" "}
+													{formatRate(stream.bytes_per_second || stream.download_speed)}
+												</div>
+											</div>
+											<div className="flex flex-wrap justify-end gap-2">
+												{mode && <span className={`badge ${mode.className}`}>{mode.label}</span>}
+												<span className="badge badge-primary">{stream.status || "Streaming"}</span>
+											</div>
+										</div>
+										{mode?.detail && (
+											<div className="mt-2 text-base-content/50 text-xs">{mode.detail}</div>
+										)}
+										<progress
+											className="progress progress-primary mt-3 h-2 w-full"
+											value={streamProgress(stream)}
+											max={100}
+										/>
+										<div className="mt-2 flex justify-between text-base-content/50 text-xs">
+											<span>{formatBytes(stream.bytes_sent)} sent</span>
+											<span>{formatBytes(stream.total_size)} total</span>
+										</div>
+									</div>
+								);
+							})
+						) : (
+							<div className="rounded-md border border-base-300 border-dashed p-4 text-base-content/60 text-sm">
+								No active streams.
+							</div>
+						)}
+					</div>
+				</Panel>
 			</section>
 
 			<section className="grid gap-4 xl:grid-cols-3">
@@ -356,106 +419,6 @@ export function Dashboard() {
 				</Panel>
 			</section>
 
-			<section className="grid gap-4 xl:grid-cols-2">
-				<Panel title="Tater Tube Players" icon={Tv}>
-					<div className="space-y-3">
-						{players.length > 0 ? (
-							players.map((player) => {
-								const stream = streamByPlayerName.get(player.name);
-								const mode = playbackMode(stream);
-								return (
-									<div
-										key={player.id}
-										className="rounded-md border border-base-300 bg-base-100/70 p-3"
-									>
-										<div className="flex items-start justify-between gap-3">
-											<div className="min-w-0">
-												<div className="truncate font-semibold">{player.name}</div>
-												<div className="text-base-content/60 text-sm">
-													Last seen {timeAgo(player.last_seen_at)}
-												</div>
-											</div>
-											<span
-												className={`badge ${isOnline(player.last_seen_at) ? "badge-success" : "badge-ghost"}`}
-											>
-												{isOnline(player.last_seen_at) ? "Online" : "Idle"}
-											</span>
-										</div>
-										<div className="mt-2 text-base-content/70 text-sm">
-											{stream ? (
-												<div className="flex flex-wrap items-center gap-2">
-													<span className="min-w-0 truncate">
-														Playing {fileLabel(stream.file_path)}
-													</span>
-													{mode && (
-														<span className={`badge badge-sm ${mode.className}`}>{mode.label}</span>
-													)}
-												</div>
-											) : (
-												"No active stream"
-											)}
-											{mode?.detail && (
-												<div className="mt-1 text-base-content/50 text-xs">{mode.detail}</div>
-											)}
-										</div>
-									</div>
-								);
-							})
-						) : (
-							<div className="rounded-md border border-base-300 border-dashed p-4 text-base-content/60 text-sm">
-								No paired Tater Tube players yet.
-							</div>
-						)}
-					</div>
-				</Panel>
-
-				<Panel title="Active Streams" icon={Gauge}>
-					<div className="space-y-3">
-						{activeStreams.length > 0 ? (
-							activeStreams.map((stream) => {
-								const mode = playbackMode(stream);
-								return (
-									<div
-										key={stream.id}
-										className="rounded-md border border-base-300 bg-base-100/70 p-3"
-									>
-										<div className="flex items-start justify-between gap-3">
-											<div className="min-w-0">
-												<div className="truncate font-semibold">{fileLabel(stream.file_path)}</div>
-												<div className="text-base-content/60 text-sm">
-													{stream.user_name || stream.source || "Unknown player"} -{" "}
-													{formatRate(stream.bytes_per_second || stream.download_speed)}
-												</div>
-											</div>
-											<div className="flex flex-wrap justify-end gap-2">
-												{mode && <span className={`badge ${mode.className}`}>{mode.label}</span>}
-												<span className="badge badge-primary">{stream.status || "Streaming"}</span>
-											</div>
-										</div>
-										{mode?.detail && (
-											<div className="mt-2 text-base-content/50 text-xs">{mode.detail}</div>
-										)}
-										<progress
-											className="progress progress-primary mt-3 h-2 w-full"
-											value={streamProgress(stream)}
-											max={100}
-										/>
-										<div className="mt-2 flex justify-between text-base-content/50 text-xs">
-											<span>{formatBytes(stream.bytes_sent)} sent</span>
-											<span>{formatBytes(stream.total_size)} total</span>
-										</div>
-									</div>
-								);
-							})
-						) : (
-							<div className="rounded-md border border-base-300 border-dashed p-4 text-base-content/60 text-sm">
-								No active streams.
-							</div>
-						)}
-					</div>
-				</Panel>
-			</section>
-
 			<section className="grid gap-4 md:grid-cols-2">
 				<Panel title="Provider Load" icon={Database}>
 					<div className="space-y-3">
@@ -506,6 +469,39 @@ export function Dashboard() {
 						</div>
 					</div>
 				</Panel>
+			</section>
+
+			<section className="space-y-3">
+				<div className="flex items-center gap-2">
+					<Activity className="h-4 w-4 text-primary" />
+					<h2 className="tater-glow font-vcr text-lg text-primary">System Summary</h2>
+				</div>
+				<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+					<StatTile
+						icon={Users}
+						label="Players Online"
+						value={`${onlinePlayers.length}/${players.length}`}
+						detail="paired players seen in the last five minutes"
+					/>
+					<StatTile
+						icon={Activity}
+						label="Now Playing"
+						value={String(activeStreams.length)}
+						detail={`${formatRate(poolMetrics?.download_speed_bytes_per_sec)} current server pull`}
+					/>
+					<StatTile
+						icon={Radio}
+						label="NNTP Providers"
+						value={String(providerCount)}
+						detail={`${providerMetrics.filter((provider) => provider.state === "connected").length} connected`}
+					/>
+					<StatTile
+						icon={List}
+						label="Queue"
+						value={`${activeQueueCount} active`}
+						detail={`${queueStats?.total_failed ?? 0} failed items`}
+					/>
+				</div>
 			</section>
 		</div>
 	);

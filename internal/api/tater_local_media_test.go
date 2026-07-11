@@ -98,3 +98,56 @@ func TestTaterLocalTVItemsBrowsesShowsSeasonsEpisodes(t *testing.T) {
 		t.Fatalf("unexpected episode rows: %#v", episodes)
 	}
 }
+
+func TestTaterLocalMusicItemsBrowseAlbumsAndTracks(t *testing.T) {
+	root := t.TempDir()
+	albumDir := filepath.Join(root, "Cool.Artist", "Big.Album.2024")
+	if err := os.MkdirAll(albumDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"01.Opening.Track.mp3",
+		"02.Second.Track.flac",
+		"cover.jpg",
+	} {
+		if err := os.WriteFile(filepath.Join(albumDir, name), []byte("audio"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := &config.Config{LocalMedia: config.LocalMediaConfig{
+		Enabled: boolPtr(true),
+		Categories: []config.LocalMediaCategory{{
+			ID:          "music",
+			Name:        "Music",
+			LibraryType: "music",
+			Paths:       []string{root},
+			Enabled:     boolPtr(true),
+		}},
+	}}
+	albums, err := taterLocalMusicAlbums(cfg, "http://server", "token", "music")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(albums) != 1 || albums[0].Title != "Big Album 2024" || albums[0].Artist != "Cool Artist" || albums[0].LeafCount != 2 {
+		t.Fatalf("unexpected albums: %#v", albums)
+	}
+
+	tracks, err := taterLocalMusicTracks(cfg, "http://server", "token", albums[0].RatingKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tracks) != 2 {
+		t.Fatalf("expected 2 tracks, got %#v", tracks)
+	}
+	if tracks[0].Title != "Opening Track" || tracks[0].Index != 1 || tracks[0].Album != "Big Album 2024" {
+		t.Fatalf("unexpected first track: %#v", tracks[0])
+	}
+	if !strings.Contains(tracks[0].StreamURL, "/api/tater/local/stream") || !strings.Contains(tracks[0].StreamURL, "player_token=token") {
+		t.Fatalf("track stream URL was not generated correctly: %s", tracks[0].StreamURL)
+	}
+}
+
+func boolPtr(value bool) *bool {
+	return &value
+}

@@ -1,15 +1,16 @@
 import {
 	Activity,
-	Bug,
+	Cpu,
 	Database,
-	ExternalLink,
 	Home,
 	List,
 	ScrollText,
 	Settings,
 	Tv,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
+import { apiClient } from "../../api/client";
 import { useQueueStats } from "../../hooks/useApi";
 import { useAuth } from "../../hooks/useAuth";
 
@@ -40,6 +41,11 @@ const navigation = [
 export function Sidebar() {
 	const { user, loginRequired } = useAuth();
 	const { data: queueStats } = useQueueStats();
+	const { data: transcodeDetection, isLoading: isDetectingHardware } = useQuery({
+		queryKey: ["system", "transcoding-detect", "sidebar"],
+		queryFn: () => apiClient.detectTranscodingHardware(),
+		refetchInterval: 60000,
+	});
 
 	const visibleNavigation = navigation.filter(
 		(item) => !item.adminOnly || !loginRequired || (user?.is_admin ?? false),
@@ -66,6 +72,33 @@ export function Sidebar() {
 			default:
 				return "badge-info";
 		}
+	};
+
+	const hardwareLabel = () => {
+		if (isDetectingHardware) return "Checking";
+		if (!transcodeDetection?.ffmpeg_available) return "No FFmpeg";
+		switch (transcodeDetection.recommended) {
+			case "vaapi":
+				return "VAAPI";
+			case "qsv":
+				return "QSV";
+			case "nvenc":
+				return "NVENC";
+			case "videotoolbox":
+				return "VTB";
+			case "v4l2m2m":
+				return "V4L2";
+			default:
+				return "Software";
+		}
+	};
+
+	const hardwareBadgeClass = () => {
+		if (isDetectingHardware) return "badge-ghost";
+		if (!transcodeDetection?.ffmpeg_available) return "badge-warning";
+		return transcodeDetection.recommended && transcodeDetection.recommended !== "none"
+			? "badge-success"
+			: "badge-ghost";
 	};
 
 	return (
@@ -152,6 +185,14 @@ export function Sidebar() {
 							</div>
 							<div className="text-base-content/70 text-sm">ready</div>
 						</div>
+
+						<div className="flex items-center justify-between">
+							<div className="flex items-center space-x-2">
+								<Cpu className="h-4 w-4 text-primary" />
+								<span className="text-sm">HW</span>
+							</div>
+							<div className={`badge badge-sm ${hardwareBadgeClass()}`}>{hardwareLabel()}</div>
+						</div>
 					</div>
 				</div>
 
@@ -161,29 +202,8 @@ export function Sidebar() {
 							<div className="text-base-content/70 text-sm">Version</div>
 							<div className="font-mono text-base-content text-sm">
 								{__APP_VERSION__}
-								{__GIT_COMMIT__ !== "unknown" && (
-									<span className="text-base-content/50"> ({__GIT_COMMIT__.slice(0, 7)})</span>
-								)}
 							</div>
 						</div>
-						<a
-							href={__GITHUB_URL__}
-							target="_blank"
-							rel="noopener noreferrer"
-							className="flex items-center space-x-2 text-base-content/70 text-sm transition-colors hover:text-base-content"
-						>
-							<ExternalLink className="h-4 w-4" />
-							<span>GitHub Repository</span>
-						</a>
-						<a
-							href={`${__GITHUB_URL__}/issues`}
-							target="_blank"
-							rel="noopener noreferrer"
-							className="flex items-center space-x-2 text-base-content/70 text-sm transition-colors hover:text-base-content"
-						>
-							<Bug className="h-4 w-4" />
-							<span>Report Issues</span>
-						</a>
 					</div>
 				</div>
 			</div>

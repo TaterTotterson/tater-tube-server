@@ -78,7 +78,7 @@ func (h *LocalStreamHandler) GetHTTPHandler() http.Handler {
 			http.Error(w, "Invalid local media path", http.StatusBadRequest)
 			return
 		}
-		if !isMediaExtension(filepath.Ext(path)) {
+		if !isLocalStreamExtension(filepath.Ext(path)) {
 			http.Error(w, "Unsupported media file", http.StatusBadRequest)
 			return
 		}
