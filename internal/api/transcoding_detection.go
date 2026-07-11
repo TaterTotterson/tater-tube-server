@@ -336,15 +336,10 @@ func firstDRIRenderDeviceForVendor(gpus []drmGPUVendor, vendor string) string {
 }
 
 func candidateDRIRenderDevices(gpus []drmGPUVendor, preferredVendors []string, configuredDevice string) []string {
-	configuredDevice = strings.TrimSpace(configuredDevice)
-	if configuredDevice != "" {
-		return []string{configuredDevice}
-	}
-
 	candidates := make([]string, 0)
-	appendCandidate := func(device string) {
+	appendCandidate := func(device string, requireExists bool) {
 		device = strings.TrimSpace(device)
-		if device == "" || !pathExists(device) {
+		if device == "" || (requireExists && !pathExists(device)) {
 			return
 		}
 		for _, existing := range candidates {
@@ -355,15 +350,18 @@ func candidateDRIRenderDevices(gpus []drmGPUVendor, preferredVendors []string, c
 		candidates = append(candidates, device)
 	}
 
+	// A saved render node is a preference, not a hard lock. If it is stale or
+	// points at the wrong GPU, continue probing visible devices.
+	appendCandidate(configuredDevice, false)
 	for _, vendor := range preferredVendors {
 		for _, gpu := range gpus {
 			if gpu.Vendor == vendor {
-				appendCandidate(gpu.RenderDevice)
+				appendCandidate(gpu.RenderDevice, true)
 			}
 		}
 	}
 	for _, device := range driRenderDevices() {
-		appendCandidate(device)
+		appendCandidate(device, true)
 	}
 	return candidates
 }
