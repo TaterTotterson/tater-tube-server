@@ -75,14 +75,18 @@ func detectTranscodingHardware(cfg config.TranscodingConfig) transcodeHardwareDe
 	hwaccels := ffmpegOutput(ffmpegPath, "-hide_banner", "-hwaccels")
 	gpus := detectDRMGPUVendors()
 	hasDRI := len(gpus) > 0 || pathExists("/dev/dri/renderD128")
+	profile := transcodeProfiles[cfg.Profile]
+	if profile.Name == "" {
+		profile = transcodeProfiles["crt_480p"]
+	}
 
 	options := []transcodeHardwareOption{
 		softwareOption(encoders),
-		nvencOption(encoders),
-		qsvOption(encoders, hwaccels, gpus, hasDRI),
-		vaapiOption(encoders, hwaccels, gpus, hasDRI),
-		videotoolboxOption(encoders),
-		v4l2m2mOption(encoders),
+		nvencOption(ffmpegPath, cfg, profile, encoders),
+		vaapiOption(ffmpegPath, cfg, profile, encoders, hwaccels, gpus, hasDRI),
+		qsvOption(ffmpegPath, cfg, profile, encoders, hwaccels, gpus, hasDRI),
+		videotoolboxOption(ffmpegPath, cfg, profile, encoders),
+		v4l2m2mOption(ffmpegPath, cfg, profile, encoders),
 	}
 	result.Options = options
 
@@ -91,7 +95,7 @@ func detectTranscodingHardware(cfg config.TranscodingConfig) transcodeHardwareDe
 		result.RecommendedDevice = opt.Device
 		return result
 	}
-	for _, id := range []string{"nvenc", "qsv", "vaapi", "v4l2m2m", "none"} {
+	for _, id := range []string{"nvenc", "vaapi", "qsv", "v4l2m2m", "none"} {
 		if opt := firstAvailable(options, id); opt != nil {
 			result.Recommended = opt.ID
 			result.RecommendedDevice = opt.Device
@@ -109,7 +113,7 @@ func softwareOption(encoders string) transcodeHardwareOption {
 	return transcodeHardwareOption{ID: "none", Label: "Software x264", Available: false, Status: "Missing libx264 encoder"}
 }
 
-func nvencOption(encoders string) transcodeHardwareOption {
+func nvencOption(ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, encoders string) transcodeHardwareOption {
 	opt := transcodeHardwareOption{ID: "nvenc", Label: "NVIDIA NVENC"}
 	if !hasFFmpegEncoder(encoders, "h264_nvenc") {
 		opt.Status = "Missing FFmpeg encoder"
@@ -120,12 +124,17 @@ func nvencOption(encoders string) transcodeHardwareOption {
 		opt.Details = "Map the NVIDIA device/runtime into the container."
 		return opt
 	}
+	if ok, reason := probeTranscodeEncoder(context.Background(), ffmpegPath, cfg, profile, "nvenc"); !ok {
+		opt.Status = "Encoder probe failed"
+		opt.Details = reason
+		return opt
+	}
 	opt.Available = true
 	opt.Status = "Available"
 	return opt
 }
 
-func qsvOption(encoders, hwaccels string, gpus []drmGPUVendor, hasDRI bool) transcodeHardwareOption {
+func qsvOption(ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, encoders, hwaccels string, gpus []drmGPUVendor, hasDRI bool) transcodeHardwareOption {
 	opt := transcodeHardwareOption{ID: "qsv", Label: "Intel Quick Sync"}
 	if !hasFFmpegEncoder(encoders, "h264_qsv") {
 		opt.Status = "Missing FFmpeg encoder"
@@ -143,13 +152,24 @@ func qsvOption(encoders, hwaccels string, gpus []drmGPUVendor, hasDRI bool) tran
 		opt.Status = "Encoder present, Intel GPU not detected"
 		return opt
 	}
+	device := strings.TrimSpace(cfg.HardwareDevice)
+	if device == "" {
+		device = firstDRIRenderDevice()
+	}
+	probeCfg := cfg
+	probeCfg.HardwareDevice = device
+	if ok, reason := probeTranscodeEncoder(context.Background(), ffmpegPath, probeCfg, profile, "qsv"); !ok {
+		opt.Status = "Encoder probe failed"
+		opt.Details = reason
+		return opt
+	}
 	opt.Available = true
-	opt.Device = firstDRIRenderDevice()
+	opt.Device = device
 	opt.Status = "Available"
 	return opt
 }
 
-func vaapiOption(encoders, hwaccels string, gpus []drmGPUVendor, hasDRI bool) transcodeHardwareOption {
+func vaapiOption(ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, encoders, hwaccels string, gpus []drmGPUVendor, hasDRI bool) transcodeHardwareOption {
 	opt := transcodeHardwareOption{ID: "vaapi", Label: "VAAPI"}
 	if !hasFFmpegEncoder(encoders, "h264_vaapi") {
 		opt.Status = "Missing FFmpeg encoder"
@@ -167,13 +187,24 @@ func vaapiOption(encoders, hwaccels string, gpus []drmGPUVendor, hasDRI bool) tr
 		opt.Status = "Encoder present, supported DRM GPU not detected"
 		return opt
 	}
+	device := strings.TrimSpace(cfg.HardwareDevice)
+	if device == "" {
+		device = firstDRIRenderDevice()
+	}
+	probeCfg := cfg
+	probeCfg.HardwareDevice = device
+	if ok, reason := probeTranscodeEncoder(context.Background(), ffmpegPath, probeCfg, profile, "vaapi"); !ok {
+		opt.Status = "Encoder probe failed"
+		opt.Details = reason
+		return opt
+	}
 	opt.Available = true
-	opt.Device = firstDRIRenderDevice()
+	opt.Device = device
 	opt.Status = "Available"
 	return opt
 }
 
-func videotoolboxOption(encoders string) transcodeHardwareOption {
+func videotoolboxOption(ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, encoders string) transcodeHardwareOption {
 	opt := transcodeHardwareOption{ID: "videotoolbox", Label: "Apple VideoToolbox"}
 	if runtime.GOOS != "darwin" {
 		opt.Status = "Not macOS"
@@ -183,12 +214,17 @@ func videotoolboxOption(encoders string) transcodeHardwareOption {
 		opt.Status = "Missing FFmpeg encoder"
 		return opt
 	}
+	if ok, reason := probeTranscodeEncoder(context.Background(), ffmpegPath, cfg, profile, "videotoolbox"); !ok {
+		opt.Status = "Encoder probe failed"
+		opt.Details = reason
+		return opt
+	}
 	opt.Available = true
 	opt.Status = "Available"
 	return opt
 }
 
-func v4l2m2mOption(encoders string) transcodeHardwareOption {
+func v4l2m2mOption(ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, encoders string) transcodeHardwareOption {
 	opt := transcodeHardwareOption{ID: "v4l2m2m", Label: "Linux V4L2 M2M"}
 	if runtime.GOOS != "linux" {
 		opt.Status = "Not Linux"
@@ -201,6 +237,11 @@ func v4l2m2mOption(encoders string) transcodeHardwareOption {
 	devices, _ := filepath.Glob("/dev/video*")
 	if len(devices) == 0 {
 		opt.Status = "Encoder present, /dev/video devices not visible"
+		return opt
+	}
+	if ok, reason := probeTranscodeEncoder(context.Background(), ffmpegPath, cfg, profile, "v4l2m2m"); !ok {
+		opt.Status = "Encoder probe failed"
+		opt.Details = reason
 		return opt
 	}
 	opt.Available = true

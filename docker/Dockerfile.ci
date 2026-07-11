@@ -48,15 +48,21 @@ COPY ./frontend/embed_docker.go ./frontend/embed_docker.go
 COPY ./frontend/dist ./frontend/dist
 
 # Build web binary with enhanced cache mount for native architecture
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_TIMESTAMP=unknown
 RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     --mount=type=cache,target=/tmp/go-build-cache,sharing=locked \
     CGO_ENABLED=1 GOOS=linux \
-    go build -a -ldflags '-linkmode external -extldflags "-static"' -o tater-tube-server cmd/tater-tube-server/main.go
+    go build -a \
+    -ldflags "-linkmode external -extldflags \"-static\" -X 'github.com/TaterTotterson/tater-tube-server/internal/version.Version=${VERSION}' -X 'github.com/TaterTotterson/tater-tube-server/internal/version.GitCommit=${COMMIT}' -X 'github.com/TaterTotterson/tater-tube-server/internal/version.Timestamp=${BUILD_TIMESTAMP}'" \
+    -o tater-tube-server cmd/tater-tube-server/main.go
 
 # Final stage - use custom base image with pre-installed packages
 ARG TARGETARCH
 FROM custom-base
 
+ARG TARGETARCH
 ARG DEBIAN_FRONTEND="noninteractive"
 ARG BUILD_DATE
 ARG VERSION
@@ -78,8 +84,20 @@ COPY --from=backend-builder /app/frontend/dist ./frontend/dist
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ffmpeg \
+        libva-drm2 \
+        libva2 \
+        mesa-va-drivers \
+        v4l-utils \
+        vainfo \
         wget \
         ca-certificates && \
+    if [ "$TARGETARCH" = "amd64" ]; then \
+        apt-get install -y --no-install-recommends \
+            i965-va-driver \
+            intel-media-va-driver \
+            libmfx1 \
+            libvpl2; \
+    fi && \
     rm -rf /var/lib/apt/lists/*
 
 # Make binary executable

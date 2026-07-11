@@ -17,6 +17,7 @@ import (
 	"github.com/TaterTotterson/tater-tube-server/internal/database"
 	"github.com/TaterTotterson/tater-tube-server/internal/httpclient"
 	"github.com/TaterTotterson/tater-tube-server/internal/prowlarr"
+	"github.com/TaterTotterson/tater-tube-server/internal/version"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
@@ -93,7 +94,7 @@ func (s *Server) handleStremioManifest(c *fiber.Ctx) error {
 
 	return c.JSON(stremioManifest{
 		ID:          "community.tater.usenet-streamer",
-		Version:     "1.0.0",
+		Version:     version.Version,
 		Name:        "Tater Tube Server",
 		Description: "Stream Usenet releases through Tater-themed Stremio endpoints",
 		Resources:   []string{"stream"},

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/auth"
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
@@ -414,6 +415,7 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 		accel = "none"
 	}
 
+	accel = h.selectTranscodeAcceleration(r.Context(), ffmpegPath, cfg.Transcoding, profile, accel)
 	args := buildFFmpegTranscodeArgs(cfg.Transcoding, profile, accel)
 	videoCodec, _ := transcodeVideoSettings(accel, cfg.Transcoding.HardwareDevice, profile)
 	effectiveAccel := effectiveTranscodeHardwareAccel(videoCodec)
@@ -484,13 +486,7 @@ func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodePro
 		"-nostdin",
 	}
 
-	if accel == "vaapi" || (accel == "auto" && hasDefaultVAAPIDevice()) {
-		device := cfg.HardwareDevice
-		if device == "" {
-			device = "/dev/dri/renderD128"
-		}
-		args = append(args, "-vaapi_device", device)
-	}
+	args = append(args, transcodeHardwareInitArgs(cfg, accel)...)
 
 	args = append(args,
 		"-i", "pipe:0",
@@ -511,19 +507,7 @@ func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodePro
 		"-bufsize", profile.BufferSize,
 	)
 
-	switch videoCodec {
-	case "libx264":
-		args = append(args,
-			"-preset", "veryfast",
-			"-profile:v", "main",
-			"-level:v", profile.Level,
-			"-pix_fmt", "yuv420p",
-		)
-	case "h264_nvenc":
-		args = append(args, "-preset", "p4", "-profile:v", "main")
-	case "h264_videotoolbox":
-		args = append(args, "-profile:v", "main", "-allow_sw", "1")
-	}
+	args = appendVideoEncoderOptions(args, videoCodec, profile)
 
 	args = append(args,
 		"-c:a", "aac",
@@ -540,6 +524,75 @@ func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodePro
 	return args
 }
 
+func (h *StreamHandler) selectTranscodeAcceleration(ctx context.Context, ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, requested string) string {
+	requested = strings.ToLower(strings.TrimSpace(requested))
+	if requested == "" {
+		requested = "none"
+	}
+	if requested == "none" {
+		return requested
+	}
+	if requested == "auto" {
+		detected := detectTranscodingHardware(cfg)
+		if detected.Recommended != "" && detected.Recommended != "auto" {
+			slog.InfoContext(ctx, "Selected FFmpeg hardware acceleration",
+				"requested", requested,
+				"selected", detected.Recommended,
+				"device", detected.RecommendedDevice)
+			return detected.Recommended
+		}
+		return "none"
+	}
+
+	ok, reason := probeTranscodeEncoder(ctx, ffmpegPath, cfg, profile, requested)
+	if ok {
+		return requested
+	}
+	slog.WarnContext(ctx, "Configured FFmpeg hardware acceleration is not usable",
+		"requested", requested,
+		"reason", reason)
+	return "none"
+}
+
+func transcodeHardwareInitArgs(cfg config.TranscodingConfig, accel string) []string {
+	device := strings.TrimSpace(cfg.HardwareDevice)
+	if device == "" {
+		device = firstDRIRenderDevice()
+	}
+
+	switch accel {
+	case "vaapi":
+		return []string{"-vaapi_device", device}
+	case "qsv":
+		return []string{
+			"-init_hw_device", "qsv=qs:hw,child_device=" + device + ",child_device_type=vaapi",
+			"-filter_hw_device", "qs",
+		}
+	default:
+		return nil
+	}
+}
+
+func appendVideoEncoderOptions(args []string, videoCodec string, profile transcodeProfile) []string {
+	switch videoCodec {
+	case "libx264":
+		return append(args,
+			"-preset", "veryfast",
+			"-profile:v", "main",
+			"-level:v", profile.Level,
+			"-pix_fmt", "yuv420p",
+		)
+	case "h264_nvenc":
+		return append(args, "-preset", "p4", "-profile:v", "main")
+	case "h264_qsv":
+		return append(args, "-preset", "veryfast", "-profile:v", "main")
+	case "h264_videotoolbox":
+		return append(args, "-profile:v", "main", "-allow_sw", "1")
+	default:
+		return args
+	}
+}
+
 func transcodeVideoSettings(accel, device string, profile transcodeProfile) (codec string, filters string) {
 	scaleFilter := "scale=w=" + strconv.Itoa(profile.MaxWidth) + ":h=" + strconv.Itoa(profile.MaxHeight) + ":force_original_aspect_ratio=decrease:force_divisible_by=2"
 
@@ -552,7 +605,7 @@ func transcodeVideoSettings(accel, device string, profile transcodeProfile) (cod
 	case "vaapi":
 		return "h264_vaapi", scaleFilter + ",format=nv12,hwupload"
 	case "qsv":
-		return "h264_qsv", scaleFilter
+		return "h264_qsv", scaleFilter + ",format=nv12,hwupload=extra_hw_frames=64"
 	case "nvenc":
 		return "h264_nvenc", scaleFilter
 	case "videotoolbox":
@@ -585,10 +638,68 @@ func effectiveTranscodeHardwareDevice(hardwareAccel, configuredDevice string) st
 	if configuredDevice != "" {
 		return configuredDevice
 	}
-	if hardwareAccel == "vaapi" {
-		return "/dev/dri/renderD128"
+	switch hardwareAccel {
+	case "vaapi", "qsv":
+		return firstDRIRenderDevice()
 	}
 	return ""
+}
+
+func probeTranscodeEncoder(parent context.Context, ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, accel string) (bool, string) {
+	ctx, cancel := context.WithTimeout(parent, 8*time.Second)
+	defer cancel()
+
+	args := buildFFmpegTranscodeProbeArgs(cfg, profile, accel)
+	out, err := exec.CommandContext(ctx, ffmpegPath, args...).CombinedOutput()
+	if ctx.Err() != nil {
+		return false, "probe timed out"
+	}
+	if err != nil {
+		reason := strings.TrimSpace(string(out))
+		if reason == "" {
+			reason = err.Error()
+		}
+		return false, truncateProbeReason(reason)
+	}
+	return true, ""
+}
+
+func buildFFmpegTranscodeProbeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string) []string {
+	args := []string{
+		"-hide_banner",
+		"-loglevel", "error",
+		"-nostdin",
+	}
+	args = append(args, transcodeHardwareInitArgs(cfg, accel)...)
+	args = append(args,
+		"-f", "lavfi",
+		"-i", "testsrc2=size=640x360:rate=30",
+		"-frames:v", "8",
+	)
+
+	videoCodec, filters := transcodeVideoSettings(accel, cfg.HardwareDevice, profile)
+	if filters != "" {
+		args = append(args, "-vf", filters)
+	}
+	args = append(args,
+		"-an",
+		"-c:v", videoCodec,
+		"-b:v", profile.VideoBitrate,
+		"-maxrate", profile.MaxRate,
+		"-bufsize", profile.BufferSize,
+	)
+	args = appendVideoEncoderOptions(args, videoCodec, profile)
+	args = append(args, "-f", "null", "-")
+	return args
+}
+
+func truncateProbeReason(reason string) string {
+	const maxLen = 600
+	reason = strings.Join(strings.Fields(reason), " ")
+	if len(reason) <= maxLen {
+		return reason
+	}
+	return reason[:maxLen] + "..."
 }
 
 func hasDefaultVAAPIDevice() bool {
