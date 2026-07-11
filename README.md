@@ -110,8 +110,8 @@ Use container paths, not host paths, inside the Tater Tube Server web UI.
 ## Hardware Transcoding
 
 Transcoding is optional and lives under `Configuration -> Hardware Transcoding`.
-The Docker image includes FFmpeg. Profiles are included for CRT 480p, HDMI
-1080p, and HDMI 4K playback.
+The Docker image includes a bundled FFmpeg build with Intel QSV/VAAPI driver
+support. Profiles are included for CRT 480p, HDMI 1080p, and HDMI 4K playback.
 
 For Intel, AMD, Raspberry Pi, and other `/dev/dri` hardware encoders, pass the
 device into the container:

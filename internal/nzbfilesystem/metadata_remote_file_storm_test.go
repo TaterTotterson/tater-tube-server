@@ -57,8 +57,8 @@ func (r *slowCloseReader) Close() error {
 // fails and must be inverted to enforce the TARGET invariant.
 
 // TestStorm_RandomReadAtCreatesEphemeralReaderPerCall pins the post-S5
-// invariant: ephemeral ReadAts with locality (the realistic Plex/
-// Jellyfin scrubbing pattern — many small reads within a small
+// invariant: ephemeral ReadAts with locality (the realistic media-player
+// scrubbing pattern — many small reads within a small
 // segment window) are coalesced by the per-file random-read LRU cache
 // so total wire calls stay near the unique-segment count rather than
 // the read count.
@@ -131,7 +131,7 @@ func TestStorm_RandomReadAtCreatesEphemeralReaderPerCall(t *testing.T) {
 //
 //	panic: runtime error: slice bounds out of range [:704512] with capacity 703432
 //
-// reproduced on a Jellyfin library scan against an .mp4 whose last
+// reproduced on a media library scan against an .mp4 whose last
 // segment is partially-filled. The fix clamps the copy length to the
 // clamped read window (end-off+1), capped by len(p).
 //

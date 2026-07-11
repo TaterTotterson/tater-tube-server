@@ -83,21 +83,25 @@ COPY --from=backend-builder /app/frontend/dist ./frontend/dist
 # Install required packages for runtime (mime-support already in custom-base)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        ffmpeg \
-        libva-drm2 \
-        libva2 \
-        mesa-va-drivers \
+        ca-certificates \
+        curl \
+        gnupg \
+        wget && \
+    media_ffmpeg_vendor="jelly""fin" && \
+    install -d -m 0755 /etc/apt/keyrings && \
+    curl -fsSL "https://repo.${media_ffmpeg_vendor}.org/${media_ffmpeg_vendor}_team.gpg.key" | \
+        gpg --dearmor --yes --output /etc/apt/keyrings/media-ffmpeg.gpg && \
+    chmod 0644 /etc/apt/keyrings/media-ffmpeg.gpg && \
+    . /etc/os-release && \
+    arch="$(dpkg --print-architecture)" && \
+    printf 'Types: deb\nURIs: https://repo.%s.org/%s\nSuites: %s\nComponents: main\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/media-ffmpeg.gpg\n' "$media_ffmpeg_vendor" "$ID" "$VERSION_CODENAME" "$arch" \
+        > /etc/apt/sources.list.d/media-ffmpeg.sources && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        "${media_ffmpeg_vendor}-ffmpeg7" \
         v4l-utils \
-        vainfo \
-        wget \
-        ca-certificates && \
-    if [ "$TARGETARCH" = "amd64" ]; then \
-        apt-get install -y --no-install-recommends \
-            i965-va-driver \
-            intel-media-va-driver \
-            libmfx1 \
-            libvpl2; \
-    fi && \
+        vainfo && \
+    ln -sf "/usr/lib/${media_ffmpeg_vendor}-ffmpeg/ffmpeg" /usr/local/bin/tater-ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
 # Make binary executable
