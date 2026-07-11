@@ -275,7 +275,8 @@ export function TranscodingConfigSection({
 									onChange={(e) => handleTranscodingChange("hardware_device", e.target.value)}
 								/>
 								<span className="mt-2 text-[11px] text-base-content/50">
-									Optional. VAAPI defaults to /dev/dri/renderD128 when left blank.
+									Optional. Used mainly by VAAPI. Intel QSV uses FFmpeg runtime device
+									selection.
 								</span>
 							</label>
 						</div>
