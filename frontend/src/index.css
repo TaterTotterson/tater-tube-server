@@ -3,6 +3,24 @@
 /** biome-ignore-all lint/correctness/noUnknownMediaFeatureName: prefers-reduced-transparency is valid CSS */
 @import "tailwindcss";
 
+@font-face {
+	font-family: "VCR OSD Mono";
+	src: url("/fonts/vcr-osd-mono.ttf") format("truetype");
+	font-display: swap;
+}
+
+.font-vcr {
+	font-family: "VCR OSD Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	letter-spacing: 0;
+}
+
+.tater-glow {
+	text-shadow:
+		0 0 8px color-mix(in srgb, var(--color-primary) 55%, transparent),
+		1px 0 0 color-mix(in srgb, var(--color-accent) 35%, transparent),
+		-1px 0 0 color-mix(in srgb, var(--color-info) 22%, transparent);
+}
+
 /* DaisyUI themes: retro (default light), forest (default dark), plus user-selectable options */
 @plugin "daisyui" {
 	themes:
@@ -155,8 +173,7 @@
 [data-theme="tater"] body {
 	background:
 		linear-gradient(rgba(255, 255, 255, 0.025) 50%, rgba(0, 0, 0, 0.045) 50%),
-		radial-gradient(circle at 50% 15%, rgba(255, 106, 0, 0.12), transparent 34%),
-		#090909;
+		radial-gradient(circle at 50% 15%, rgba(255, 106, 0, 0.12), transparent 34%), #090909;
 	background-size:
 		100% 4px,
 		100% 100%,

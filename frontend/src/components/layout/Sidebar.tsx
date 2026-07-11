@@ -75,15 +75,11 @@ export function Sidebar() {
 				<div className="mb-8 flex items-center space-x-3">
 					<div className="avatar placeholder">
 						<div className="flex h-12 w-12 items-center justify-center overflow-hidden">
-							<img
-								src="/logo.png"
-								alt="Tater Tube Server"
-								className="h-12 w-12 object-contain"
-							/>
+							<img src="/logo.png" alt="Tater Tube Server" className="h-12 w-12 object-contain" />
 						</div>
 					</div>
 					<div>
-						<h2 className="font-bold text-lg leading-tight">Tater Streamer</h2>
+						<h2 className="tater-glow font-vcr text-lg text-primary leading-tight">Tater Tube</h2>
 					</div>
 				</div>
 

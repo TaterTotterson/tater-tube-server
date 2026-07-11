@@ -13,7 +13,7 @@ func TestBuildFFmpegTranscodeArgsSoftwareCRT(t *testing.T) {
 	joined := strings.Join(args, " ")
 
 	require.Contains(t, joined, "-i pipe:0")
-	require.Contains(t, joined, "-vf scale=w=640:h=480:force_original_aspect_ratio=decrease")
+	require.Contains(t, joined, "-vf scale=w=640:h=480:force_original_aspect_ratio=decrease:force_divisible_by=2")
 	require.Contains(t, joined, "-c:v libx264")
 	require.Contains(t, joined, "-c:a aac")
 	require.Contains(t, joined, "-f mpegts pipe:1")
@@ -24,6 +24,6 @@ func TestBuildFFmpegTranscodeArgsVAAPI(t *testing.T) {
 	joined := strings.Join(args, " ")
 
 	require.Contains(t, joined, "-vaapi_device /dev/dri/renderD128")
-	require.Contains(t, joined, "-vf scale=w=1920:h=1080:force_original_aspect_ratio=decrease,format=nv12,hwupload")
+	require.Contains(t, joined, "-vf scale=w=1920:h=1080:force_original_aspect_ratio=decrease:force_divisible_by=2,format=nv12,hwupload")
 	require.Contains(t, joined, "-c:v h264_vaapi")
 }

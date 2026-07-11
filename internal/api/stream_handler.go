@@ -96,7 +96,15 @@ func (h *StreamHandler) authenticate(r *http.Request) (*database.User, bool) {
 				slog.DebugContext(ctx, "Stream authenticated by Tater Tube player token",
 					"player_id", player.ID,
 					"path", r.URL.Query().Get("path"))
-				return nil, true
+				playerName := strings.TrimSpace(player.Name)
+				if playerName == "" {
+					playerName = "Tater Tube Player"
+				}
+				return &database.User{
+					UserID:   player.ID,
+					Name:     &playerName,
+					Provider: "tater",
+				}, true
 			}
 		}
 		slog.WarnContext(ctx, "Stream authentication failed - invalid player token",
@@ -498,7 +506,7 @@ func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodePro
 }
 
 func transcodeVideoSettings(accel, device string, profile transcodeProfile) (codec string, filters string) {
-	scaleFilter := "scale=w=" + strconv.Itoa(profile.MaxWidth) + ":h=" + strconv.Itoa(profile.MaxHeight) + ":force_original_aspect_ratio=decrease"
+	scaleFilter := "scale=w=" + strconv.Itoa(profile.MaxWidth) + ":h=" + strconv.Itoa(profile.MaxHeight) + ":force_original_aspect_ratio=decrease:force_divisible_by=2"
 
 	switch accel {
 	case "auto":

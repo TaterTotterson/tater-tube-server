@@ -552,6 +552,14 @@ export const useSystemBrowse = (path?: string) => {
 	});
 };
 
+export const useSystemStats = (refetchInterval = 10000) => {
+	return useQuery({
+		queryKey: ["system", "stats"],
+		queryFn: () => apiClient.getSystemStats(),
+		refetchInterval,
+	});
+};
+
 export const useResetSystemStats = () => {
 	const queryClient = useQueryClient();
 
