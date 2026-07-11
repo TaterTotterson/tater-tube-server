@@ -1,6 +1,8 @@
 package api
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -38,4 +40,27 @@ func TestBuildFFmpegTranscodeArgsQSV(t *testing.T) {
 	require.Contains(t, joined, "-vf scale=w=640:h=480:force_original_aspect_ratio=decrease:force_divisible_by=2,format=nv12,hwupload=extra_hw_frames=64")
 	require.Contains(t, joined, "-c:v h264_qsv")
 	require.Contains(t, joined, "-profile:v main")
+}
+
+func TestFirstDRIRenderDeviceForVendor(t *testing.T) {
+	dir := t.TempDir()
+	intelRender := filepath.Join(dir, "renderD129")
+	amdRender := filepath.Join(dir, "renderD128")
+	require.NoError(t, os.WriteFile(intelRender, []byte{}, 0o644))
+	require.NoError(t, os.WriteFile(amdRender, []byte{}, 0o644))
+
+	device := firstDRIRenderDeviceForVendor([]drmGPUVendor{
+		{RenderDevice: amdRender, Vendor: "amd"},
+		{RenderDevice: intelRender, Vendor: "intel"},
+	}, "intel")
+
+	require.Equal(t, intelRender, device)
+}
+
+func TestFirstDRIRenderDeviceForVendorSkipsUnmappedDevice(t *testing.T) {
+	device := firstDRIRenderDeviceForVendor([]drmGPUVendor{
+		{RenderDevice: filepath.Join(t.TempDir(), "renderD129"), Vendor: "intel"},
+	}, "intel")
+
+	require.Empty(t, device)
 }

@@ -74,7 +74,7 @@ func detectTranscodingHardware(cfg config.TranscodingConfig) transcodeHardwareDe
 	encoders := ffmpegOutput(ffmpegPath, "-hide_banner", "-encoders")
 	hwaccels := ffmpegOutput(ffmpegPath, "-hide_banner", "-hwaccels")
 	gpus := detectDRMGPUVendors()
-	hasDRI := len(gpus) > 0 || pathExists("/dev/dri/renderD128")
+	hasDRI := hasDRIRenderDevice()
 	profile := transcodeProfiles[cfg.Profile]
 	if profile.Name == "" {
 		profile = transcodeProfiles["crt_480p"]
@@ -148,11 +148,14 @@ func qsvOption(ffmpegPath string, cfg config.TranscodingConfig, profile transcod
 		opt.Status = "Encoder present, /dev/dri not visible"
 		return opt
 	}
-	if !hasGPUVendor(gpus, "intel") {
+	if len(gpus) > 0 && !hasGPUVendor(gpus, "intel") {
 		opt.Status = "Encoder present, Intel GPU not detected"
 		return opt
 	}
 	device := strings.TrimSpace(cfg.HardwareDevice)
+	if device == "" {
+		device = firstDRIRenderDeviceForVendor(gpus, "intel")
+	}
 	if device == "" {
 		device = firstDRIRenderDevice()
 	}
@@ -283,6 +286,11 @@ func pathExists(path string) bool {
 	return err == nil
 }
 
+func hasDRIRenderDevice() bool {
+	devices, _ := filepath.Glob("/dev/dri/renderD*")
+	return len(devices) > 0
+}
+
 func hasNvidiaDevice() bool {
 	if devices, _ := filepath.Glob("/dev/nvidia*"); len(devices) > 0 {
 		return true
@@ -332,6 +340,15 @@ func hasGPUVendor(gpus []drmGPUVendor, vendor string) bool {
 		}
 	}
 	return false
+}
+
+func firstDRIRenderDeviceForVendor(gpus []drmGPUVendor, vendor string) string {
+	for _, gpu := range gpus {
+		if gpu.Vendor == vendor && pathExists(gpu.RenderDevice) {
+			return gpu.RenderDevice
+		}
+	}
+	return ""
 }
 
 func firstDRIRenderDevice() string {
