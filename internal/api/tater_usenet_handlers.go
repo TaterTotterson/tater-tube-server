@@ -54,6 +54,7 @@ type taterUsenetItem struct {
 	SourceIndex int    `json:"sourceIndex,omitempty"`
 	Path        string `json:"path,omitempty"`
 	StreamURL   string `json:"streamUrl,omitempty"`
+	SeekMode    string `json:"seekMode,omitempty"`
 	GUID        string `json:"guid,omitempty"`
 	Date        string `json:"date,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -541,15 +542,15 @@ func taterLocalMediaItems(cfg *config.Config, baseURL, playerToken, categoryID s
 	}
 	switch strings.ToLower(strings.TrimSpace(cat.LibraryType)) {
 	case "tv":
-		return taterLocalTVItems(cat, paths, baseURL, playerToken, sourceIndex, relPath)
+		return taterLocalTVItems(cfg, cat, paths, baseURL, playerToken, sourceIndex, relPath)
 	case "folders":
-		return taterLocalFolderItems(cat, paths, baseURL, playerToken, sourceIndex, relPath)
+		return taterLocalFolderItems(cfg, cat, paths, baseURL, playerToken, sourceIndex, relPath)
 	default:
-		return taterLocalMovieItems(cat, paths, baseURL, playerToken)
+		return taterLocalMovieItems(cfg, cat, paths, baseURL, playerToken)
 	}
 }
 
-func taterLocalFolderItems(cat config.LocalMediaCategory, paths []string, baseURL, playerToken string, sourceIndex int, relPath string) ([]taterUsenetItem, error) {
+func taterLocalFolderItems(cfg *config.Config, cat config.LocalMediaCategory, paths []string, baseURL, playerToken string, sourceIndex int, relPath string) ([]taterUsenetItem, error) {
 	if sourceIndex < 0 && strings.TrimSpace(relPath) == "" && len(paths) > 1 {
 		items := make([]taterUsenetItem, 0, len(paths))
 		for i, root := range paths {
@@ -622,6 +623,7 @@ func taterLocalFolderItems(cat config.LocalMediaCategory, paths []string, baseUR
 			SourceIndex: sourceIndex,
 			Path:        childRel,
 			StreamURL:   taterLocalStreamURL(baseURL, cat.ID, sourceIndex, childRel, playerToken),
+			SeekMode:    taterLocalSeekMode(cfg, filepath.Ext(name)),
 			SizeBytes:   size,
 		}
 		if size > 0 {
@@ -632,7 +634,7 @@ func taterLocalFolderItems(cat config.LocalMediaCategory, paths []string, baseUR
 	return items, nil
 }
 
-func taterLocalMovieItems(cat config.LocalMediaCategory, paths []string, baseURL, playerToken string) ([]taterUsenetItem, error) {
+func taterLocalMovieItems(cfg *config.Config, cat config.LocalMediaCategory, paths []string, baseURL, playerToken string) ([]taterUsenetItem, error) {
 	items := []taterUsenetItem{}
 	for sourceIndex, root := range paths {
 		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
@@ -675,6 +677,7 @@ func taterLocalMovieItems(cat config.LocalMediaCategory, paths []string, baseURL
 				SourceIndex: sourceIndex,
 				Path:        rel,
 				StreamURL:   taterLocalStreamURL(baseURL, cat.ID, sourceIndex, rel, playerToken),
+				SeekMode:    taterLocalSeekMode(cfg, filepath.Ext(name)),
 				Date:        year,
 				SizeBytes:   size,
 				SizeText:    localMovieDetail(year),
@@ -692,7 +695,7 @@ func taterLocalMovieItems(cat config.LocalMediaCategory, paths []string, baseURL
 	return items, nil
 }
 
-func taterLocalTVItems(cat config.LocalMediaCategory, paths []string, baseURL, playerToken string, sourceIndex int, relPath string) ([]taterUsenetItem, error) {
+func taterLocalTVItems(cfg *config.Config, cat config.LocalMediaCategory, paths []string, baseURL, playerToken string, sourceIndex int, relPath string) ([]taterUsenetItem, error) {
 	if sourceIndex < 0 && strings.TrimSpace(relPath) == "" {
 		items := []taterUsenetItem{}
 		for i, root := range paths {
@@ -772,6 +775,7 @@ func taterLocalTVItems(cat config.LocalMediaCategory, paths []string, baseURL, p
 			SourceIndex: sourceIndex,
 			Path:        childRel,
 			StreamURL:   taterLocalStreamURL(baseURL, cat.ID, sourceIndex, childRel, playerToken),
+			SeekMode:    taterLocalSeekMode(cfg, filepath.Ext(name)),
 			SizeBytes:   size,
 			SizeText:    "EPISODE",
 		}
@@ -781,6 +785,18 @@ func taterLocalTVItems(cat config.LocalMediaCategory, paths []string, baseURL, p
 		return strings.ToLower(items[i].Title) < strings.ToLower(items[j].Title)
 	})
 	return items, nil
+}
+
+func taterLocalSeekMode(cfg *config.Config, ext string) string {
+	if cfg == nil || cfg.Transcoding.Enabled == nil || !*cfg.Transcoding.Enabled {
+		return "client"
+	}
+	switch strings.ToLower(ext) {
+	case ".mkv", ".mp4", ".m4v", ".mov", ".avi", ".ts", ".m2ts", ".mpg", ".mpeg", ".wmv", ".webm":
+		return "server"
+	default:
+		return "client"
+	}
 }
 
 func taterLocalMediaCategory(cfg *config.Config, id string) (config.LocalMediaCategory, bool) {
