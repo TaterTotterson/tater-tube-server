@@ -42,7 +42,7 @@ docker run ... --device /dev/dri/renderD128:/dev/dri/renderD128 ...
 ```
 
 Then enable transcoding and select the hardware mode in
-`Configuration -> Streaming`.
+`Configuration -> Hardware Transcoding`.
 
 ## Build
 

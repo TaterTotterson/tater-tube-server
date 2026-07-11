@@ -27,3 +27,15 @@ func TestBuildFFmpegTranscodeArgsVAAPI(t *testing.T) {
 	require.Contains(t, joined, "-vf scale=w=1920:h=1080:force_original_aspect_ratio=decrease:force_divisible_by=2,format=nv12,hwupload")
 	require.Contains(t, joined, "-c:v h264_vaapi")
 }
+
+func TestBuildFFmpegTranscodeArgsQSV(t *testing.T) {
+	cfg := config.TranscodingConfig{HardwareDevice: "/dev/dri/renderD129"}
+	args := buildFFmpegTranscodeArgs(cfg, transcodeProfiles["crt_480p"], "qsv")
+	joined := strings.Join(args, " ")
+
+	require.Contains(t, joined, "-init_hw_device qsv=qs:hw,child_device=/dev/dri/renderD129,child_device_type=vaapi")
+	require.Contains(t, joined, "-filter_hw_device qs")
+	require.Contains(t, joined, "-vf scale=w=640:h=480:force_original_aspect_ratio=decrease:force_divisible_by=2,format=nv12,hwupload=extra_hw_frames=64")
+	require.Contains(t, joined, "-c:v h264_qsv")
+	require.Contains(t, joined, "-profile:v main")
+}

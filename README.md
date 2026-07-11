@@ -12,6 +12,15 @@ Tater Tube Server is the backend for Tater Tube players. It provides The Tube
 catalog, Newznab-backed streaming, local media libraries, player pairing,
 optional FFmpeg transcoding, queue status, logs, and a mobile-friendly setup UI.
 
+## Tater Tube Player
+
+This server is designed to pair with the Tater Tube player image. The player
+repo has the Raspberry Pi images, module setup, built-in updater details, and
+device-specific notes for CRT composite and HDMI builds.
+
+- Player GitHub: [TaterTotterson/Tater-Tube](https://github.com/TaterTotterson/Tater-Tube)
+- Project website: [tatertube.tv](https://tatertube.tv)
+
 ## Quick Start
 
 1. Start the server with Docker.

@@ -77,6 +77,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
 ARG TARGETARCH
 FROM custom-base
 
+ARG TARGETARCH
 ARG DEBIAN_FRONTEND="noninteractive"
 ARG BUILD_DATE
 ARG VERSION
@@ -98,8 +99,20 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ffmpeg \
+        libva-drm2 \
+        libva2 \
+        mesa-va-drivers \
+        v4l-utils \
+        vainfo \
         wget \
         ca-certificates && \
+    if [ "$TARGETARCH" = "amd64" ]; then \
+        apt-get install -y --no-install-recommends \
+            i965-va-driver \
+            intel-media-va-driver \
+            libmfx1 \
+            libvpl2; \
+    fi && \
     rm -rf /var/lib/apt/lists/*
 
 # Make binary executable
