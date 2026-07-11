@@ -103,6 +103,26 @@ export interface TranscodingConfig {
 	hardware_device?: string;
 }
 
+export interface TranscodingHardwareOption {
+	id: string;
+	label: string;
+	available: boolean;
+	device?: string;
+	status: string;
+	details?: string;
+}
+
+export interface TranscodingHardwareDetection {
+	ffmpeg_path: string;
+	ffmpeg_available: boolean;
+	recommended: string;
+	recommended_device?: string;
+	current: string;
+	current_device?: string;
+	options: TranscodingHardwareOption[];
+	notes?: string[];
+}
+
 // Segment cache configuration
 export interface SegmentCacheConfig {
 	enabled: boolean | null;
@@ -666,7 +686,8 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 	},
 	sabnzbd: {
 		title: "SABnzbd API",
-		description: "Emulate a SABnzbd server to allow ARR applications to send NZBs to Tater Tube Server.",
+		description:
+			"Emulate a SABnzbd server to allow ARR applications to send NZBs to Tater Tube Server.",
 		icon: "Download",
 		canEdit: true,
 		hidden: true,
@@ -681,8 +702,7 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 	},
 	stremio: {
 		title: "Stremio Integration",
-		description:
-			"Enable the Stremio addon and direct NZB stream endpoint.",
+		description: "Enable the Stremio addon and direct NZB stream endpoint.",
 		icon: "Tv",
 		canEdit: true,
 		hidden: true,
@@ -713,8 +733,7 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 	},
 	network: {
 		title: "Network & User Agent",
-		description:
-			"HTTP/HTTPS proxy and indexer User-Agent for outbound indexer and NZB traffic.",
+		description: "HTTP/HTTPS proxy and indexer User-Agent for outbound indexer and NZB traffic.",
 		icon: "Globe",
 		canEdit: true,
 	},

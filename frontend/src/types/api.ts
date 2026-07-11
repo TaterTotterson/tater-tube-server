@@ -205,6 +205,26 @@ export interface HealthStats {
 	degraded: number;
 }
 
+export interface SystemInfo {
+	version?: string;
+	git_commit?: string;
+	start_time: string;
+	uptime: string;
+	go_version?: string;
+	os?: string;
+	arch?: string;
+	cpus?: number;
+	hostname?: string;
+	mem_alloc?: number;
+	mem_sys?: number;
+}
+
+export interface SystemStatsResponse {
+	queue: QueueStats;
+	health: HealthStats;
+	system: SystemInfo;
+}
+
 // Playback-impact classification embedded in FileHealth.error_details JSON.
 // Produced by the hole model (internal/holes): "degraded" files are still
 // playable (streaming zero-fills the missing segments), "failed" are not.

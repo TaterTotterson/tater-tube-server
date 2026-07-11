@@ -540,6 +540,12 @@ type SystemInfoResponse struct {
 	StartTime time.Time `json:"start_time"`
 	Uptime    string    `json:"uptime"`
 	GoVersion string    `json:"go_version,omitempty"`
+	OS        string    `json:"os,omitempty"`
+	Arch      string    `json:"arch,omitempty"`
+	CPUs      int       `json:"cpus,omitempty"`
+	Hostname  string    `json:"hostname,omitempty"`
+	MemAlloc  uint64    `json:"mem_alloc,omitempty"`
+	MemSys    uint64    `json:"mem_sys,omitempty"`
 }
 
 // Update API Types

@@ -302,6 +302,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/system/provider-stats", s.handleGetProviderHistoricalStats)
 	api.Get("/system/provider-speed-history", s.handleGetProviderSpeedHistory)
 	api.Get("/system/indexer-stats", s.handleGetIndexerStats)
+	api.Get("/system/transcoding-detect", s.handleDetectTranscodingHardware)
 	api.Delete("/system/indexer-stats/cleanup", s.handleCleanupIndexerStats)
 	api.Post("/system/stats/reset", s.handleResetSystemStats)
 	api.Post("/system/cleanup", s.handleSystemCleanup)
@@ -406,12 +407,22 @@ func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 // getSystemInfo returns current system information
 func (s *Server) getSystemInfo() SystemInfoResponse {
 	uptime := time.Since(s.startTime)
+	hostname, _ := os.Hostname()
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
 	return SystemInfoResponse{
 		Version:   version.Version,
 		GitCommit: version.GitCommit,
 		StartTime: s.startTime,
 		Uptime:    uptime.String(),
 		GoVersion: runtime.Version(),
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+		CPUs:      runtime.NumCPU(),
+		Hostname:  hostname,
+		MemAlloc:  memStats.Alloc,
+		MemSys:    memStats.Sys,
 	}
 }
 

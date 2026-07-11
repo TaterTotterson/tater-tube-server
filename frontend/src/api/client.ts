@@ -22,6 +22,7 @@ import type {
 	QueueStats,
 	ScanStatusResponse,
 	SystemBrowseResponse,
+	SystemStatsResponse,
 	UploadNZBLnkResponse,
 	User,
 } from "../types/api";
@@ -38,6 +39,7 @@ import type {
 	ProviderUpdateRequest,
 	TaterPairingCodeCreateResponse,
 	TaterPlayersConfig,
+	TranscodingHardwareDetection,
 } from "../types/config";
 import type { UpdateChannel, UpdateStatusResponse } from "../types/update";
 
@@ -763,6 +765,14 @@ class APIClient {
 
 		const query = searchParams.toString();
 		return this.request<SystemBrowseResponse>(`/system/browse${query ? `?${query}` : ""}`);
+	}
+
+	async detectTranscodingHardware() {
+		return this.request<TranscodingHardwareDetection>("/system/transcoding-detect");
+	}
+
+	async getSystemStats() {
+		return this.request<SystemStatsResponse>("/system/stats");
 	}
 
 	async resetSystemStats(params?: {
