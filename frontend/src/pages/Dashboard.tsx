@@ -16,7 +16,7 @@ import { type ReactNode, useMemo } from "react";
 import { apiClient } from "../api/client";
 import { useActiveStreams, usePoolMetrics, useQueueStats, useSystemStats } from "../hooks/useApi";
 import { useConfig } from "../hooks/useConfig";
-import type { ActiveStream } from "../types/api";
+import type { ActiveStream, HealthStats, SystemInfo } from "../types/api";
 
 function formatBytes(value?: number) {
 	if (!value || value <= 0) return "0 B";
@@ -111,7 +111,7 @@ export function Dashboard() {
 	const { data: config } = useConfig();
 	const { data: queueStats } = useQueueStats(10000);
 	const { data: poolMetrics } = usePoolMetrics();
-	const { data: activeStreams = [] } = useActiveStreams();
+	const { data: activeStreamData } = useActiveStreams();
 	const { data: systemStats } = useSystemStats();
 	const { data: transcodeDetection } = useQuery({
 		queryKey: ["system", "transcoding-detect"],
@@ -119,13 +119,24 @@ export function Dashboard() {
 		refetchInterval: 30000,
 	});
 
+	const activeStreams = Array.isArray(activeStreamData) ? activeStreamData : [];
+	const providerMetrics = Array.isArray(poolMetrics?.providers) ? poolMetrics.providers : [];
+	const configuredProviders = Array.isArray(config?.providers) ? config.providers : [];
+	const systemInfo: Partial<SystemInfo> = systemStats?.system ?? {};
+	const healthStats: Partial<HealthStats> = systemStats?.health ?? {};
+
 	const players = useMemo(
-		() => config?.players?.players?.filter((player) => !player.revoked_at) ?? [],
+		() =>
+			(Array.isArray(config?.players?.players) ? config.players.players : []).filter(
+				(player) => !player.revoked_at,
+			),
 		[config?.players?.players],
 	);
 	const onlinePlayers = players.filter((player) => isOnline(player.last_seen_at));
-	const localCategories =
-		config?.local_media?.categories?.filter((category) => category.enabled !== false) ?? [];
+	const localMediaCategories = Array.isArray(config?.local_media?.categories)
+		? config.local_media.categories
+		: [];
+	const localCategories = localMediaCategories.filter((category) => category.enabled !== false);
 	const localPaths = localCategories.reduce(
 		(total, category) => total + (category.paths?.length ?? 0),
 		0,
@@ -142,7 +153,7 @@ export function Dashboard() {
 				queueStats.total_queued - queueStats.total_processing - queueStats.total_completed,
 			)
 		: 0;
-	const providerCount = poolMetrics?.providers?.length ?? config?.providers?.length ?? 0;
+	const providerCount = providerMetrics.length || configuredProviders.length;
 	const hardwareOptions = transcodeDetection?.options?.filter((option) => option.available) ?? [];
 
 	const streamByPlayerName = useMemo(() => {
@@ -175,7 +186,7 @@ export function Dashboard() {
 						icon={Radio}
 						label="NNTP Providers"
 						value={String(providerCount)}
-						detail={`${poolMetrics?.providers?.filter((provider) => provider.state === "connected").length ?? 0} connected`}
+						detail={`${providerMetrics.filter((provider) => provider.state === "connected").length} connected`}
 					/>
 					<StatTile
 						icon={List}
@@ -199,35 +210,29 @@ export function Dashboard() {
 					<div className="grid gap-3 sm:grid-cols-2">
 						<div>
 							<div className="text-base-content/50 text-xs uppercase tracking-widest">Host</div>
-							<div className="truncate font-semibold">
-								{systemStats?.system.hostname || "unknown"}
-							</div>
+							<div className="truncate font-semibold">{systemInfo.hostname || "unknown"}</div>
 						</div>
 						<div>
 							<div className="text-base-content/50 text-xs uppercase tracking-widest">Runtime</div>
 							<div className="font-semibold">
-								{systemStats?.system.os || "?"}/{systemStats?.system.arch || "?"}
+								{systemInfo.os || "?"}/{systemInfo.arch || "?"}
 							</div>
 						</div>
 						<div>
 							<div className="text-base-content/50 text-xs uppercase tracking-widest">CPU</div>
-							<div className="font-semibold">{systemStats?.system.cpus ?? 0} cores</div>
+							<div className="font-semibold">{systemInfo.cpus ?? 0} cores</div>
 						</div>
 						<div>
 							<div className="text-base-content/50 text-xs uppercase tracking-widest">Memory</div>
-							<div className="font-semibold">
-								{formatBytes(systemStats?.system.mem_sys)} reserved
-							</div>
+							<div className="font-semibold">{formatBytes(systemInfo.mem_sys)} reserved</div>
 						</div>
 						<div>
 							<div className="text-base-content/50 text-xs uppercase tracking-widest">Version</div>
-							<div className="truncate font-semibold">{systemStats?.system.version || "dev"}</div>
+							<div className="truncate font-semibold">{systemInfo.version || "dev"}</div>
 						</div>
 						<div>
 							<div className="text-base-content/50 text-xs uppercase tracking-widest">Uptime</div>
-							<div className="truncate font-semibold">
-								{systemStats?.system.uptime || "unknown"}
-							</div>
+							<div className="truncate font-semibold">{systemInfo.uptime || "unknown"}</div>
 						</div>
 					</div>
 				</Panel>
@@ -388,8 +393,8 @@ export function Dashboard() {
 			<section className="grid gap-4 md:grid-cols-2">
 				<Panel title="Provider Load" icon={Database}>
 					<div className="space-y-3">
-						{poolMetrics?.providers?.length ? (
-							poolMetrics.providers.map((provider) => (
+						{providerMetrics.length ? (
+							providerMetrics.map((provider) => (
 								<div
 									key={provider.id || provider.name}
 									className="flex items-center justify-between gap-3"
@@ -417,21 +422,21 @@ export function Dashboard() {
 					<div className="grid gap-3 sm:grid-cols-2">
 						<div>
 							<div className="text-base-content/50 text-xs uppercase tracking-widest">Healthy</div>
-							<div className="font-semibold">{systemStats?.health.healthy ?? 0}</div>
+							<div className="font-semibold">{healthStats.healthy ?? 0}</div>
 						</div>
 						<div>
 							<div className="text-base-content/50 text-xs uppercase tracking-widest">Checking</div>
-							<div className="font-semibold">{systemStats?.health.checking ?? 0}</div>
+							<div className="font-semibold">{healthStats.checking ?? 0}</div>
 						</div>
 						<div>
 							<div className="text-base-content/50 text-xs uppercase tracking-widest">Degraded</div>
-							<div className="font-semibold">{systemStats?.health.degraded ?? 0}</div>
+							<div className="font-semibold">{healthStats.degraded ?? 0}</div>
 						</div>
 						<div>
 							<div className="text-base-content/50 text-xs uppercase tracking-widest">
 								Corrupted
 							</div>
-							<div className="font-semibold">{systemStats?.health.corrupted ?? 0}</div>
+							<div className="font-semibold">{healthStats.corrupted ?? 0}</div>
 						</div>
 					</div>
 				</Panel>
