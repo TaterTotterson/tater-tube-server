@@ -41,10 +41,10 @@ Linux, pass `/dev/dri` through as a device:
 docker run ... --device /dev/dri:/dev/dri ...
 ```
 
-Then enable transcoding and select the hardware mode in
-`Configuration -> Hardware Transcoding`. Intel QSV uses a QSV device derived
-from Intel VAAPI, and the hardware device field can select a specific render
-node when needed.
+Then select the hardware mode in `Configuration -> Hardware Transcoding`.
+Tater Tube players decide per playback request whether to direct play or
+transcode. Intel QSV uses a QSV device derived from Intel VAAPI, and the
+hardware device field can select a specific render node when needed.
 
 ## Build
 

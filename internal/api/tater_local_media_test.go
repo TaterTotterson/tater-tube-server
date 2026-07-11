@@ -44,7 +44,7 @@ func TestTaterLocalMovieItemsScansCleanMovieRows(t *testing.T) {
 	}
 }
 
-func TestTaterLocalMovieItemsMarksServerSeekWhenTranscodingEnabled(t *testing.T) {
+func TestTaterLocalMovieItemsDefaultToClientSeek(t *testing.T) {
 	root := t.TempDir()
 	moviePath := filepath.Join(root, "Seek.Movie.2024.mkv")
 	if err := os.WriteFile(moviePath, []byte("media"), 0644); err != nil {
@@ -57,8 +57,8 @@ func TestTaterLocalMovieItemsMarksServerSeekWhenTranscodingEnabled(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].SeekMode != "server" {
-		t.Fatalf("expected transcoded local movie to use server seek mode: %#v", items)
+	if len(items) != 1 || items[0].SeekMode != "client" {
+		t.Fatalf("expected local movie catalog to default to client seek: %#v", items)
 	}
 }
 
