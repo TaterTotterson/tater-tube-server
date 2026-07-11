@@ -109,4 +109,5 @@ The streaming internals and queue/import pipeline come from that project.
 
 ## License
 
-This project keeps the upstream license terms in [LICENSE](LICENSE).
+Tater Tube Server is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+Portions derived from AltMount retain the upstream MIT notice in [NOTICE](NOTICE).
