@@ -38,9 +38,10 @@ func TestBuildFFmpegTranscodeArgsQSV(t *testing.T) {
 	require.NotContains(t, joined, "-init_hw_device")
 	require.NotContains(t, joined, "-filter_hw_device")
 	require.NotContains(t, joined, "hwupload")
+	require.NotContains(t, joined, "-preset veryfast")
+	require.NotContains(t, joined, "-profile:v main")
 	require.Contains(t, joined, "-vf scale=w=640:h=480:force_original_aspect_ratio=decrease:force_divisible_by=2")
 	require.Contains(t, joined, "-c:v h264_qsv")
-	require.Contains(t, joined, "-profile:v main")
 }
 
 func TestFirstDRIRenderDeviceForVendor(t *testing.T) {

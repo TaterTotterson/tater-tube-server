@@ -610,8 +610,6 @@ func appendVideoEncoderOptions(args []string, videoCodec string, profile transco
 		)
 	case "h264_nvenc":
 		return append(args, "-preset", "p4", "-profile:v", "main")
-	case "h264_qsv":
-		return append(args, "-preset", "veryfast", "-profile:v", "main")
 	case "h264_videotoolbox":
 		return append(args, "-profile:v", "main", "-allow_sw", "1")
 	default:
