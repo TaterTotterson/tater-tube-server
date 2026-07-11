@@ -417,14 +417,21 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	if selectedHardwareDevice != "" {
 		transcodeCfg.HardwareDevice = selectedHardwareDevice
 	}
-	args := buildFFmpegTranscodeArgs(transcodeCfg, profile, accel)
+	startSeconds := parseTranscodeStartSeconds(r.URL.Query().Get("start"))
+	inputPath := ""
+	if startSeconds > 0 {
+		inputPath = path
+	}
+	args := buildFFmpegTranscodeArgs(transcodeCfg, profile, accel, inputPath, startSeconds)
 	videoCodec, _ := transcodeVideoSettings(accel, transcodeCfg.HardwareDevice, profile)
 	effectiveAccel := effectiveTranscodeHardwareAccel(videoCodec)
 	hardwareDevice := effectiveTranscodeHardwareDevice(effectiveAccel, transcodeCfg.HardwareDevice)
 	h.markTranscodedStream(w, file, profileID, profile.Name, effectiveAccel, hardwareDevice, videoCodec)
 
 	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
-	cmd.Stdin = file
+	if inputPath == "" {
+		cmd.Stdin = file
+	}
 
 	var stderr limitedBuffer
 	cmd.Stderr = &stderr
@@ -441,7 +448,8 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 		"profile", profileID,
 		"profile_name", profile.Name,
 		"hardware_acceleration", effectiveAccel,
-		"video_codec", videoCodec)
+		"video_codec", videoCodec,
+		"start_seconds", startSeconds)
 
 	if err := cmd.Run(); err != nil && r.Context().Err() == nil {
 		slog.ErrorContext(ctx, "FFmpeg transcode failed",
@@ -449,9 +457,18 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 			"profile", profileID,
 			"hardware_acceleration", effectiveAccel,
 			"video_codec", videoCodec,
+			"start_seconds", startSeconds,
 			"error", err,
 			"stderr", stderr.String())
 	}
+}
+
+func parseTranscodeStartSeconds(value string) float64 {
+	start, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil || start <= 0 {
+		return 0
+	}
+	return start
 }
 
 func (h *StreamHandler) markTranscodedStream(w http.ResponseWriter, file afero.File, profileID, profileName, hardwareAccel, hardwareDevice, videoCodec string) {
@@ -480,7 +497,7 @@ func (h *StreamHandler) markTranscodedStream(w http.ResponseWriter, file afero.F
 	)
 }
 
-func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string) []string {
+func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, inputPath string, startSeconds float64) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
@@ -488,9 +505,13 @@ func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodePro
 	}
 
 	args = append(args, transcodeHardwareInitArgs(cfg, accel)...)
+	if startSeconds > 0 && strings.TrimSpace(inputPath) != "" {
+		args = append(args, "-ss", strconv.FormatFloat(startSeconds, 'f', 3, 64), "-i", inputPath)
+	} else {
+		args = append(args, "-i", "pipe:0")
+	}
 
 	args = append(args,
-		"-i", "pipe:0",
 		"-map", "0:v:0",
 		"-map", "0:a:0?",
 		"-sn",

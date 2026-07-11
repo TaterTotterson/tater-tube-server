@@ -25,7 +25,7 @@ func TestTaterLocalMovieItemsScansCleanMovieRows(t *testing.T) {
 		}
 	}
 
-	items, err := taterLocalMovieItems(config.LocalMediaCategory{ID: "movies", Name: "Movies"}, []string{root}, "http://server", "token")
+	items, err := taterLocalMovieItems(nil, config.LocalMediaCategory{ID: "movies", Name: "Movies"}, []string{root}, "http://server", "token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,6 +44,24 @@ func TestTaterLocalMovieItemsScansCleanMovieRows(t *testing.T) {
 	}
 }
 
+func TestTaterLocalMovieItemsMarksServerSeekWhenTranscodingEnabled(t *testing.T) {
+	root := t.TempDir()
+	moviePath := filepath.Join(root, "Seek.Movie.2024.mkv")
+	if err := os.WriteFile(moviePath, []byte("media"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	enabled := true
+	cfg := &config.Config{Transcoding: config.TranscodingConfig{Enabled: &enabled}}
+	items, err := taterLocalMovieItems(cfg, config.LocalMediaCategory{ID: "movies", Name: "Movies"}, []string{root}, "http://server", "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].SeekMode != "server" {
+		t.Fatalf("expected transcoded local movie to use server seek mode: %#v", items)
+	}
+}
+
 func TestTaterLocalTVItemsBrowsesShowsSeasonsEpisodes(t *testing.T) {
 	root := t.TempDir()
 	seasonDir := filepath.Join(root, "Some.Show.2020", "Season 01")
@@ -56,7 +74,7 @@ func TestTaterLocalTVItemsBrowsesShowsSeasonsEpisodes(t *testing.T) {
 	}
 
 	cat := config.LocalMediaCategory{ID: "tv", Name: "TV"}
-	shows, err := taterLocalTVItems(cat, []string{root}, "http://server", "token", -1, "")
+	shows, err := taterLocalTVItems(nil, cat, []string{root}, "http://server", "token", -1, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +82,7 @@ func TestTaterLocalTVItemsBrowsesShowsSeasonsEpisodes(t *testing.T) {
 		t.Fatalf("unexpected show rows: %#v", shows)
 	}
 
-	seasons, err := taterLocalTVItems(cat, []string{root}, "http://server", "token", 0, "Some.Show.2020")
+	seasons, err := taterLocalTVItems(nil, cat, []string{root}, "http://server", "token", 0, "Some.Show.2020")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +90,7 @@ func TestTaterLocalTVItemsBrowsesShowsSeasonsEpisodes(t *testing.T) {
 		t.Fatalf("unexpected season rows: %#v", seasons)
 	}
 
-	episodes, err := taterLocalTVItems(cat, []string{root}, "http://server", "token", 0, "Some.Show.2020/Season 01")
+	episodes, err := taterLocalTVItems(nil, cat, []string{root}, "http://server", "token", 0, "Some.Show.2020/Season 01")
 	if err != nil {
 		t.Fatal(err)
 	}

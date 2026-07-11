@@ -11,7 +11,7 @@ import (
 )
 
 func TestBuildFFmpegTranscodeArgsSoftwareCRT(t *testing.T) {
-	args := buildFFmpegTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["crt_480p"], "none")
+	args := buildFFmpegTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["crt_480p"], "none", "", 0)
 	joined := strings.Join(args, " ")
 
 	require.Contains(t, joined, "-i pipe:0")
@@ -21,8 +21,16 @@ func TestBuildFFmpegTranscodeArgsSoftwareCRT(t *testing.T) {
 	require.Contains(t, joined, "-f mpegts pipe:1")
 }
 
+func TestBuildFFmpegTranscodeArgsFileSeek(t *testing.T) {
+	args := buildFFmpegTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["crt_480p"], "none", "/media/movie.mkv", 182.5)
+	joined := strings.Join(args, " ")
+
+	require.Contains(t, joined, "-ss 182.500 -i /media/movie.mkv")
+	require.NotContains(t, joined, "-i pipe:0")
+}
+
 func TestBuildFFmpegTranscodeArgsVAAPI(t *testing.T) {
-	args := buildFFmpegTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["hdmi_1080p"], "vaapi")
+	args := buildFFmpegTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["hdmi_1080p"], "vaapi", "", 0)
 	joined := strings.Join(args, " ")
 
 	require.Contains(t, joined, "-vaapi_device /dev/dri/renderD128")
@@ -32,7 +40,7 @@ func TestBuildFFmpegTranscodeArgsVAAPI(t *testing.T) {
 
 func TestBuildFFmpegTranscodeArgsQSV(t *testing.T) {
 	cfg := config.TranscodingConfig{HardwareDevice: "/dev/dri/renderD129"}
-	args := buildFFmpegTranscodeArgs(cfg, transcodeProfiles["crt_480p"], "qsv")
+	args := buildFFmpegTranscodeArgs(cfg, transcodeProfiles["crt_480p"], "qsv", "", 0)
 	joined := strings.Join(args, " ")
 
 	require.Contains(t, joined, "-init_hw_device vaapi=va:/dev/dri/renderD129,driver=iHD")
