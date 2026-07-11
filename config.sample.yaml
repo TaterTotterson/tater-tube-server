@@ -31,7 +31,6 @@ streaming:
   max_prefetch: 4
 
 transcoding:
-  enabled: false
   profile: 'crt_480p'
   hardware_acceleration: 'none'
   ffmpeg_path: 'ffmpeg'

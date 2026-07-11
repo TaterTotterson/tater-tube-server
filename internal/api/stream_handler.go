@@ -366,10 +366,24 @@ func (h *StreamHandler) shouldTranscode(r *http.Request, path string) bool {
 		return false
 	}
 	cfg := h.configGetter()
-	if cfg == nil || cfg.Transcoding.Enabled == nil || !*cfg.Transcoding.Enabled {
+	if cfg == nil {
 		return false
 	}
-	if r.URL.Query().Get("direct") == "1" || r.URL.Query().Get("transcode") == "0" {
+
+	transcodeValue := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("transcode")))
+	if r.URL.Query().Get("direct") == "1" ||
+		transcodeValue == "0" ||
+		transcodeValue == "false" ||
+		transcodeValue == "off" ||
+		transcodeValue == "no" {
+		return false
+	}
+
+	forceTranscode := transcodeValue == "1" ||
+		transcodeValue == "true" ||
+		transcodeValue == "on" ||
+		transcodeValue == "yes"
+	if !forceTranscode {
 		return false
 	}
 

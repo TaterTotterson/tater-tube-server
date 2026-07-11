@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,4 +106,50 @@ func TestCandidateDRIRenderDevicesPrefersVendorDevice(t *testing.T) {
 	require.GreaterOrEqual(t, len(candidates), 2)
 	require.Equal(t, intelRender, candidates[0])
 	require.Equal(t, amdRender, candidates[1])
+}
+
+func TestShouldTranscodeRequestCanForceOn(t *testing.T) {
+	handler := &StreamHandler{
+		configGetter: func() *config.Config {
+			return &config.Config{}
+		},
+	}
+	req := httptest.NewRequest("GET", "/api/files/stream/movie.mkv?transcode=1", nil)
+
+	require.True(t, handler.shouldTranscode(req, "/media/movie.mkv"))
+}
+
+func TestShouldTranscodeRequestCanForceOff(t *testing.T) {
+	enabled := true
+	handler := &StreamHandler{
+		configGetter: func() *config.Config {
+			return &config.Config{Transcoding: config.TranscodingConfig{Enabled: &enabled}}
+		},
+	}
+	req := httptest.NewRequest("GET", "/api/files/stream/movie.mkv?transcode=0", nil)
+
+	require.False(t, handler.shouldTranscode(req, "/media/movie.mkv"))
+}
+
+func TestShouldTranscodeDirectPlaysWithoutRequestOverride(t *testing.T) {
+	enabled := true
+	handler := &StreamHandler{
+		configGetter: func() *config.Config {
+			return &config.Config{Transcoding: config.TranscodingConfig{Enabled: &enabled}}
+		},
+	}
+	req := httptest.NewRequest("GET", "/api/files/stream/movie.mkv", nil)
+
+	require.False(t, handler.shouldTranscode(req, "/media/movie.mkv"))
+}
+
+func TestShouldTranscodeIgnoresUnsupportedExtensions(t *testing.T) {
+	handler := &StreamHandler{
+		configGetter: func() *config.Config {
+			return &config.Config{}
+		},
+	}
+	req := httptest.NewRequest("GET", "/api/files/stream/subtitle.srt?transcode=1", nil)
+
+	require.False(t, handler.shouldTranscode(req, "/media/subtitle.srt"))
 }

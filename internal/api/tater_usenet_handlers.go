@@ -788,15 +788,7 @@ func taterLocalTVItems(cfg *config.Config, cat config.LocalMediaCategory, paths 
 }
 
 func taterLocalSeekMode(cfg *config.Config, ext string) string {
-	if cfg == nil || cfg.Transcoding.Enabled == nil || !*cfg.Transcoding.Enabled {
-		return "client"
-	}
-	switch strings.ToLower(ext) {
-	case ".mkv", ".mp4", ".m4v", ".mov", ".avi", ".ts", ".m2ts", ".mpg", ".mpeg", ".wmv", ".webm":
-		return "server"
-	default:
-		return "client"
-	}
+	return "client"
 }
 
 func taterLocalMediaCategory(cfg *config.Config, id string) (config.LocalMediaCategory, bool) {

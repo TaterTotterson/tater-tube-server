@@ -276,8 +276,9 @@ type StreamingConfig struct {
 	FailureMasking FailureMaskingConfig `yaml:"failure_masking" mapstructure:"failure_masking" json:"failure_masking"`
 }
 
-// TranscodingConfig controls the optional FFmpeg playback transcoder used by
-// /api/files/stream. Direct play remains the default when Enabled is false.
+// TranscodingConfig controls FFmpeg profiles and hardware selection. Players
+// decide per playback request whether to direct play or transcode; Enabled is
+// retained only for old config compatibility.
 type TranscodingConfig struct {
 	Enabled              *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	Profile              string `yaml:"profile" mapstructure:"profile" json:"profile"`
