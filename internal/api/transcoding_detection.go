@@ -45,10 +45,7 @@ func (s *Server) handleDetectTranscodingHardware(c *fiber.Ctx) error {
 }
 
 func detectTranscodingHardware(cfg config.TranscodingConfig) transcodeHardwareDetection {
-	ffmpegPath := strings.TrimSpace(cfg.FFmpegPath)
-	if ffmpegPath == "" {
-		ffmpegPath = "ffmpeg"
-	}
+	ffmpegPath := effectiveFFmpegPath(cfg.FFmpegPath)
 	current := strings.TrimSpace(cfg.HardwareAcceleration)
 	if current == "" {
 		current = "none"
@@ -148,16 +145,19 @@ func qsvOption(ffmpegPath string, cfg config.TranscodingConfig, profile transcod
 		opt.Status = "Encoder present, /dev/dri not visible"
 		return opt
 	}
-	probeCfg := cfg
-	probeCfg.HardwareDevice = ""
-	if ok, reason := probeTranscodeEncoder(context.Background(), ffmpegPath, probeCfg, profile, "qsv"); !ok {
+	device, reason, ok := probeTranscodeEncoderDevices(
+		ffmpegPath, cfg, profile, "qsv",
+		candidateDRIRenderDevices(gpus, []string{"intel"}, cfg.HardwareDevice),
+	)
+	if !ok {
 		opt.Status = "Encoder probe failed"
 		opt.Details = reason
 		return opt
 	}
 	opt.Available = true
+	opt.Device = device
 	opt.Status = "Available"
-	opt.Details = "Uses FFmpeg QSV runtime device selection."
+	opt.Details = "Uses a QSV device derived from Intel VAAPI."
 	return opt
 }
 

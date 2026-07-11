@@ -275,8 +275,7 @@ export function TranscodingConfigSection({
 									onChange={(e) => handleTranscodingChange("hardware_device", e.target.value)}
 								/>
 								<span className="mt-2 text-[11px] text-base-content/50">
-									Optional. Used mainly by VAAPI. Intel QSV uses FFmpeg runtime device
-									selection.
+									Optional. Intel QSV and VAAPI use this render node when one is selected.
 								</span>
 							</label>
 						</div>

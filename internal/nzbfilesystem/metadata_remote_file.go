@@ -1157,7 +1157,7 @@ ephemeral:
 	}
 
 	// Coalesce small random reads through a per-file LRU of full segment
-	// bytes. Plex/Jellyfin scrubbing produces bursts of small ReadAts
+	// bytes. Media-player scrubbing produces bursts of small ReadAts
 	// across a handful of segments; without this every call hit the wire
 	// (storm S5). Only viable for plain (unencrypted, non-nested)
 	// segments — encrypted streams don't map cleanly to segment

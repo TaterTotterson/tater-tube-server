@@ -17,7 +17,7 @@ import (
 // the lock, and Close completes in microseconds regardless of segment
 // latency.
 //
-// Without this, a Plex/Jellyfin scrub session that produces frequent
+// Without this, a media-player scrub session that produces frequent
 // disconnect cycles would pin a request goroutine (and its pool slot)
 // for the per-attempt timeout × retry-count on every disconnect.
 

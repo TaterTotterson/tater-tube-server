@@ -388,10 +388,7 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	ffmpegPath := cfg.Transcoding.FFmpegPath
-	if ffmpegPath == "" {
-		ffmpegPath = "ffmpeg"
-	}
+	ffmpegPath := effectiveFFmpegPath(cfg.Transcoding.FFmpegPath)
 	if _, err := exec.LookPath(ffmpegPath); err != nil {
 		slog.ErrorContext(ctx, "FFmpeg not available for transcoding", "path", ffmpegPath, "error", err)
 		http.Error(w, "Transcoding unavailable: ffmpeg not found", http.StatusServiceUnavailable)
@@ -548,23 +545,14 @@ func (h *StreamHandler) selectTranscodeAcceleration(ctx context.Context, ffmpegP
 		return "none", ""
 	}
 
-	if requested == "qsv" {
-		probeCfg := cfg
-		probeCfg.HardwareDevice = ""
-		ok, reason := probeTranscodeEncoder(ctx, ffmpegPath, probeCfg, profile, requested)
-		if ok {
-			return requested, ""
+	if strings.TrimSpace(cfg.HardwareDevice) == "" && (requested == "vaapi" || requested == "qsv") {
+		vendors := []string{"intel", "amd"}
+		if requested == "qsv" {
+			vendors = []string{"intel"}
 		}
-		slog.WarnContext(ctx, "Configured FFmpeg hardware acceleration is not usable",
-			"requested", requested,
-			"reason", reason)
-		return "none", ""
-	}
-
-	if strings.TrimSpace(cfg.HardwareDevice) == "" && requested == "vaapi" {
 		device, reason, ok := probeTranscodeEncoderDevices(
 			ffmpegPath, cfg, profile, requested,
-			candidateDRIRenderDevices(detectDRMGPUVendors(), []string{"intel", "amd"}, ""),
+			candidateDRIRenderDevices(detectDRMGPUVendors(), vendors, ""),
 		)
 		if ok {
 			return requested, device
@@ -594,6 +582,12 @@ func transcodeHardwareInitArgs(cfg config.TranscodingConfig, accel string) []str
 	switch accel {
 	case "vaapi":
 		return []string{"-vaapi_device", device}
+	case "qsv":
+		return []string{
+			"-init_hw_device", "vaapi=va:" + device + ",driver=iHD",
+			"-init_hw_device", "qsv=qs@va",
+			"-filter_hw_device", "qs",
+		}
 	default:
 		return nil
 	}
@@ -629,7 +623,7 @@ func transcodeVideoSettings(accel, device string, profile transcodeProfile) (cod
 	case "vaapi":
 		return "h264_vaapi", scaleFilter + ",format=nv12,hwupload"
 	case "qsv":
-		return "h264_qsv", scaleFilter
+		return "h264_qsv", scaleFilter + ",format=nv12"
 	case "nvenc":
 		return "h264_nvenc", scaleFilter
 	case "videotoolbox":
@@ -659,17 +653,26 @@ func effectiveTranscodeHardwareAccel(videoCodec string) string {
 }
 
 func effectiveTranscodeHardwareDevice(hardwareAccel, configuredDevice string) string {
-	if hardwareAccel == "qsv" {
-		return ""
-	}
 	if configuredDevice != "" {
 		return configuredDevice
 	}
 	switch hardwareAccel {
-	case "vaapi":
+	case "vaapi", "qsv":
 		return firstDRIRenderDevice()
 	}
 	return ""
+}
+
+func effectiveFFmpegPath(configuredPath string) string {
+	configuredPath = strings.TrimSpace(configuredPath)
+	if configuredPath == "" || configuredPath == "ffmpeg" {
+		const bundledFFmpegPath = "/usr/local/bin/tater-ffmpeg"
+		if pathExists(bundledFFmpegPath) {
+			return bundledFFmpegPath
+		}
+		return "ffmpeg"
+	}
+	return configuredPath
 }
 
 func probeTranscodeEncoder(parent context.Context, ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, accel string) (bool, string) {
