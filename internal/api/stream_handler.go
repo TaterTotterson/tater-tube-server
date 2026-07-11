@@ -548,14 +548,23 @@ func (h *StreamHandler) selectTranscodeAcceleration(ctx context.Context, ffmpegP
 		return "none", ""
 	}
 
-	if strings.TrimSpace(cfg.HardwareDevice) == "" && (requested == "vaapi" || requested == "qsv") {
-		vendors := []string{"intel", "amd"}
-		if requested == "qsv" {
-			vendors = []string{"intel"}
+	if requested == "qsv" {
+		probeCfg := cfg
+		probeCfg.HardwareDevice = ""
+		ok, reason := probeTranscodeEncoder(ctx, ffmpegPath, probeCfg, profile, requested)
+		if ok {
+			return requested, ""
 		}
+		slog.WarnContext(ctx, "Configured FFmpeg hardware acceleration is not usable",
+			"requested", requested,
+			"reason", reason)
+		return "none", ""
+	}
+
+	if strings.TrimSpace(cfg.HardwareDevice) == "" && requested == "vaapi" {
 		device, reason, ok := probeTranscodeEncoderDevices(
 			ffmpegPath, cfg, profile, requested,
-			candidateDRIRenderDevices(detectDRMGPUVendors(), vendors, ""),
+			candidateDRIRenderDevices(detectDRMGPUVendors(), []string{"intel", "amd"}, ""),
 		)
 		if ok {
 			return requested, device
@@ -585,11 +594,6 @@ func transcodeHardwareInitArgs(cfg config.TranscodingConfig, accel string) []str
 	switch accel {
 	case "vaapi":
 		return []string{"-vaapi_device", device}
-	case "qsv":
-		return []string{
-			"-init_hw_device", "qsv=qs:hw,child_device=" + device + ",child_device_type=vaapi",
-			"-filter_hw_device", "qs",
-		}
 	default:
 		return nil
 	}
@@ -627,7 +631,7 @@ func transcodeVideoSettings(accel, device string, profile transcodeProfile) (cod
 	case "vaapi":
 		return "h264_vaapi", scaleFilter + ",format=nv12,hwupload"
 	case "qsv":
-		return "h264_qsv", scaleFilter + ",format=nv12,hwupload=extra_hw_frames=64"
+		return "h264_qsv", scaleFilter
 	case "nvenc":
 		return "h264_nvenc", scaleFilter
 	case "videotoolbox":
@@ -657,11 +661,14 @@ func effectiveTranscodeHardwareAccel(videoCodec string) string {
 }
 
 func effectiveTranscodeHardwareDevice(hardwareAccel, configuredDevice string) string {
+	if hardwareAccel == "qsv" {
+		return ""
+	}
 	if configuredDevice != "" {
 		return configuredDevice
 	}
 	switch hardwareAccel {
-	case "vaapi", "qsv":
+	case "vaapi":
 		return firstDRIRenderDevice()
 	}
 	return ""

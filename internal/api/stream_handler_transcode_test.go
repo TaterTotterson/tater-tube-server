@@ -35,9 +35,10 @@ func TestBuildFFmpegTranscodeArgsQSV(t *testing.T) {
 	args := buildFFmpegTranscodeArgs(cfg, transcodeProfiles["crt_480p"], "qsv")
 	joined := strings.Join(args, " ")
 
-	require.Contains(t, joined, "-init_hw_device qsv=qs:hw,child_device=/dev/dri/renderD129,child_device_type=vaapi")
-	require.Contains(t, joined, "-filter_hw_device qs")
-	require.Contains(t, joined, "-vf scale=w=640:h=480:force_original_aspect_ratio=decrease:force_divisible_by=2,format=nv12,hwupload=extra_hw_frames=64")
+	require.NotContains(t, joined, "-init_hw_device")
+	require.NotContains(t, joined, "-filter_hw_device")
+	require.NotContains(t, joined, "hwupload")
+	require.Contains(t, joined, "-vf scale=w=640:h=480:force_original_aspect_ratio=decrease:force_divisible_by=2")
 	require.Contains(t, joined, "-c:v h264_qsv")
 	require.Contains(t, joined, "-profile:v main")
 }

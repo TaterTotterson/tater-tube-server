@@ -34,15 +34,17 @@ stream cache stores decoded Usenet segments in `/config/segment-cache`; adjust
 its size, expiry, or path from the web UI under `Configuration -> Streaming`.
 
 FFmpeg is installed in the image for optional playback transcoding. Software
-x264 works without extra Docker flags. For VAAPI/QSV on Linux, pass the render
-device through, for example:
+x264 works without extra Docker flags. For VAAPI/QSV on Linux, pass `/dev/dri`
+through as a device:
 
 ```bash
-docker run ... --device /dev/dri/renderD128:/dev/dri/renderD128 ...
+docker run ... --device /dev/dri:/dev/dri ...
 ```
 
 Then enable transcoding and select the hardware mode in
-`Configuration -> Hardware Transcoding`.
+`Configuration -> Hardware Transcoding`. Intel QSV uses FFmpeg's runtime device
+selection; the hardware device field is mainly for VAAPI systems that need a
+specific render node.
 
 ## Build
 

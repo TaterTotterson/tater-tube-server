@@ -95,7 +95,7 @@ func detectTranscodingHardware(cfg config.TranscodingConfig) transcodeHardwareDe
 		result.RecommendedDevice = opt.Device
 		return result
 	}
-	for _, id := range []string{"nvenc", "vaapi", "qsv", "v4l2m2m", "none"} {
+	for _, id := range []string{"nvenc", "qsv", "vaapi", "v4l2m2m", "none"} {
 		if opt := firstAvailable(options, id); opt != nil {
 			result.Recommended = opt.ID
 			result.RecommendedDevice = opt.Device
@@ -148,18 +148,16 @@ func qsvOption(ffmpegPath string, cfg config.TranscodingConfig, profile transcod
 		opt.Status = "Encoder present, /dev/dri not visible"
 		return opt
 	}
-	device, reason, ok := probeTranscodeEncoderDevices(
-		ffmpegPath, cfg, profile, "qsv",
-		candidateDRIRenderDevices(gpus, []string{"intel"}, cfg.HardwareDevice),
-	)
-	if !ok {
+	probeCfg := cfg
+	probeCfg.HardwareDevice = ""
+	if ok, reason := probeTranscodeEncoder(context.Background(), ffmpegPath, probeCfg, profile, "qsv"); !ok {
 		opt.Status = "Encoder probe failed"
 		opt.Details = reason
 		return opt
 	}
 	opt.Available = true
-	opt.Device = device
 	opt.Status = "Available"
+	opt.Details = "Uses FFmpeg QSV runtime device selection."
 	return opt
 }
 
