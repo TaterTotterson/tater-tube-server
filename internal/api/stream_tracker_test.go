@@ -72,3 +72,22 @@ func TestStreamTracker_GetAll_Sorting(t *testing.T) {
 	assert.Equal(t, "/new.mkv", streams[0].FilePath)
 	assert.Equal(t, "/old.mkv", streams[1].FilePath)
 }
+
+func TestStreamTracker_GetAll_IncludesTranscodingInfo(t *testing.T) {
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+
+	stream := tracker.AddStream("/movies/movie.mkv", "Local", "Living Room", "127.0.0.1", "TestAgent", 1000)
+	tracker.SetTranscodingInfo(stream.ID, "hdmi_1080p", "HDMI 1080p", "vaapi", "/dev/dri/renderD128", "h264_vaapi", true)
+
+	streams := tracker.GetAll()
+
+	assert.Len(t, streams, 1)
+	assert.True(t, streams[0].Transcoded)
+	assert.True(t, streams[0].HardwareActive)
+	assert.Equal(t, "hdmi_1080p", streams[0].TranscodeProfile)
+	assert.Equal(t, "HDMI 1080p", streams[0].TranscodeName)
+	assert.Equal(t, "vaapi", streams[0].HardwareAccel)
+	assert.Equal(t, "/dev/dri/renderD128", streams[0].HardwareDevice)
+	assert.Equal(t, "h264_vaapi", streams[0].VideoCodec)
+}

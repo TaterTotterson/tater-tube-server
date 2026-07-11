@@ -28,6 +28,13 @@ type ActiveStream struct {
 	TotalConnections int       `json:"total_connections"`
 	BufferedOffset   int64     `json:"buffered_offset"`
 	Status           string    `json:"status"` // e.g., "Buffering", "Streaming", "Stalled"
+	Transcoded       bool      `json:"transcoded"`
+	TranscodeProfile string    `json:"transcode_profile,omitempty"`
+	TranscodeName    string    `json:"transcode_name,omitempty"`
+	HardwareAccel    string    `json:"hardware_acceleration,omitempty"`
+	HardwareDevice   string    `json:"hardware_device,omitempty"`
+	VideoCodec       string    `json:"video_codec,omitempty"`
+	HardwareActive   bool      `json:"hardware_active"`
 }
 
 // ARRsRepairService abstracts the ARR repair operations needed by the filesystem.

@@ -225,6 +225,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 
 	api.Get("/tater/players", s.handleTaterPlayers)
 	api.Post("/tater/players/codes", s.handleTaterCreatePairingCode)
+	api.Patch("/tater/players/:id", s.handleTaterUpdatePlayer)
 	api.Delete("/tater/players/:id", s.handleTaterRevokePlayer)
 
 	// Queue endpoints

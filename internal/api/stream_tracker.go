@@ -314,6 +314,28 @@ func (t *StreamTracker) UpdateProgress(id string, bytesRead int64) {
 	}
 }
 
+func (t *StreamTracker) Touch(id string) {
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*streamInternal)
+		stream.lastReadAt = time.Now()
+	}
+}
+
+func (t *StreamTracker) SetTranscodingInfo(id, profileID, profileName, hardwareAccel, hardwareDevice, videoCodec string, hardwareActive bool) {
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*streamInternal)
+		stream.Transcoded = true
+		stream.TranscodeProfile = profileID
+		stream.TranscodeName = profileName
+		stream.HardwareAccel = hardwareAccel
+		stream.HardwareDevice = hardwareDevice
+		stream.VideoCodec = videoCodec
+		stream.HardwareActive = hardwareActive
+		stream.Status = "Transcoding"
+		stream.lastReadAt = time.Now()
+	}
+}
+
 // UpdateDownloadProgress updates the bytes downloaded for a stream by ID
 func (t *StreamTracker) UpdateDownloadProgress(id string, bytesDownloaded int64) {
 	if val, ok := t.streams.Load(id); ok {
@@ -474,6 +496,18 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			// Use the "most active" status
 			if existing.Status != "Streaming" && s.Status == "Streaming" {
 				existing.Status = "Streaming"
+			}
+			if s.Transcoded {
+				existing.Transcoded = true
+				existing.TranscodeProfile = s.TranscodeProfile
+				existing.TranscodeName = s.TranscodeName
+				existing.HardwareAccel = s.HardwareAccel
+				existing.HardwareDevice = s.HardwareDevice
+				existing.VideoCodec = s.VideoCodec
+				existing.HardwareActive = s.HardwareActive
+				if existing.Status != "Streaming" {
+					existing.Status = s.Status
+				}
 			}
 
 			existing.TotalConnections++

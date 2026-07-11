@@ -34,9 +34,10 @@ type StreamHandler struct {
 
 // MonitoredFile wraps an afero.File to track read progress and support cancellation
 type MonitoredFile struct {
-	file   afero.File
-	stream *nzbfilesystem.ActiveStream
-	ctx    context.Context
+	file          afero.File
+	stream        *nzbfilesystem.ActiveStream
+	ctx           context.Context
+	streamTracker *StreamTracker
 }
 
 func (m *MonitoredFile) Read(p []byte) (n int, err error) {
@@ -47,6 +48,9 @@ func (m *MonitoredFile) Read(p []byte) (n int, err error) {
 	if n > 0 {
 		atomic.AddInt64(&m.stream.BytesSent, int64(n))
 		atomic.AddInt64(&m.stream.CurrentOffset, int64(n))
+		if m.streamTracker != nil {
+			m.streamTracker.Touch(m.stream.ID)
+		}
 	}
 	return n, err
 }
@@ -96,10 +100,7 @@ func (h *StreamHandler) authenticate(r *http.Request) (*database.User, bool) {
 				slog.DebugContext(ctx, "Stream authenticated by Tater Tube player token",
 					"player_id", player.ID,
 					"path", r.URL.Query().Get("path"))
-				playerName := strings.TrimSpace(player.Name)
-				if playerName == "" {
-					playerName = "Tater Tube Player"
-				}
+				playerName := taterPlayerDisplayName(player)
 				return &database.User{
 					UserID:   player.ID,
 					Name:     &playerName,
@@ -269,9 +270,10 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 			if streamObj != nil {
 				// Wrap the file with monitoring
 				monitoredFile := &MonitoredFile{
-					file:   file,
-					stream: streamObj,
-					ctx:    streamCtx,
+					file:          file,
+					stream:        streamObj,
+					ctx:           streamCtx,
+					streamTracker: h.streamTracker,
 				}
 
 				// Set MIME type based on file extension (prevents internal seeks)
@@ -413,6 +415,11 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	}
 
 	args := buildFFmpegTranscodeArgs(cfg.Transcoding, profile, accel)
+	videoCodec, _ := transcodeVideoSettings(accel, cfg.Transcoding.HardwareDevice, profile)
+	effectiveAccel := effectiveTranscodeHardwareAccel(videoCodec)
+	hardwareDevice := effectiveTranscodeHardwareDevice(effectiveAccel, cfg.Transcoding.HardwareDevice)
+	h.markTranscodedStream(w, file, profileID, profile.Name, effectiveAccel, hardwareDevice, videoCodec)
+
 	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
 	cmd.Stdin = file
 
@@ -430,16 +437,44 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 		"path", path,
 		"profile", profileID,
 		"profile_name", profile.Name,
-		"hardware_acceleration", accel)
+		"hardware_acceleration", effectiveAccel,
+		"video_codec", videoCodec)
 
 	if err := cmd.Run(); err != nil && r.Context().Err() == nil {
 		slog.ErrorContext(ctx, "FFmpeg transcode failed",
 			"path", path,
 			"profile", profileID,
-			"hardware_acceleration", accel,
+			"hardware_acceleration", effectiveAccel,
+			"video_codec", videoCodec,
 			"error", err,
 			"stderr", stderr.String())
 	}
+}
+
+func (h *StreamHandler) markTranscodedStream(w http.ResponseWriter, file afero.File, profileID, profileName, hardwareAccel, hardwareDevice, videoCodec string) {
+	if h.streamTracker == nil {
+		return
+	}
+
+	streamID := ""
+	if tracked, ok := w.(*trackedResponseWriter); ok && tracked.stream != nil {
+		streamID = tracked.stream.ID
+	} else if mvf, ok := file.(*nzbfilesystem.MetadataVirtualFile); ok {
+		streamID = mvf.GetStreamID()
+	}
+	if streamID == "" {
+		return
+	}
+
+	h.streamTracker.SetTranscodingInfo(
+		streamID,
+		profileID,
+		profileName,
+		hardwareAccel,
+		hardwareDevice,
+		videoCodec,
+		hardwareAccel != "" && hardwareAccel != "none",
+	)
 }
 
 func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string) []string {
@@ -529,6 +564,33 @@ func transcodeVideoSettings(accel, device string, profile transcodeProfile) (cod
 	}
 }
 
+func effectiveTranscodeHardwareAccel(videoCodec string) string {
+	switch videoCodec {
+	case "h264_vaapi":
+		return "vaapi"
+	case "h264_qsv":
+		return "qsv"
+	case "h264_nvenc":
+		return "nvenc"
+	case "h264_videotoolbox":
+		return "videotoolbox"
+	case "h264_v4l2m2m":
+		return "v4l2m2m"
+	default:
+		return "none"
+	}
+}
+
+func effectiveTranscodeHardwareDevice(hardwareAccel, configuredDevice string) string {
+	if configuredDevice != "" {
+		return configuredDevice
+	}
+	if hardwareAccel == "vaapi" {
+		return "/dev/dri/renderD128"
+	}
+	return ""
+}
+
 func hasDefaultVAAPIDevice() bool {
 	_, err := os.Stat("/dev/dri/renderD128")
 	return err == nil
@@ -544,6 +606,30 @@ func (f flushWriter) Write(p []byte) (int, error) {
 		flusher.Flush()
 	}
 	return n, err
+}
+
+type trackedResponseWriter struct {
+	http.ResponseWriter
+	stream        *nzbfilesystem.ActiveStream
+	streamTracker *StreamTracker
+}
+
+func (w *trackedResponseWriter) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	if n > 0 && w.stream != nil {
+		atomic.AddInt64(&w.stream.BytesSent, int64(n))
+		atomic.AddInt64(&w.stream.CurrentOffset, int64(n))
+		if w.streamTracker != nil {
+			w.streamTracker.Touch(w.stream.ID)
+		}
+	}
+	return n, err
+}
+
+func (w *trackedResponseWriter) Flush() {
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 type limitedBuffer struct {

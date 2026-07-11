@@ -60,6 +60,48 @@ function streamProgress(stream: ActiveStream) {
 	return Math.max(0, Math.min(100, (sent / stream.total_size) * 100));
 }
 
+function hardwareName(value?: string) {
+	switch (value) {
+		case "vaapi":
+			return "VAAPI";
+		case "qsv":
+			return "Quick Sync";
+		case "nvenc":
+			return "NVENC";
+		case "videotoolbox":
+			return "VideoToolbox";
+		case "v4l2m2m":
+			return "V4L2 M2M";
+		default:
+			return "Hardware";
+	}
+}
+
+function playbackMode(stream?: ActiveStream) {
+	if (!stream) {
+		return null;
+	}
+	if (!stream.transcoded) {
+		return {
+			label: "Direct",
+			className: "badge-outline",
+			detail: "direct play",
+		};
+	}
+	if (stream.hardware_active) {
+		return {
+			label: `HW ${hardwareName(stream.hardware_acceleration)}`,
+			className: "badge-success",
+			detail: stream.video_codec || stream.hardware_device || "hardware transcode",
+		};
+	}
+	return {
+		label: "SW Transcode",
+		className: "badge-warning",
+		detail: stream.transcode_name || stream.video_codec || "software transcode",
+	};
+}
+
 function StatTile({
 	icon: Icon,
 	label,
@@ -320,6 +362,7 @@ export function Dashboard() {
 						{players.length > 0 ? (
 							players.map((player) => {
 								const stream = streamByPlayerName.get(player.name);
+								const mode = playbackMode(stream);
 								return (
 									<div
 										key={player.id}
@@ -339,7 +382,21 @@ export function Dashboard() {
 											</span>
 										</div>
 										<div className="mt-2 text-base-content/70 text-sm">
-											{stream ? `Playing ${fileLabel(stream.file_path)}` : "No active stream"}
+											{stream ? (
+												<div className="flex flex-wrap items-center gap-2">
+													<span className="min-w-0 truncate">
+														Playing {fileLabel(stream.file_path)}
+													</span>
+													{mode && (
+														<span className={`badge badge-sm ${mode.className}`}>{mode.label}</span>
+													)}
+												</div>
+											) : (
+												"No active stream"
+											)}
+											{mode?.detail && (
+												<div className="mt-1 text-base-content/50 text-xs">{mode.detail}</div>
+											)}
 										</div>
 									</div>
 								);
@@ -355,32 +412,41 @@ export function Dashboard() {
 				<Panel title="Active Streams" icon={Gauge}>
 					<div className="space-y-3">
 						{activeStreams.length > 0 ? (
-							activeStreams.map((stream) => (
-								<div
-									key={stream.id}
-									className="rounded-md border border-base-300 bg-base-100/70 p-3"
-								>
-									<div className="flex items-start justify-between gap-3">
-										<div className="min-w-0">
-											<div className="truncate font-semibold">{fileLabel(stream.file_path)}</div>
-											<div className="text-base-content/60 text-sm">
-												{stream.user_name || stream.source || "Unknown player"} -{" "}
-												{formatRate(stream.bytes_per_second || stream.download_speed)}
+							activeStreams.map((stream) => {
+								const mode = playbackMode(stream);
+								return (
+									<div
+										key={stream.id}
+										className="rounded-md border border-base-300 bg-base-100/70 p-3"
+									>
+										<div className="flex items-start justify-between gap-3">
+											<div className="min-w-0">
+												<div className="truncate font-semibold">{fileLabel(stream.file_path)}</div>
+												<div className="text-base-content/60 text-sm">
+													{stream.user_name || stream.source || "Unknown player"} -{" "}
+													{formatRate(stream.bytes_per_second || stream.download_speed)}
+												</div>
+											</div>
+											<div className="flex flex-wrap justify-end gap-2">
+												{mode && <span className={`badge ${mode.className}`}>{mode.label}</span>}
+												<span className="badge badge-primary">{stream.status || "Streaming"}</span>
 											</div>
 										</div>
-										<span className="badge badge-primary">{stream.status || "Streaming"}</span>
+										{mode?.detail && (
+											<div className="mt-2 text-base-content/50 text-xs">{mode.detail}</div>
+										)}
+										<progress
+											className="progress progress-primary mt-3 h-2 w-full"
+											value={streamProgress(stream)}
+											max={100}
+										/>
+										<div className="mt-2 flex justify-between text-base-content/50 text-xs">
+											<span>{formatBytes(stream.bytes_sent)} sent</span>
+											<span>{formatBytes(stream.total_size)} total</span>
+										</div>
 									</div>
-									<progress
-										className="progress progress-primary mt-3 h-2 w-full"
-										value={streamProgress(stream)}
-										max={100}
-									/>
-									<div className="mt-2 flex justify-between text-base-content/50 text-xs">
-										<span>{formatBytes(stream.bytes_sent)} sent</span>
-										<span>{formatBytes(stream.total_size)} total</span>
-									</div>
-								</div>
-							))
+								);
+							})
 						) : (
 							<div className="rounded-md border border-base-300 border-dashed p-4 text-base-content/60 text-sm">
 								No active streams.
