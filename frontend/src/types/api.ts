@@ -402,7 +402,9 @@ export interface ActiveStream {
 	id: string;
 	file_path: string;
 	started_at: string;
+	last_activity?: string;
 	source: string;
+	player_id?: string;
 	user_name?: string;
 	client_ip?: string;
 	user_agent?: string;

@@ -109,6 +109,9 @@ func TestLocalStreamHandlerTracksActiveDirectStreams(t *testing.T) {
 	if streams[0].UserName != "Living Room" {
 		t.Fatalf("expected player name in active stream, got %q", streams[0].UserName)
 	}
+	if streams[0].PlayerID != "player-1" {
+		t.Fatalf("expected player ID in active stream, got %q", streams[0].PlayerID)
+	}
 	if streams[0].BytesSent <= 0 {
 		t.Fatalf("expected bytes sent to be tracked, got %d", streams[0].BytesSent)
 	}

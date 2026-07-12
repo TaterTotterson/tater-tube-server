@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -303,6 +304,13 @@ func (t *StreamTracker) SetCancelFunc(id string, cancel context.CancelFunc) {
 	if val, ok := t.streams.Load(id); ok {
 		internal := val.(*streamInternal)
 		internal.cancel = cancel
+	}
+}
+
+func (t *StreamTracker) SetPlayerID(id, playerID string) {
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*streamInternal)
+		stream.PlayerID = strings.TrimSpace(playerID)
 	}
 }
 

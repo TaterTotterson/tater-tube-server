@@ -17,6 +17,7 @@ const (
 	ActiveStreamKey           = contextKey("activeStream")
 	StreamIDKey               = contextKey("streamID")
 	StreamSourceKey           = contextKey("streamSource")
+	StreamPlayerIDKey         = contextKey("streamPlayerID")
 	StreamUserNameKey         = contextKey("streamUserName")
 	ClientIPKey               = contextKey("clientIP")
 	UserAgentKey              = contextKey("userAgent")

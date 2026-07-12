@@ -1,13 +1,4 @@
-import {
-	Activity,
-	Cpu,
-	Database,
-	Home,
-	List,
-	ScrollText,
-	Settings,
-	Tv,
-} from "lucide-react";
+import { Activity, Cpu, Database, Home, ScrollText, Settings, Tv } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
 import { apiClient } from "../../api/client";
@@ -21,9 +12,9 @@ const navigation = [
 		icon: Home,
 	},
 	{
-		name: "Queue",
+		name: "Activity",
 		href: "/queue",
-		icon: List,
+		icon: Activity,
 	},
 	{
 		name: "Logs",
@@ -181,7 +172,7 @@ export function Sidebar() {
 						<div className="flex items-center justify-between">
 							<div className="flex items-center space-x-2">
 								<Database className="h-4 w-4" />
-								<span className="text-sm">Queue</span>
+								<span className="text-sm">Activity</span>
 							</div>
 							<div className="text-base-content/70 text-sm">{queueLabel()}</div>
 						</div>
@@ -208,9 +199,7 @@ export function Sidebar() {
 					<div className="space-y-2">
 						<div className="flex items-center justify-between">
 							<div className="text-base-content/70 text-sm">Version</div>
-							<div className="font-mono text-base-content text-sm">
-								{__APP_VERSION__}
-							</div>
+							<div className="font-mono text-base-content text-sm">{__APP_VERSION__}</div>
 						</div>
 					</div>
 				</div>

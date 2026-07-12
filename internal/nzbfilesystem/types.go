@@ -14,6 +14,7 @@ type ActiveStream struct {
 	StartedAt        time.Time `json:"started_at"`
 	LastActivity     time.Time `json:"last_activity"`
 	Source           string    `json:"source"`
+	PlayerID         string    `json:"player_id,omitempty"`
 	UserName         string    `json:"user_name,omitempty"`
 	ClientIP         string    `json:"client_ip,omitempty"`
 	UserAgent        string    `json:"user_agent,omitempty"`

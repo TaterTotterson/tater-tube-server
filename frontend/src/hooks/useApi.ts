@@ -369,6 +369,14 @@ export const useActiveStreams = () => {
 	});
 };
 
+export const useStreamHistory = () => {
+	return useQuery({
+		queryKey: ["files", "streams", "history"],
+		queryFn: () => apiClient.getStreamHistory(),
+		refetchInterval: 10000,
+	});
+};
+
 export const useDirectHealthCheck = () => {
 	const queryClient = useQueryClient();
 

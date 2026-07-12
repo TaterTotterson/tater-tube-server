@@ -12,8 +12,10 @@ import {
 	Clock,
 	Download,
 	FileCode,
+	FileVideo,
 	Filter,
 	Globe,
+	History,
 	Import,
 	Link2,
 	List,
@@ -51,11 +53,12 @@ import {
 	useRegenerateSymlinks,
 	useRestartBulkQueueItems,
 	useRetryQueueItem,
+	useStreamHistory,
 	useUpdateQueueItemPriority,
 } from "../hooks/useApi";
 import { useQueueStream } from "../hooks/useQueueStream";
 import { formatBytes, formatRelativeTime, truncateText } from "../lib/utils";
-import { type QueueItem, QueueStatus } from "../types/api";
+import { type ActiveStream, type QueueItem, QueueStatus } from "../types/api";
 
 type QueueFilter = "" | "pending" | "processing" | "completed" | "failed";
 type QueueView = "list" | "import";
@@ -67,6 +70,65 @@ const QUEUE_SECTIONS = [
 	{ id: "completed", title: "Completed", icon: CheckCircle2 },
 	{ id: "failed", title: "Failed", icon: XOctagon },
 ];
+
+function pathLabel(path?: string) {
+	const parts = String(path || "")
+		.split(/[\\/]/)
+		.filter(Boolean);
+	return parts.at(-1) || path || "Unknown media";
+}
+
+function normalizedPath(value?: string) {
+	return String(value || "")
+		.trim()
+		.replace(/\\/g, "/")
+		.toLowerCase();
+}
+
+function stripArchiveExtension(value: string) {
+	return value.replace(/\.(nzb|nzb\.gz|gz)$/i, "");
+}
+
+function streamActivityTime(stream?: ActiveStream) {
+	return stream?.last_activity || stream?.started_at || "";
+}
+
+function streamPlayerLabel(stream?: ActiveStream) {
+	if (!stream) return "";
+	return stream.user_name || stream.player_id || stream.client_ip || "Unknown player";
+}
+
+function streamSourceLabel(stream?: ActiveStream) {
+	if (!stream) return "";
+	if (stream.source === "Local") return "Local";
+	if (stream.source === "API" || stream.source === "Stremio") return "NZB Stream";
+	return stream.source || "Playback";
+}
+
+function queuePlaybackMatch(stream: ActiveStream, item: QueueItem) {
+	const streamPath = normalizedPath(stream.file_path);
+	if (!streamPath) return false;
+
+	const candidates = [
+		item.storage_path,
+		item.target_path,
+		item.nzb_display_name,
+		stripArchiveExtension(item.nzb_display_name || ""),
+		pathLabel(item.target_path),
+		pathLabel(item.storage_path),
+	]
+		.map(normalizedPath)
+		.filter((candidate) => candidate.length >= 4);
+
+	return candidates.some((candidate) => streamPath.includes(candidate));
+}
+
+function queueItemActivityLabel(item: QueueItem) {
+	if (item.status === QueueStatus.PROCESSING) return "Processing";
+	if (item.status === QueueStatus.COMPLETED) return "Not played";
+	if (item.status === QueueStatus.FAILED) return "Failed";
+	return "Waiting";
+}
 
 export function QueuePage() {
 	const [view, setView] = useState<QueueView>("list");
@@ -108,6 +170,8 @@ export function QueuePage() {
 	const queueData = queueResponse?.data;
 	const meta = queueResponse?.meta;
 	const totalPages = meta?.total ? Math.ceil(meta.total / pageSize) : 0;
+	const { data: streamHistoryData, isLoading: streamHistoryLoading } = useStreamHistory();
+	const streamHistory = Array.isArray(streamHistoryData) ? streamHistoryData : [];
 
 	const { progress: liveProgress } = useQueueStream({
 		enabled: view === "list",
@@ -130,6 +194,22 @@ export function QueuePage() {
 			return aActive - bActive;
 		});
 	}, [queueData, liveProgress]);
+
+	const recentPlayback = useMemo(() => {
+		return streamHistory.slice(0, 8);
+	}, [streamHistory]);
+
+	const playbackByQueueItemId = useMemo(() => {
+		const map = new Map<number, ActiveStream>();
+		if (!queueData) return map;
+		for (const item of queueData) {
+			const match = streamHistory.find((stream) => queuePlaybackMatch(stream, item));
+			if (match) {
+				map.set(item.id, match);
+			}
+		}
+		return map;
+	}, [queueData, streamHistory]);
 
 	const { data: stats } = useQueueStats();
 	const deleteItem = useDeleteQueueItem();
@@ -409,7 +489,7 @@ export function QueuePage() {
 	if (error) {
 		return (
 			<div className="space-y-4">
-				<h1 className="font-bold text-3xl tracking-tight">Queue Management</h1>
+				<h1 className="font-bold text-3xl tracking-tight">Activity</h1>
 				<ErrorAlert error={error as Error} onRetry={() => refetch()} />
 			</div>
 		);
@@ -421,11 +501,13 @@ export function QueuePage() {
 			<div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
 				<div className="flex items-center space-x-3">
 					<div className="rounded-xl bg-primary/10 p-2">
-						<List className="h-8 w-8 text-primary" />
+						<Activity className="h-8 w-8 text-primary" />
 					</div>
 					<div>
-						<h1 className="font-bold text-3xl tracking-tight">Queue</h1>
-						<p className="text-base-content/60 text-sm">Monitor and manage NZB processing tasks</p>
+						<h1 className="font-bold text-3xl tracking-tight">Activity</h1>
+						<p className="text-base-content/60 text-sm">
+							Playback history and NZB stream processing in one place
+						</p>
 					</div>
 				</div>
 
@@ -437,7 +519,7 @@ export function QueuePage() {
 							className={`tab tab-sm gap-2 ${view === "list" ? "tab-active" : ""}`}
 							onClick={() => setView("list")}
 						>
-							<List className="h-3.5 w-3.5" /> List
+							<History className="h-3.5 w-3.5" /> Activity
 						</button>
 						<button
 							type="button"
@@ -616,6 +698,109 @@ export function QueuePage() {
 					{/* Content Area */}
 					<div className="min-w-0 lg:col-span-9 xl:col-span-10">
 						<div className="space-y-6">
+							{/* Playback History */}
+							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
+								<div className="card-body p-4 sm:p-6">
+									<div className="mb-4 flex min-w-0 items-center justify-between gap-3">
+										<div className="min-w-0">
+											<h2 className="font-bold text-lg">Playback History</h2>
+											<p className="text-base-content/60 text-sm">
+												Recent local and NZB streams by Tater Tube player.
+											</p>
+										</div>
+										<span className="badge badge-primary badge-sm shrink-0">
+											{recentPlayback.length} recent
+										</span>
+									</div>
+
+									{streamHistoryLoading ? (
+										<div className="flex justify-center py-8">
+											<LoadingSpinner />
+										</div>
+									) : recentPlayback.length > 0 ? (
+										<div className="overflow-x-auto">
+											<table className="table-zebra table-sm table">
+												<thead className="bg-base-200/50">
+													<tr>
+														<th className="font-bold text-base-content/80 text-xs uppercase tracking-widest">
+															Media
+														</th>
+														<th className="font-bold text-base-content/80 text-xs uppercase tracking-widest">
+															Source
+														</th>
+														<th className="font-bold text-base-content/80 text-xs uppercase tracking-widest">
+															Player
+														</th>
+														<th className="font-bold text-base-content/80 text-xs uppercase tracking-widest">
+															Size
+														</th>
+														<th className="font-bold text-base-content/80 text-xs uppercase tracking-widest">
+															When
+														</th>
+													</tr>
+												</thead>
+												<tbody>
+													{recentPlayback.map((stream) => (
+														<tr key={`${stream.id}-${stream.started_at}`}>
+															<td className="min-w-[220px]">
+																<div className="flex min-w-0 items-center gap-2">
+																	<FileVideo className="h-3.5 w-3.5 shrink-0 text-primary/70" />
+																	<div className="min-w-0">
+																		<div
+																			className="truncate font-semibold text-sm"
+																			title={stream.file_path}
+																		>
+																			{pathLabel(stream.file_path)}
+																		</div>
+																		<div className="truncate text-base-content/40 text-xs">
+																			{stream.file_path}
+																		</div>
+																	</div>
+																</div>
+															</td>
+															<td>
+																<span
+																	className={`badge badge-sm ${
+																		stream.source === "Local" ? "badge-accent" : "badge-primary"
+																	}`}
+																>
+																	{streamSourceLabel(stream)}
+																</span>
+															</td>
+															<td>
+																<div className="flex min-w-0 flex-col">
+																	<span className="truncate font-semibold text-sm">
+																		{streamPlayerLabel(stream)}
+																	</span>
+																	{stream.client_ip && (
+																		<span className="text-base-content/40 text-xs">
+																			{stream.client_ip}
+																		</span>
+																	)}
+																</div>
+															</td>
+															<td className="font-mono text-xs opacity-70">
+																{formatBytes(stream.total_size || stream.bytes_sent || 0)}
+															</td>
+															<td className="whitespace-nowrap text-xs opacity-70">
+																{streamActivityTime(stream)
+																	? formatRelativeTime(streamActivityTime(stream))
+																	: "recently"}
+															</td>
+														</tr>
+													))}
+												</tbody>
+											</table>
+										</div>
+									) : (
+										<div className="rounded-lg border border-base-300 border-dashed py-8 text-center text-base-content/50">
+											<FileVideo className="mx-auto mb-2 h-8 w-8 opacity-20" />
+											<p>No playback history yet</p>
+										</div>
+									)}
+								</div>
+							</div>
+
 							{/* Bulk Actions Toolbar */}
 							{selectedItems.size > 0 && (
 								<div className="card border border-primary/20 bg-primary/5 shadow-sm">
@@ -716,23 +901,33 @@ export function QueuePage() {
 										<>
 											{/* Mobile View (< 768px) */}
 											<div className="min-w-0 space-y-3 p-4 md:hidden">
-												{enrichedQueueData?.map((item: QueueItem) => (
-													<QueueItemCard
-														key={item.id}
-														item={item}
-														isSelected={selectedItems.has(item.id)}
-														onSelectChange={handleSelectItem}
-														onRetry={handleRetry}
-														onCancel={handleCancel}
-														onDelete={handleDelete}
-														onDownload={handleDownload}
-														onRegenerateSymlink={handleRegenerateSymlink}
-														isRetryPending={retryItem.isPending}
-														isCancelPending={cancelItem.isPending}
-														isDeletePending={deleteItem.isPending}
-														isRegenerateSymlinkPending={regenerateSymlinks.isPending}
-													/>
-												))}
+												{enrichedQueueData?.map((item: QueueItem) => {
+													const playback = playbackByQueueItemId.get(item.id);
+													return (
+														<QueueItemCard
+															key={item.id}
+															item={item}
+															isSelected={selectedItems.has(item.id)}
+															activityLabel={queueItemActivityLabel(item)}
+															playedAtLabel={
+																playback
+																	? `Played ${formatRelativeTime(streamActivityTime(playback))}`
+																	: undefined
+															}
+															playedByLabel={playback ? streamPlayerLabel(playback) : undefined}
+															onSelectChange={handleSelectItem}
+															onRetry={handleRetry}
+															onCancel={handleCancel}
+															onDelete={handleDelete}
+															onDownload={handleDownload}
+															onRegenerateSymlink={handleRegenerateSymlink}
+															isRetryPending={retryItem.isPending}
+															isCancelPending={cancelItem.isPending}
+															isDeletePending={deleteItem.isPending}
+															isRegenerateSymlinkPending={regenerateSymlinks.isPending}
+														/>
+													);
+												})}
 											</div>
 
 											{/* Desktop View (≥768px) */}
@@ -776,261 +971,262 @@ export function QueuePage() {
 															<th className="w-24 font-bold text-base-content/80 text-xs uppercase tracking-widest">
 																Priority
 															</th>
-															<th>
-																<button
-																	type="button"
-																	className="flex items-center gap-1 font-bold text-base-content/80 text-xs uppercase tracking-widest hover:text-primary"
-																	onClick={() => handleSort("created_at")}
-																>
-																	Created
-																	{sortBy === "created_at" &&
-																		(sortOrder === "asc" ? (
-																			<ChevronUp className="h-3 w-3" />
-																		) : (
-																			<ChevronDown className="h-3 w-3" />
-																		))}
-																</button>
+															<th className="font-bold text-base-content/80 text-xs uppercase tracking-widest">
+																Player
 															</th>
 															<th className="w-16" />
 														</tr>
 													</thead>
 													<tbody>
-														{enrichedQueueData?.map((item: QueueItem) => (
-															<tr
-																key={item.id}
-																className={`hover transition-colors ${selectedItems.has(item.id) ? "bg-primary/5" : ""}`}
-															>
-																<td className="text-center">
-																	<input
-																		type="checkbox"
-																		className="checkbox checkbox-sm"
-																		checked={selectedItems.has(item.id)}
-																		onChange={(e) => handleSelectItem(item.id, e.target.checked)}
-																	/>
-																</td>
-																<td className="min-w-0">
-																	<div className="flex min-w-0 flex-col">
-																		<div className="flex min-w-0 items-center gap-2">
-																			<FileCode className="h-3.5 w-3.5 shrink-0 text-base-content/60" />
-																			<div className="min-w-0 flex-1 font-bold text-sm">
-																				<PathDisplay
-																					path={item.nzb_display_name}
-																					maxLength={80}
-																					showFileName={true}
-																				/>
+														{enrichedQueueData?.map((item: QueueItem) => {
+															const playback = playbackByQueueItemId.get(item.id);
+															return (
+																<tr
+																	key={item.id}
+																	className={`hover transition-colors ${selectedItems.has(item.id) ? "bg-primary/5" : ""}`}
+																>
+																	<td className="text-center">
+																		<input
+																			type="checkbox"
+																			className="checkbox checkbox-sm"
+																			checked={selectedItems.has(item.id)}
+																			onChange={(e) => handleSelectItem(item.id, e.target.checked)}
+																		/>
+																	</td>
+																	<td className="min-w-0">
+																		<div className="flex min-w-0 flex-col">
+																			<div className="flex min-w-0 items-center gap-2">
+																				<FileCode className="h-3.5 w-3.5 shrink-0 text-base-content/60" />
+																				<div className="min-w-0 flex-1 font-bold text-sm">
+																					<PathDisplay
+																						path={item.nzb_display_name}
+																						maxLength={80}
+																						showFileName={true}
+																					/>
+																				</div>
+																			</div>
+																			{item.indexer && (
+																				<div className="mt-1 flex min-w-0 items-center gap-1 pl-5.5 text-base-content/50 text-xs">
+																					<Globe className="h-3 w-3 shrink-0" />
+																					<span className="truncate">{item.indexer}</span>
+																				</div>
+																			)}
+																			<div className="mt-1 min-w-0 pl-5.5 text-base-content/40 text-xs">
+																				{item.target_path ? (
+																					<span className="flex min-w-0 items-center gap-1">
+																						<Box className="h-2.5 w-2.5 shrink-0" />
+																						<PathDisplay path={item.target_path} maxLength={60} />
+																					</span>
+																				) : (
+																					`ID: ${item.id}`
+																				)}
 																			</div>
 																		</div>
-																		{item.indexer && (
-																			<div className="mt-1 flex min-w-0 items-center gap-1 pl-5.5 text-base-content/50 text-xs">
-																				<Globe className="h-3 w-3 shrink-0" />
-																				<span className="truncate">{item.indexer}</span>
-																			</div>
+																	</td>
+																	<td>
+																		{item.file_size ? (
+																			<span className="font-mono text-xs opacity-70">
+																				{formatBytes(item.file_size)}
+																			</span>
+																		) : (
+																			<span className="text-base-content/50">—</span>
 																		)}
-																		<div className="mt-1 min-w-0 pl-5.5 text-base-content/40 text-xs">
-																			{item.target_path ? (
-																				<span className="flex min-w-0 items-center gap-1">
-																					<Box className="h-2.5 w-2.5 shrink-0" />
-																					<PathDisplay path={item.target_path} maxLength={60} />
-																				</span>
+																	</td>
+																	<td>
+																		<div className="flex flex-col gap-1">
+																			{item.status === QueueStatus.FAILED && item.error_message ? (
+																				<div
+																					className="tooltip tooltip-top"
+																					data-tip={truncateText(item.error_message, 200)}
+																				>
+																					<div className="flex items-center gap-1">
+																						<StatusBadge status={item.status} />
+																						<AlertCircle className="h-3 w-3 text-error" />
+																					</div>
+																				</div>
+																			) : item.status === QueueStatus.PROCESSING &&
+																				item.percentage != null ? (
+																				<div className="flex w-24 flex-col gap-1">
+																					<div className="flex justify-between font-bold font-mono text-base-content/80 text-xs">
+																						<span>{item.stage ?? "PROGRESS"}</span>
+																						<span>{item.percentage}%</span>
+																					</div>
+																					<progress
+																						className="progress progress-primary h-1.5 w-full"
+																						value={item.percentage}
+																						max={100}
+																					/>
+																				</div>
 																			) : (
-																				`ID: ${item.id}`
+																				<StatusBadge status={item.status} />
 																			)}
 																		</div>
-																	</div>
-																</td>
-																<td>
-																	{item.file_size ? (
-																		<span className="font-mono text-xs opacity-70">
-																			{formatBytes(item.file_size)}
-																		</span>
-																	) : (
-																		<span className="text-base-content/50">—</span>
-																	)}
-																</td>
-																<td>
-																	<div className="flex flex-col gap-1">
-																		{item.status === QueueStatus.FAILED && item.error_message ? (
-																			<div
-																				className="tooltip tooltip-top"
-																				data-tip={truncateText(item.error_message, 200)}
-																			>
-																				<div className="flex items-center gap-1">
-																					<StatusBadge status={item.status} />
-																					<AlertCircle className="h-3 w-3 text-error" />
+																	</td>
+																	<td>
+																		{item.status !== QueueStatus.PROCESSING &&
+																		item.status !== QueueStatus.COMPLETED ? (
+																			<div className="flex items-center gap-1">
+																				<span
+																					className={`badge badge-xs px-2 py-2 font-bold font-mono ${
+																						item.priority === 1
+																							? "badge-error"
+																							: item.priority === 3
+																								? "badge-ghost text-base-content/50"
+																								: "badge-outline"
+																					}`}
+																				>
+																					{item.priority === 1
+																						? "High"
+																						: item.priority === 3
+																							? "Low"
+																							: "Normal"}
+																				</span>
+																				<div className="flex flex-col">
+																					<button
+																						type="button"
+																						className="btn btn-ghost btn-xs p-0"
+																						disabled={
+																							item.priority <= 1 || updatePriority.isPending
+																						}
+																						onClick={() =>
+																							handleSetPriority(
+																								item.id,
+																								(item.priority - 1) as 1 | 2 | 3,
+																							)
+																						}
+																						aria-label="Increase priority"
+																					>
+																						<ArrowUp className="h-3 w-3" aria-hidden="true" />
+																					</button>
+																					<button
+																						type="button"
+																						className="btn btn-ghost btn-xs p-0"
+																						disabled={
+																							item.priority >= 3 || updatePriority.isPending
+																						}
+																						onClick={() =>
+																							handleSetPriority(
+																								item.id,
+																								(item.priority + 1) as 1 | 2 | 3,
+																							)
+																						}
+																						aria-label="Decrease priority"
+																					>
+																						<ArrowDown className="h-3 w-3" aria-hidden="true" />
+																					</button>
 																				</div>
-																			</div>
-																		) : item.status === QueueStatus.PROCESSING &&
-																			item.percentage != null ? (
-																			<div className="flex w-24 flex-col gap-1">
-																				<div className="flex justify-between font-bold font-mono text-base-content/80 text-xs">
-																					<span>{item.stage ?? "PROGRESS"}</span>
-																					<span>{item.percentage}%</span>
-																				</div>
-																				<progress
-																					className="progress progress-primary h-1.5 w-full"
-																					value={item.percentage}
-																					max={100}
-																				/>
 																			</div>
 																		) : (
-																			<StatusBadge status={item.status} />
+																			<span className="text-base-content/30">—</span>
 																		)}
-																	</div>
-																</td>
-																<td>
-																	{item.status !== QueueStatus.PROCESSING &&
-																	item.status !== QueueStatus.COMPLETED ? (
-																		<div className="flex items-center gap-1">
-																			<span
-																				className={`badge badge-xs px-2 py-2 font-bold font-mono ${
-																					item.priority === 1
-																						? "badge-error"
-																						: item.priority === 3
-																							? "badge-ghost text-base-content/50"
-																							: "badge-outline"
-																				}`}
-																			>
-																				{item.priority === 1
-																					? "High"
-																					: item.priority === 3
-																						? "Low"
-																						: "Normal"}
-																			</span>
-																			<div className="flex flex-col">
-																				<button
-																					type="button"
-																					className="btn btn-ghost btn-xs p-0"
-																					disabled={item.priority <= 1 || updatePriority.isPending}
-																					onClick={() =>
-																						handleSetPriority(
-																							item.id,
-																							(item.priority - 1) as 1 | 2 | 3,
-																						)
-																					}
-																					aria-label="Increase priority"
-																				>
-																					<ArrowUp className="h-3 w-3" aria-hidden="true" />
-																				</button>
-																				<button
-																					type="button"
-																					className="btn btn-ghost btn-xs p-0"
-																					disabled={item.priority >= 3 || updatePriority.isPending}
-																					onClick={() =>
-																						handleSetPriority(
-																							item.id,
-																							(item.priority + 1) as 1 | 2 | 3,
-																						)
-																					}
-																					aria-label="Decrease priority"
-																				>
-																					<ArrowDown className="h-3 w-3" aria-hidden="true" />
-																				</button>
+																	</td>
+																	<td>
+																		{playback ? (
+																			<div className="flex min-w-0 flex-col">
+																				<span className="truncate font-semibold text-sm">
+																					{streamPlayerLabel(playback)}
+																				</span>
+																				<span className="text-base-content/50 text-xs">
+																					Played {formatRelativeTime(streamActivityTime(playback))}
+																				</span>
 																			</div>
-																		</div>
-																	) : (
-																		<span className="text-base-content/30">—</span>
-																	)}
-																</td>
-																<td>
-																	<div className="flex flex-col">
-																		<span className="text-xs opacity-70">
-																			{item.status === QueueStatus.PROCESSING && item.started_at
-																				? `Started ${formatRelativeTime(item.started_at)}`
-																				: item.status === QueueStatus.COMPLETED && item.completed_at
-																					? `Finished ${formatRelativeTime(item.completed_at)}`
-																					: item.status === QueueStatus.FAILED &&
-																							(item.completed_at || item.updated_at)
-																						? `Failed ${formatRelativeTime(item.completed_at || item.updated_at)}`
-																						: `Added ${formatRelativeTime(item.created_at)}`}
-																		</span>
-																		{item.retry_count > 0 && (
-																			<span className="mt-0.5 font-bold text-warning text-xs uppercase tracking-tighter">
-																				{item.retry_count} Retries
-																			</span>
+																		) : (
+																			<div className="flex flex-col">
+																				<span className="text-xs opacity-70">
+																					{queueItemActivityLabel(item)}
+																				</span>
+																				{item.retry_count > 0 && (
+																					<span className="mt-0.5 font-bold text-warning text-xs uppercase tracking-tighter">
+																						{item.retry_count} Retries
+																					</span>
+																				)}
+																			</div>
 																		)}
-																	</div>
-																</td>
-																<td className="text-right">
-																	<div className="dropdown dropdown-end">
-																		<button
-																			tabIndex={0}
-																			type="button"
-																			className="btn btn-ghost btn-sm btn-square"
-																		>
-																			<MoreVertical className="h-4 w-4" />
-																		</button>
-																		<ul className="dropdown-content menu z-[50] w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">
-																			{(item.status === QueueStatus.PENDING ||
-																				item.status === QueueStatus.FAILED) && (
-																				<li>
-																					<button
-																						type="button"
-																						onClick={() => handleRetry(item.id)}
-																						disabled={retryItem.isPending}
-																					>
-																						<PlayCircle className="h-4 w-4 text-primary" />
-																						{item.status === QueueStatus.PENDING
-																							? "Start Now"
-																							: "Retry Task"}
-																					</button>
-																				</li>
-																			)}
-																			{item.status === QueueStatus.PROCESSING && (
-																				<li>
-																					<button
-																						type="button"
-																						onClick={() => handleCancel(item.id)}
-																						disabled={cancelItem.isPending}
-																						className="text-warning"
-																					>
-																						<XCircle className="h-4 w-4" />
-																						Cancel Process
-																					</button>
-																				</li>
-																			)}
-																			<li>
-																				<button
-																					type="button"
-																					onClick={() => handleDownload(item.id)}
-																				>
-																					<Download className="h-4 w-4" />
-																					Download NZB
-																				</button>
-																			</li>
-																			{item.status === QueueStatus.COMPLETED &&
-																				item.storage_path && (
+																	</td>
+																	<td className="text-right">
+																		<div className="dropdown dropdown-end">
+																			<button
+																				tabIndex={0}
+																				type="button"
+																				className="btn btn-ghost btn-sm btn-square"
+																			>
+																				<MoreVertical className="h-4 w-4" />
+																			</button>
+																			<ul className="dropdown-content menu z-[50] w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">
+																				{(item.status === QueueStatus.PENDING ||
+																					item.status === QueueStatus.FAILED) && (
 																					<li>
 																						<button
 																							type="button"
-																							onClick={() =>
-																								handleRegenerateSymlink(item.storage_path as string)
-																							}
-																							disabled={regenerateSymlinks.isPending}
+																							onClick={() => handleRetry(item.id)}
+																							disabled={retryItem.isPending}
 																						>
-																							<Link2 className="h-4 w-4 text-primary" />
-																							Regenerate Symlink
+																							<PlayCircle className="h-4 w-4 text-primary" />
+																							{item.status === QueueStatus.PENDING
+																								? "Start Now"
+																								: "Retry Task"}
 																						</button>
 																					</li>
 																				)}
-																			<div className="divider my-1 text-base-content/70" />
-																			{item.status !== QueueStatus.PROCESSING && (
+																				{item.status === QueueStatus.PROCESSING && (
+																					<li>
+																						<button
+																							type="button"
+																							onClick={() => handleCancel(item.id)}
+																							disabled={cancelItem.isPending}
+																							className="text-warning"
+																						>
+																							<XCircle className="h-4 w-4" />
+																							Cancel Process
+																						</button>
+																					</li>
+																				)}
 																				<li>
 																					<button
 																						type="button"
-																						onClick={() => handleDelete(item.id)}
-																						disabled={deleteItem.isPending}
-																						className="text-error"
+																						onClick={() => handleDownload(item.id)}
 																					>
-																						<Trash2 className="h-4 w-4" />
-																						Delete Record
+																						<Download className="h-4 w-4" />
+																						Download NZB
 																					</button>
 																				</li>
-																			)}
-																		</ul>
-																	</div>
-																</td>
-															</tr>
-														))}
+																				{item.status === QueueStatus.COMPLETED &&
+																					item.storage_path && (
+																						<li>
+																							<button
+																								type="button"
+																								onClick={() =>
+																									handleRegenerateSymlink(
+																										item.storage_path as string,
+																									)
+																								}
+																								disabled={regenerateSymlinks.isPending}
+																							>
+																								<Link2 className="h-4 w-4 text-primary" />
+																								Regenerate Symlink
+																							</button>
+																						</li>
+																					)}
+																				<div className="divider my-1 text-base-content/70" />
+																				{item.status !== QueueStatus.PROCESSING && (
+																					<li>
+																						<button
+																							type="button"
+																							onClick={() => handleDelete(item.id)}
+																							disabled={deleteItem.isPending}
+																							className="text-error"
+																						>
+																							<Trash2 className="h-4 w-4" />
+																							Delete Record
+																						</button>
+																					</li>
+																				)}
+																			</ul>
+																		</div>
+																	</td>
+																</tr>
+															);
+														})}
 													</tbody>
 												</table>
 											</div>

@@ -114,6 +114,7 @@ func (h *LocalStreamHandler) GetHTTPHandler() http.Handler {
 			streamCtx, cancel := context.WithCancel(r.Context())
 			streamReq = r.WithContext(streamCtx)
 			stream = h.streamTracker.AddStream(path, "Local", playerName, r.RemoteAddr, r.UserAgent(), info.Size())
+			h.streamTracker.SetPlayerID(stream.ID, player.ID)
 			h.streamTracker.SetCancelFunc(stream.ID, cancel)
 			transcoder.setStreamMediaInfoFromPath(streamReq.Context(), stream.ID, path, 0)
 			cleanup = func() {
