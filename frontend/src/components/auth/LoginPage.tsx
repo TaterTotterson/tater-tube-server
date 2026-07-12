@@ -13,8 +13,7 @@ export function LoginPage() {
 		error,
 		clearError,
 	} = useAuth();
-	const [userCount, setUserCount] = useState<number>(1);
-	const [passwordConfigured, setPasswordConfigured] = useState(true);
+	const [setupRequired, setSetupRequired] = useState(false);
 	const [statusLoading, setStatusLoading] = useState(true);
 	const [hasConnectionError, setHasConnectionError] = useState(false);
 	const [password, setPassword] = useState("");
@@ -25,8 +24,9 @@ export function LoginPage() {
 		const checkStatus = async () => {
 			try {
 				const status = await checkRegistrationStatus();
-				setUserCount(status.user_count);
-				setPasswordConfigured(status.password_configured);
+				setSetupRequired(
+					status.setup_required === true || status.password_configured === false,
+				);
 				setHasConnectionError(false);
 			} catch (err) {
 				console.error("Failed to check registration status:", err);
@@ -41,7 +41,7 @@ export function LoginPage() {
 		}
 	}, [isAuthenticated, checkRegistrationStatus]);
 
-	const isSetupMode = (userCount === 0 || !passwordConfigured) && !hasConnectionError;
+	const isSetupMode = setupRequired && !hasConnectionError;
 	const title = isSetupMode ? "Set Access Password" : "Enter Password";
 	const message = useMemo(() => {
 		if (hasConnectionError) {

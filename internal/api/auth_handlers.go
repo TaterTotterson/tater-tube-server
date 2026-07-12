@@ -134,11 +134,15 @@ func (s *Server) handleRegister(c *fiber.Ctx) error {
 //	@Router			/auth/registration-status [get]
 func (s *Server) handleCheckRegistration(c *fiber.Ctx) error {
 	passwordConfigured := s.isServerPasswordConfigured()
+	configuredCount := 0
+	if passwordConfigured {
+		configuredCount = 1
+	}
 	response := fiber.Map{
 		"registration_enabled": !passwordConfigured,
 		"setup_required":       !passwordConfigured,
 		"password_configured":  passwordConfigured,
-		"user_count":           0,
+		"user_count":           configuredCount,
 	}
 	return RespondSuccess(c, response)
 }
