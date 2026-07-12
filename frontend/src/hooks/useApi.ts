@@ -461,7 +461,7 @@ export const useImportHistory = (limit?: number, refetchInterval?: number) => {
 	});
 };
 
-// Native upload hook (using JWT authentication)
+// Native upload hook (using cookie authentication)
 export const useUploadToQueue = () => {
 	const queryClient = useQueryClient();
 

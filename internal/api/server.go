@@ -175,22 +175,13 @@ func (s *Server) requireAuthWhenEnabled(skipPaths []string) fiber.Handler {
 			return c.Next()
 		}
 
-		if s.authService == nil || s.userRepo == nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+		if !s.attachPasswordSessionUser(c) {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"success": false,
-				"message": "Authentication service unavailable",
+				"message": "Authentication required",
 			})
 		}
-
-		tokenService := s.authService.TokenService()
-		if tokenService == nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"success": false,
-				"message": "Authentication token service unavailable",
-			})
-		}
-
-		return auth.RequireAuth(tokenService, s.userRepo)(c)
+		return c.Next()
 	}
 }
 

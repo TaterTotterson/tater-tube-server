@@ -1,9 +1,7 @@
 package config
 
 import (
-	"crypto/rand"
 	"crypto/tls"
-	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"os"
@@ -202,7 +200,7 @@ type PlayerPairingCode struct {
 // AuthConfig represents authentication configuration
 type AuthConfig struct {
 	LoginRequired *bool  `yaml:"login_required" mapstructure:"login_required" json:"login_required"`
-	JWTSecret     string `yaml:"jwt_secret,omitempty" mapstructure:"jwt_secret" json:"-"`
+	PasswordHash  string `yaml:"password_hash,omitempty" mapstructure:"password_hash" json:"-"`
 }
 
 // DatabaseConfig represents database configuration
@@ -1951,35 +1949,6 @@ func SaveToFile(config *Config, filename string) error {
 	return nil
 }
 
-func generateJWTSecret() (string, error) {
-	bytes := make([]byte, 32)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", fmt.Errorf("failed to generate JWT secret: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(bytes), nil
-}
-
-func ensureJWTSecret(config *Config, filename string) error {
-	if config.Auth.JWTSecret != "" {
-		return nil
-	}
-
-	secret, err := generateJWTSecret()
-	if err != nil {
-		return err
-	}
-	config.Auth.JWTSecret = secret
-
-	if filename == "" {
-		return nil
-	}
-	if err := SaveToFile(config, filename); err != nil {
-		return fmt.Errorf("failed to persist generated JWT secret: %w", err)
-	}
-	slog.Info("Generated and persisted authentication secret", "path", filename)
-	return nil
-}
-
 // LoadConfig loads configuration from file and merges with defaults
 func LoadConfig(configFile string) (*Config, error) {
 	config := DefaultConfig()
@@ -2075,10 +2044,6 @@ func LoadConfig(configFile string) (*Config, error) {
 		}
 		config.Server.Port = port
 		slog.Info("Using PORT from environment variable", "port", port)
-	}
-
-	if err := ensureJWTSecret(config, targetConfigFile); err != nil {
-		return nil, err
 	}
 
 	// Validate configuration
