@@ -148,6 +148,22 @@ func TestTaterLocalMusicItemsBrowseAlbumsAndTracks(t *testing.T) {
 	}
 }
 
+func TestAttachTaterDurationAddsPlayerFields(t *testing.T) {
+	item := taterUsenetItem{Title: "Track"}
+
+	attachTaterDuration(&item, 65.4321)
+
+	if item.Duration != 65 {
+		t.Fatalf("expected rounded duration seconds, got %d", item.Duration)
+	}
+	if item.DurationSeconds != 65.432 {
+		t.Fatalf("expected millisecond precision durationSeconds, got %f", item.DurationSeconds)
+	}
+	if item.DurationDisplay != "1:05" {
+		t.Fatalf("expected display duration 1:05, got %q", item.DurationDisplay)
+	}
+}
+
 func boolPtr(value bool) *bool {
 	return &value
 }

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
@@ -46,34 +48,35 @@ type taterUsenetCategory struct {
 }
 
 type taterUsenetItem struct {
-	Title           string `json:"title"`
-	Key             string `json:"key,omitempty"`
-	RatingKey       string `json:"ratingKey,omitempty"`
-	PartKey         string `json:"partKey,omitempty"`
-	NzbURL          string `json:"nzbUrl"`
-	Type            string `json:"type,omitempty"`
-	MediaType       string `json:"mediaType,omitempty"`
-	Artist          string `json:"artist,omitempty"`
-	Album           string `json:"album,omitempty"`
-	SearchQuery     string `json:"searchQuery,omitempty"`
-	CategoryID      string `json:"categoryId,omitempty"`
-	SourceIndex     int    `json:"sourceIndex,omitempty"`
-	Path            string `json:"path,omitempty"`
-	StreamURL       string `json:"streamUrl,omitempty"`
-	SeekMode        string `json:"seekMode,omitempty"`
-	GUID            string `json:"guid,omitempty"`
-	Date            string `json:"date,omitempty"`
-	Description     string `json:"description,omitempty"`
-	Category        string `json:"category,omitempty"`
-	Poster          string `json:"poster,omitempty"`
-	Files           string `json:"files,omitempty"`
-	Grabs           string `json:"grabs,omitempty"`
-	Index           int    `json:"index,omitempty"`
-	Duration        int64  `json:"duration,omitempty"`
-	LeafCount       int    `json:"leafCount,omitempty"`
-	SizeBytes       int64  `json:"sizeBytes,omitempty"`
-	SizeText        string `json:"sizeText,omitempty"`
-	DurationDisplay string `json:"durationDisplay,omitempty"`
+	Title           string  `json:"title"`
+	Key             string  `json:"key,omitempty"`
+	RatingKey       string  `json:"ratingKey,omitempty"`
+	PartKey         string  `json:"partKey,omitempty"`
+	NzbURL          string  `json:"nzbUrl"`
+	Type            string  `json:"type,omitempty"`
+	MediaType       string  `json:"mediaType,omitempty"`
+	Artist          string  `json:"artist,omitempty"`
+	Album           string  `json:"album,omitempty"`
+	SearchQuery     string  `json:"searchQuery,omitempty"`
+	CategoryID      string  `json:"categoryId,omitempty"`
+	SourceIndex     int     `json:"sourceIndex,omitempty"`
+	Path            string  `json:"path,omitempty"`
+	StreamURL       string  `json:"streamUrl,omitempty"`
+	SeekMode        string  `json:"seekMode,omitempty"`
+	GUID            string  `json:"guid,omitempty"`
+	Date            string  `json:"date,omitempty"`
+	Description     string  `json:"description,omitempty"`
+	Category        string  `json:"category,omitempty"`
+	Poster          string  `json:"poster,omitempty"`
+	Files           string  `json:"files,omitempty"`
+	Grabs           string  `json:"grabs,omitempty"`
+	Index           int     `json:"index,omitempty"`
+	Duration        int64   `json:"duration,omitempty"`
+	DurationSeconds float64 `json:"durationSeconds,omitempty"`
+	LeafCount       int     `json:"leafCount,omitempty"`
+	SizeBytes       int64   `json:"sizeBytes,omitempty"`
+	SizeText        string  `json:"sizeText,omitempty"`
+	DurationDisplay string  `json:"durationDisplay,omitempty"`
 }
 
 type taterUsenetPlayRequest struct {
@@ -690,6 +693,7 @@ func taterLocalFolderItems(cfg *config.Config, cat config.LocalMediaCategory, pa
 		if size > 0 {
 			item.SizeText = formatTaterBytes(size)
 		}
+		attachTaterLocalDuration(cfg, filepath.Join(dirPath, name), &item)
 		items = append(items, item)
 	}
 	return items, nil
@@ -743,6 +747,7 @@ func taterLocalMovieItems(cfg *config.Config, cat config.LocalMediaCategory, pat
 				SizeBytes:   size,
 				SizeText:    localMovieDetail(year),
 			}
+			attachTaterLocalDuration(cfg, path, &item)
 			items = append(items, item)
 			return nil
 		})
@@ -840,6 +845,7 @@ func taterLocalTVItems(cfg *config.Config, cat config.LocalMediaCategory, paths 
 			SizeBytes:   size,
 			SizeText:    "EPISODE",
 		}
+		attachTaterLocalDuration(cfg, filepath.Join(dirPath, name), &item)
 		items = append(items, item)
 	}
 	sort.SliceStable(items, func(i, j int) bool {
@@ -1047,6 +1053,7 @@ func taterLocalMusicTracks(cfg *config.Config, baseURL, playerToken, albumID str
 		if size > 0 {
 			item.SizeText = formatTaterBytes(size)
 		}
+		attachTaterLocalDuration(cfg, path, &item)
 		tracks = append(tracks, item)
 		return nil
 	})
@@ -1070,6 +1077,91 @@ func taterLocalMusicTracks(cfg *config.Config, baseURL, playerToken, albumID str
 
 func taterLocalSeekMode(cfg *config.Config, ext string) string {
 	return "client"
+}
+
+type taterLocalDurationCacheEntry struct {
+	Size            int64
+	ModTimeUnixNano int64
+	DurationSeconds float64
+}
+
+var taterLocalDurationCache = struct {
+	sync.Mutex
+	Items map[string]taterLocalDurationCacheEntry
+}{
+	Items: map[string]taterLocalDurationCacheEntry{},
+}
+
+func attachTaterLocalDuration(cfg *config.Config, path string, item *taterUsenetItem) {
+	if item == nil {
+		return
+	}
+	attachTaterDuration(item, taterLocalDurationSeconds(cfg, path))
+}
+
+func attachTaterDuration(item *taterUsenetItem, durationSeconds float64) {
+	if item == nil || durationSeconds <= 0 || math.IsNaN(durationSeconds) || math.IsInf(durationSeconds, 0) {
+		return
+	}
+	item.DurationSeconds = math.Round(durationSeconds*1000) / 1000
+	item.Duration = int64(math.Round(durationSeconds))
+	item.DurationDisplay = formatTaterDuration(durationSeconds)
+}
+
+func taterLocalDurationSeconds(cfg *config.Config, path string) float64 {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return 0
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		absPath = filepath.Clean(path)
+	}
+	info, err := os.Stat(absPath)
+	if err != nil || info == nil || info.IsDir() {
+		return 0
+	}
+
+	cacheKey := absPath
+	size := info.Size()
+	modTime := info.ModTime().UnixNano()
+	taterLocalDurationCache.Lock()
+	if cached, ok := taterLocalDurationCache.Items[cacheKey]; ok &&
+		cached.Size == size &&
+		cached.ModTimeUnixNano == modTime {
+		taterLocalDurationCache.Unlock()
+		return cached.DurationSeconds
+	}
+	taterLocalDurationCache.Unlock()
+
+	ffmpegPath := "ffmpeg"
+	if cfg != nil {
+		ffmpegPath = effectiveFFmpegPath(cfg.Transcoding.FFmpegPath)
+	}
+	durationSeconds := probeMediaDurationSeconds(context.Background(), ffmpegPath, absPath)
+
+	taterLocalDurationCache.Lock()
+	taterLocalDurationCache.Items[cacheKey] = taterLocalDurationCacheEntry{
+		Size:            size,
+		ModTimeUnixNano: modTime,
+		DurationSeconds: durationSeconds,
+	}
+	taterLocalDurationCache.Unlock()
+	return durationSeconds
+}
+
+func formatTaterDuration(durationSeconds float64) string {
+	if durationSeconds <= 0 || math.IsNaN(durationSeconds) || math.IsInf(durationSeconds, 0) {
+		return ""
+	}
+	total := int64(math.Round(durationSeconds))
+	hours := total / 3600
+	minutes := (total % 3600) / 60
+	seconds := total % 60
+	if hours > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", hours, minutes, seconds)
+	}
+	return fmt.Sprintf("%d:%02d", minutes, seconds)
 }
 
 func taterLocalMediaCategory(cfg *config.Config, id string) (config.LocalMediaCategory, bool) {
