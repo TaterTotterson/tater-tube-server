@@ -28,6 +28,9 @@ type ActiveStream struct {
 	TotalConnections int       `json:"total_connections"`
 	BufferedOffset   int64     `json:"buffered_offset"`
 	Status           string    `json:"status"` // e.g., "Buffering", "Streaming", "Stalled"
+	PlaybackPosition float64   `json:"playback_position_seconds"`
+	PlaybackStart    float64   `json:"playback_start_seconds,omitempty"`
+	MediaDuration    float64   `json:"media_duration_seconds,omitempty"`
 	Transcoded       bool      `json:"transcoded"`
 	TranscodeProfile string    `json:"transcode_profile,omitempty"`
 	TranscodeName    string    `json:"transcode_name,omitempty"`

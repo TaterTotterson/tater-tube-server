@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"log/slog"
+	"math"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -336,6 +337,20 @@ func (t *StreamTracker) SetTranscodingInfo(id, profileID, profileName, hardwareA
 	}
 }
 
+func (t *StreamTracker) SetMediaInfo(id string, durationSeconds, playbackStartSeconds float64) {
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*streamInternal)
+		if durationSeconds > 0 && !math.IsNaN(durationSeconds) && !math.IsInf(durationSeconds, 0) {
+			stream.MediaDuration = durationSeconds
+		}
+		if playbackStartSeconds > 0 && !math.IsNaN(playbackStartSeconds) && !math.IsInf(playbackStartSeconds, 0) {
+			stream.PlaybackStart = playbackStartSeconds
+			stream.PlaybackPosition = playbackStartSeconds
+		}
+		stream.lastReadAt = time.Now()
+	}
+}
+
 // UpdateDownloadProgress updates the bytes downloaded for a stream by ID
 func (t *StreamTracker) UpdateDownloadProgress(id string, bytesDownloaded int64) {
 	if val, ok := t.streams.Load(id); ok {
@@ -492,6 +507,12 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			if existing.TotalSize == 0 && s.TotalSize > 0 {
 				existing.TotalSize = s.TotalSize
 			}
+			if existing.MediaDuration == 0 && s.MediaDuration > 0 {
+				existing.MediaDuration = s.MediaDuration
+			}
+			if existing.PlaybackStart == 0 && s.PlaybackStart > 0 {
+				existing.PlaybackStart = s.PlaybackStart
+			}
 
 			// Use the "most active" status
 			if existing.Status != "Streaming" && s.Status == "Streaming" {
@@ -511,6 +532,7 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			}
 
 			existing.TotalConnections++
+			updatePlaybackPosition(existing, existing.LastActivity)
 		} else {
 			// Initialize new group with this stream
 			streamCopy := *s
@@ -527,6 +549,7 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			// Use groupKey as stable ID to prevent UI flickering when underlying connections change
 			streamCopy.ID = groupKey
 			streamCopy.TotalConnections = 1
+			updatePlaybackPosition(&streamCopy, internal.lastReadAt)
 			grouped[groupKey] = &streamCopy
 		}
 		return true
@@ -544,6 +567,34 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 	})
 
 	return streams
+}
+
+func updatePlaybackPosition(stream *nzbfilesystem.ActiveStream, lastReadAt time.Time) {
+	if stream == nil {
+		return
+	}
+	position := stream.PlaybackPosition
+	if stream.Transcoded {
+		position = stream.PlaybackStart + time.Since(stream.StartedAt).Seconds()
+	} else if stream.MediaDuration > 0 && stream.TotalSize > 0 && stream.CurrentOffset > 0 {
+		progress := float64(stream.CurrentOffset) / float64(stream.TotalSize)
+		if progress < 0 {
+			progress = 0
+		}
+		if progress > 1 {
+			progress = 1
+		}
+		position = stream.PlaybackStart + progress*(stream.MediaDuration-stream.PlaybackStart)
+	} else if position <= 0 && !lastReadAt.IsZero() {
+		position = time.Since(stream.StartedAt).Seconds()
+	}
+	if stream.MediaDuration > 0 && position > stream.MediaDuration {
+		position = stream.MediaDuration
+	}
+	if position < 0 || math.IsNaN(position) || math.IsInf(position, 0) {
+		position = 0
+	}
+	stream.PlaybackPosition = position
 }
 
 // GetStream returns an active stream by ID

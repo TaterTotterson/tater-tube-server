@@ -417,6 +417,9 @@ export interface ActiveStream {
 	status: string;
 	total_connections: number;
 	buffered_offset: number;
+	playback_position_seconds: number;
+	playback_start_seconds?: number;
+	media_duration_seconds?: number;
 	transcoded: boolean;
 	transcode_profile?: string;
 	transcode_name?: string;

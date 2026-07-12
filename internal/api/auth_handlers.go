@@ -62,12 +62,18 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 		return RespondBadRequest(c, "Invalid request body", err.Error())
 	}
 
-	if req.Username == "" || req.Password == "" {
-		return RespondBadRequest(c, "Username and password are required", "")
+	if req.Password == "" {
+		return RespondBadRequest(c, "Password is required", "")
 	}
 
 	// Authenticate user
-	user, err := s.authService.AuthenticateUser(c.Context(), req.Username, req.Password)
+	var user *database.User
+	var err error
+	if req.Username == "" {
+		user, err = s.authService.AuthenticatePassword(c.Context(), req.Password)
+	} else {
+		user, err = s.authService.AuthenticateUser(c.Context(), req.Username, req.Password)
+	}
 	if err != nil {
 		return RespondUnauthorized(c, "Invalid credentials", "")
 	}
@@ -120,8 +126,12 @@ func (s *Server) handleRegister(c *fiber.Ctx) error {
 		return RespondBadRequest(c, "Invalid request body", err.Error())
 	}
 
-	if req.Username == "" || req.Password == "" {
-		return RespondBadRequest(c, "Username and password are required", "")
+	if req.Password == "" {
+		return RespondBadRequest(c, "Password is required", "")
+	}
+
+	if req.Username == "" {
+		req.Username = "admin"
 	}
 
 	// Validate username (basic validation)
@@ -150,6 +160,18 @@ func (s *Server) handleRegister(c *fiber.Ctx) error {
 		User:    s.mapUserToResponse(user),
 		Message: "Registration successful. API key generated automatically.",
 	}
+
+	tokenString, err := s.authService.TokenService().Token(auth.CreateClaimsFromUser(c.Context(), user))
+	if err != nil {
+		return RespondInternalError(c, "Failed to create token", err.Error())
+	}
+	if err := s.setJWTCookie(c, tokenString); err != nil {
+		return RespondInternalError(c, "Failed to set cookie", err.Error())
+	}
+	if err := s.userRepo.UpdateLastLogin(c.Context(), user.UserID); err != nil {
+		slog.WarnContext(c.Context(), "Failed to update last login", "user_id", user.UserID, "error", err)
+	}
+
 	return RespondSuccess(c, response)
 }
 
@@ -552,6 +574,9 @@ func (s *Server) handleResetAdminPassword(c *fiber.Ctx) error {
 	}
 	if req.Username == "" || req.NewPassword == "" {
 		return RespondBadRequest(c, "Username and new password are required", "")
+	}
+	if len(req.NewPassword) < 12 {
+		return RespondValidationError(c, "Password must be at least 12 characters", "")
 	}
 
 	hash, err := s.authService.HashPassword(req.NewPassword)

@@ -68,8 +68,8 @@ func (c *Coordinator) AttemptFallback(ctx context.Context, item *database.Import
 	// Convert priority to SABnzbd format.
 	priority := convertPriorityToSABnzbd(item.Priority)
 
-	// Create client and send (proxy-aware per current network config).
-	client := sabnzbd.NewSABnzbdClient(httpclient.NewForExternal(cfg.Network, httpclient.LongTimeout))
+	// Create client and send.
+	client := sabnzbd.NewSABnzbdClient(httpclient.NewForExternal(httpclient.LongTimeout))
 	nzoID, err := client.SendNZBContent(
 		ctx,
 		cfg.SABnzbd.FallbackHost,

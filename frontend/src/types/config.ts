@@ -20,8 +20,6 @@ export interface ConfigResponse {
 	local_media: LocalMediaConfig;
 	players: TaterPlayersConfig;
 	providers: ProviderConfig[];
-	nzblnk: NzblnkConfig;
-	network: NetworkConfig;
 	api_key?: string;
 	download_key?: string;
 	profiler_enabled: boolean;
@@ -41,16 +39,6 @@ export interface APIConfig {
 // Authentication configuration
 export interface AuthConfig {
 	login_required: boolean;
-}
-
-// Network proxy configuration for outbound HTTP (indexers, arrs, SABnzbd, NZBLNK).
-// Empty strings disable proxying for that scheme. Mirrors standard
-// HTTP_PROXY/HTTPS_PROXY/NO_PROXY env-var semantics. Internal endpoints
-// (RC server, self-loopback) are not affected.
-export interface NetworkConfig {
-	http_proxy: string;
-	https_proxy: string;
-	no_proxy: string;
 }
 
 // Database configuration
@@ -249,11 +237,6 @@ export interface PipelineTuneResponse {
 	warning?: string;
 }
 
-// NZBLNK resolver configuration
-export interface NzblnkConfig {
-	user_agent?: string;
-}
-
 // SABnzbd configuration
 export interface SABnzbdConfig {
 	enabled: boolean;
@@ -293,8 +276,6 @@ export interface ConfigUpdateRequest {
 	newznab?: Partial<NewznabConfig>;
 	local_media?: Partial<LocalMediaConfig>;
 	providers?: ProviderUpdateRequest[];
-	nzblnk?: NzblnkConfig;
-	network?: NetworkConfig;
 	profiler_enabled?: boolean;
 }
 
@@ -431,8 +412,6 @@ export type ConfigSection =
 	| "newznab"
 	| "local_media"
 	| "players"
-	| "nzblnk"
-	| "network"
 	| "system";
 
 export interface ProviderFormData {
@@ -724,18 +703,6 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		title: "Tater Tube Players",
 		description: "Pair, view, and revoke Tater Tube player devices.",
 		icon: "Tv",
-		canEdit: true,
-	},
-	nzblnk: {
-		title: "NZBLNK",
-		description: "Settings for resolving nzblnk:// links via public NZB indexers",
-		icon: "Link",
-		canEdit: true,
-	},
-	network: {
-		title: "Network & User Agent",
-		description: "HTTP/HTTPS proxy and indexer User-Agent for outbound indexer and NZB traffic.",
-		icon: "Globe",
 		canEdit: true,
 	},
 	system: {

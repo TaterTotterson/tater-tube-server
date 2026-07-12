@@ -281,6 +281,31 @@ func (s *Server) handleTaterRevokePlayer(c *fiber.Ctx) error {
 	return RespondSuccess(c, fiber.Map{"message": "Player revoked"})
 }
 
+func (s *Server) handleTaterActiveStreams(c *fiber.Ctx) error {
+	cfg, token, ok := s.taterAuthorizedConfig(c)
+	if !ok {
+		return nil
+	}
+	if s.streamTracker == nil {
+		return RespondSuccess(c, []any{})
+	}
+
+	player, ok := findTaterPlayerByToken(cfg, token)
+	if !ok {
+		return RespondUnauthorized(c, "Invalid player token", "")
+	}
+	playerName := taterPlayerDisplayName(player)
+	streams := s.streamTracker.GetAll()
+	filtered := make([]any, 0, len(streams))
+	for _, stream := range streams {
+		if strings.EqualFold(strings.TrimSpace(stream.UserName), playerName) {
+			filtered = append(filtered, stream)
+		}
+	}
+
+	return RespondSuccess(c, filtered)
+}
+
 func (s *Server) taterAuthorizedConfig(c *fiber.Ctx) (*config.Config, string, bool) {
 	if s.configManager == nil {
 		RespondServiceUnavailable(c, "Configuration not available", "")

@@ -109,11 +109,13 @@ func (h *LocalStreamHandler) GetHTTPHandler() http.Handler {
 		var cleanup func()
 		var streamWriter http.ResponseWriter = w
 		var stream *nzbfilesystem.ActiveStream
+		transcoder := &StreamHandler{configGetter: h.configGetter, streamTracker: h.streamTracker}
 		if h.streamTracker != nil {
 			streamCtx, cancel := context.WithCancel(r.Context())
 			streamReq = r.WithContext(streamCtx)
 			stream = h.streamTracker.AddStream(path, "Local", playerName, r.RemoteAddr, r.UserAgent(), info.Size())
 			h.streamTracker.SetCancelFunc(stream.ID, cancel)
+			transcoder.setStreamMediaInfoFromPath(streamReq.Context(), stream.ID, path, 0)
 			cleanup = func() {
 				cancel()
 				h.streamTracker.Remove(stream.ID)
@@ -126,7 +128,6 @@ func (h *LocalStreamHandler) GetHTTPHandler() http.Handler {
 			}
 		}
 
-		transcoder := &StreamHandler{configGetter: h.configGetter, streamTracker: h.streamTracker}
 		if transcoder.shouldTranscode(r, path) {
 			transcoder.serveTranscoded(streamWriter, streamReq, streamReq.Context(), path, file)
 			return

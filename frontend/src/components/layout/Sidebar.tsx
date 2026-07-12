@@ -11,7 +11,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
 import { apiClient } from "../../api/client";
-import { useQueueStats } from "../../hooks/useApi";
+import { useActiveStreams, useQueueStats } from "../../hooks/useApi";
 import { useAuth } from "../../hooks/useAuth";
 
 const navigation = [
@@ -41,11 +41,22 @@ const navigation = [
 export function Sidebar() {
 	const { user, loginRequired } = useAuth();
 	const { data: queueStats } = useQueueStats();
+	const { data: activeStreamData } = useActiveStreams();
 	const { data: transcodeDetection, isLoading: isDetectingHardware } = useQuery({
 		queryKey: ["system", "transcoding-detect", "sidebar"],
 		queryFn: () => apiClient.detectTranscodingHardware(),
 		refetchInterval: 60000,
 	});
+	const activeStreams = Array.isArray(activeStreamData) ? activeStreamData : [];
+	const activeStreamCount = activeStreams.length;
+	const activeQueueCount = (() => {
+		if (!queueStats) return 0;
+		const totalItems =
+			queueStats.total_processing + queueStats.total_completed + queueStats.total_failed;
+		const pendingItems = Math.max(0, queueStats.total_queued - totalItems);
+		return queueStats.total_processing + pendingItems;
+	})();
+	const activeWorkCount = activeQueueCount + activeStreamCount;
 
 	const visibleNavigation = navigation.filter(
 		(item) => !item.adminOnly || !loginRequired || (user?.is_admin ?? false),
@@ -54,7 +65,7 @@ export function Sidebar() {
 	const getBadgeCount = (path: string) => {
 		switch (path) {
 			case "/queue":
-				return queueStats ? queueStats.total_processing + queueStats.total_failed : 0;
+				return queueStats ? activeQueueCount + queueStats.total_failed : 0;
 			default:
 				return 0;
 		}
@@ -72,6 +83,19 @@ export function Sidebar() {
 			default:
 				return "badge-info";
 		}
+	};
+
+	const statusLabel = () => {
+		if (queueStats && queueStats.total_failed > 0) return "attention";
+		if (activeStreamCount > 0) return "streaming";
+		if (activeQueueCount > 0) return "working";
+		return "ready";
+	};
+
+	const queueLabel = () => {
+		if (activeWorkCount > 0) return `${activeWorkCount} active`;
+		if (queueStats && queueStats.total_failed > 0) return `${queueStats.total_failed} failed`;
+		return "idle";
 	};
 
 	const hardwareLabel = () => {
@@ -148,42 +172,18 @@ export function Sidebar() {
 					<div className="space-y-4">
 						<div className="flex items-center justify-between">
 							<div className="flex items-center space-x-2">
-								<Tv className="h-4 w-4 text-primary" />
-								<span className="text-sm">Streamer</span>
-							</div>
-							<div className="badge badge-success badge-sm">Online</div>
-						</div>
-
-						{queueStats && (
-							<div className="flex items-center justify-between">
-								<div className="flex items-center space-x-2">
-									<Database className="h-4 w-4" />
-									<span className="text-sm">Queue</span>
-								</div>
-								<div className="text-base-content/70 text-sm">
-									{(() => {
-										const totalItems =
-											queueStats.total_processing +
-											queueStats.total_completed +
-											queueStats.total_failed;
-										const pendingItems = queueStats.total_queued - totalItems;
-										const activeItems = queueStats.total_processing + pendingItems;
-
-										if (activeItems > 0) {
-											return `${activeItems} active`;
-										}
-										return "idle";
-									})()}
-								</div>
-							</div>
-						)}
-
-						<div className="flex items-center justify-between">
-							<div className="flex items-center space-x-2">
 								<Activity className="h-4 w-4 text-success" />
 								<span className="text-sm">Status</span>
 							</div>
-							<div className="text-base-content/70 text-sm">ready</div>
+							<div className="text-base-content/70 text-sm">{statusLabel()}</div>
+						</div>
+
+						<div className="flex items-center justify-between">
+							<div className="flex items-center space-x-2">
+								<Database className="h-4 w-4" />
+								<span className="text-sm">Queue</span>
+							</div>
+							<div className="text-base-content/70 text-sm">{queueLabel()}</div>
 						</div>
 
 						<div className="flex items-center justify-between">
@@ -192,6 +192,14 @@ export function Sidebar() {
 								<span className="text-sm">HW</span>
 							</div>
 							<div className={`badge badge-sm ${hardwareBadgeClass()}`}>{hardwareLabel()}</div>
+						</div>
+
+						<div className="flex items-center justify-between">
+							<div className="flex items-center space-x-2">
+								<Tv className="h-4 w-4 text-primary" />
+								<span className="text-sm">Streamer</span>
+							</div>
+							<div className="badge badge-success badge-sm">Online</div>
 						</div>
 					</div>
 				</div>

@@ -218,7 +218,7 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 				newConfig.Newznab.APIKey = currentConfig.Newznab.APIKey
 			}
 		}
-	case "server", "api", "auth", "database", "metadata", "streaming", "transcoding", "health", "import", "log", "sabnzbd", "arrs", "segment_cache", "system", "stremio", "local_media", "nzblnk", "network":
+	case "server", "api", "auth", "database", "metadata", "streaming", "transcoding", "health", "import", "log", "sabnzbd", "arrs", "segment_cache", "system", "stremio", "local_media":
 		err = c.BodyParser(newConfig)
 		// BodyParser will map fields like "profiler_enabled" from JSON to the root of newConfig
 		// because Config struct has it with `json:"profiler_enabled"`.

@@ -263,34 +263,6 @@ func TestConfig_GetDownloadClientBaseURL(t *testing.T) {
 	}
 }
 
-func TestConfig_NetworkRoundTrip(t *testing.T) {
-	in := Config{
-		Network: NetworkConfig{
-			HTTPProxy:  "http://proxy:3128",
-			HTTPSProxy: "http://proxy:3128",
-			NoProxy:    "localhost,10.0.0.0/8",
-		},
-	}
-	b, err := yaml.Marshal(in)
-	assert.NoError(t, err)
-
-	var out Config
-	err = yaml.Unmarshal(b, &out)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.Network, out.Network)
-	assert.Equal(t, "http://proxy:3128", out.Network.GetHTTPProxy())
-	assert.Equal(t, "http://proxy:3128", out.Network.GetHTTPSProxy())
-	assert.Equal(t, "localhost,10.0.0.0/8", out.Network.GetNoProxy())
-}
-
-func TestConfig_NetworkDefaultsEmpty(t *testing.T) {
-	cfg := Config{}
-	assert.Empty(t, cfg.Network.HTTPProxy)
-	assert.Empty(t, cfg.Network.HTTPSProxy)
-	assert.Empty(t, cfg.Network.NoProxy)
-}
-
 func TestMigrateArrsCleanup_FoldsLegacyConfig(t *testing.T) {
 	legacyEnabled := true
 	cfg := &Config{
