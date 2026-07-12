@@ -95,13 +95,15 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
 
 // Auth context interface
 interface AuthContextType extends AuthState {
-	login: (username: string, password: string) => Promise<boolean>;
-	register: (username: string, email: string | undefined, password: string) => Promise<boolean>;
+	login: (password: string) => Promise<boolean>;
+	register: (password: string) => Promise<boolean>;
 	logout: () => Promise<void>;
 	refreshToken: () => Promise<void>;
 	clearError: () => void;
 	checkRegistrationStatus: () => Promise<{
 		registration_enabled: boolean;
+		setup_required: boolean;
+		password_configured: boolean;
 		user_count: number;
 	}>;
 	recheckAuth: () => Promise<void>;
@@ -119,7 +121,7 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
 	const [state, dispatch] = useReducer(authReducer, initialState);
 
-	// Auto-logout when any API call returns 401 (e.g. expired JWT)
+	// Auto-logout when any API call returns 401 (e.g. expired session)
 	const stateRef = useRef(state);
 	useEffect(() => {
 		stateRef.current = state;
@@ -169,10 +171,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
 	}, [checkAuth]);
 
 	// Login function (direct authentication)
-	const login = async (username: string, password: string): Promise<boolean> => {
+	const login = async (password: string): Promise<boolean> => {
 		try {
 			dispatch({ type: "AUTH_START" });
-			const response = await apiClient.login(username, password);
+			const response = await apiClient.login(password);
 			if (response.user) {
 				dispatch({ type: "AUTH_SUCCESS", payload: response.user });
 				return true;
@@ -187,14 +189,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
 	};
 
 	// Register function (first user only)
-	const register = async (
-		username: string,
-		email: string | undefined,
-		password: string,
-	): Promise<boolean> => {
+	const register = async (password: string): Promise<boolean> => {
 		try {
 			dispatch({ type: "AUTH_START" });
-			const response = await apiClient.register(username, email, password);
+			const response = await apiClient.register(password);
 			if (response.user) {
 				dispatch({ type: "AUTH_SUCCESS", payload: response.user });
 				return true;
@@ -211,6 +209,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 	// Check registration status
 	const checkRegistrationStatus = async (): Promise<{
 		registration_enabled: boolean;
+		setup_required: boolean;
+		password_configured: boolean;
 		user_count: number;
 	}> => {
 		return await apiClient.checkRegistrationStatus();

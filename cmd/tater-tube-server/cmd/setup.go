@@ -186,31 +186,8 @@ func setupRepositories(ctx context.Context, db *database.DB) *repositorySet {
 
 // setupAuthService creates and initializes the authentication service.
 func setupAuthService(ctx context.Context, cfg *config.Config, userRepo *database.UserRepository, loginRequired bool) (*auth.Service, error) {
-	if !loginRequired {
-		slog.InfoContext(ctx, "Authentication login disabled; initializing auth service for runtime enable")
-	}
-
-	if cfg.Auth.JWTSecret == "" {
-		return nil, fmt.Errorf("authentication secret is missing from config")
-	}
-
-	authConfig := auth.DefaultConfig()
-	authConfig.JWTSecret = cfg.Auth.JWTSecret
-	authConfig.Host = cfg.Server.Host
-	authConfig.Port = cfg.Server.Port
-
-	authService, err := auth.NewService(authConfig, userRepo)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create authentication service: %w", err)
-	}
-
-	// Setup OAuth providers
-	if err := authService.SetupProviders(authConfig); err != nil {
-		return nil, fmt.Errorf("failed to setup auth providers: %w", err)
-	}
-
-	slog.InfoContext(ctx, "Authentication service initialized", "login_required", loginRequired)
-	return authService, nil
+	slog.InfoContext(ctx, "Password authentication initialized", "login_required", loginRequired)
+	return nil, nil
 }
 
 // setupStreamHandler creates the HTTP stream handler for file streaming

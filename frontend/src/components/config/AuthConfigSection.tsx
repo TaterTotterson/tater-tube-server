@@ -12,6 +12,8 @@ interface CredentialForm {
 
 interface RegistrationStatus {
 	registration_enabled: boolean;
+	setup_required: boolean;
+	password_configured: boolean;
 	user_count: number;
 }
 
@@ -88,10 +90,14 @@ export function AuthConfigSection({
 	};
 
 	const needsCredentialSetup =
-		formData.login_required && registrationStatus !== null && registrationStatus.user_count === 0;
+		formData.login_required &&
+		registrationStatus !== null &&
+		!registrationStatus.password_configured;
 
 	const credentialsAlreadyExist =
-		formData.login_required && registrationStatus !== null && registrationStatus.user_count > 0;
+		formData.login_required &&
+		registrationStatus !== null &&
+		registrationStatus.password_configured;
 
 	const isDirectUser = user?.provider === "direct";
 
@@ -171,7 +177,7 @@ export function AuthConfigSection({
 			setIsRegistering(true);
 			setCredentialError(null);
 			try {
-				await apiClient.register("", undefined, credentialForm.password);
+				await apiClient.register(credentialForm.password);
 				await fetchRegistrationStatus();
 			} catch (err) {
 				setCredentialError(

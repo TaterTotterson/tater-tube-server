@@ -681,28 +681,27 @@ class APIClient {
 	}
 
 	// Direct authentication methods
-	async login(username: string, password: string) {
+	async login(password: string) {
 		return this.request<AuthResponse>("/auth/login", {
 			method: "POST",
-			body: JSON.stringify({ username, password }),
+			body: JSON.stringify({ password }),
 		});
 	}
 
-	async register(username: string, email: string | undefined, password: string) {
+	async register(password: string) {
 		return this.request<AuthResponse>("/auth/register", {
 			method: "POST",
-			body: JSON.stringify({
-				username,
-				email: email || undefined,
-				password,
-			}),
+			body: JSON.stringify({ password }),
 		});
 	}
 
 	async checkRegistrationStatus() {
-		return this.request<{ registration_enabled: boolean; user_count: number }>(
-			"/auth/registration-status",
-		);
+		return this.request<{
+			registration_enabled: boolean;
+			setup_required: boolean;
+			password_configured: boolean;
+			user_count: number;
+		}>("/auth/registration-status");
 	}
 
 	async getAuthConfig() {
@@ -913,7 +912,7 @@ class APIClient {
 		});
 	}
 
-	// Native upload endpoint using JWT authentication
+	// Native upload endpoint using cookie authentication
 	async uploadToQueue(
 		file: File,
 		category?: string,

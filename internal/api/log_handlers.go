@@ -53,13 +53,9 @@ func (s *Server) ServeLogsSSE(w http.ResponseWriter, r *http.Request) {
 	if cfg := s.configManager.GetConfig(); cfg != nil && cfg.Auth.LoginRequired != nil {
 		loginRequired = *cfg.Auth.LoginRequired
 	}
-	if loginRequired && s.authService != nil {
-		if ts := s.authService.TokenService(); ts != nil {
-			if _, _, err := ts.Get(r); err != nil {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-		}
+	if loginRequired && !s.validatePasswordSessionRequest(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
 	}
 
 	flusher, ok := w.(http.Flusher)
