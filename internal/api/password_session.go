@@ -76,6 +76,10 @@ func (s *Server) setServerPasswordHash(hash string) error {
 	return s.configManager.SaveConfig()
 }
 
+func (s *Server) clearServerPasswordHash() error {
+	return s.setServerPasswordHash("")
+}
+
 func (s *Server) passwordSessionKey() []byte {
 	sum := sha256.Sum256([]byte("tater-tube-server-session:" + s.getServerPasswordHash()))
 	return sum[:]

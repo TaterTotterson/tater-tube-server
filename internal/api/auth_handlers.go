@@ -140,7 +140,7 @@ func (s *Server) handleCheckRegistration(c *fiber.Ctx) error {
 	}
 	response := fiber.Map{
 		"registration_enabled": !passwordConfigured,
-		"setup_required":       !passwordConfigured,
+		"setup_required":       false,
 		"password_configured":  passwordConfigured,
 		"user_count":           configuredCount,
 	}
@@ -156,14 +156,11 @@ func (s *Server) handleCheckRegistration(c *fiber.Ctx) error {
 //	@Success		200	{object}	APIResponse
 //	@Router			/auth/config [get]
 func (s *Server) handleGetAuthConfig(c *fiber.Ctx) error {
-	cfg := s.configManager.GetConfig()
-	loginRequired := true // Default to true if not set
-	if cfg != nil && cfg.Auth.LoginRequired != nil {
-		loginRequired = *cfg.Auth.LoginRequired
-	}
+	passwordConfigured := s.isServerPasswordConfigured()
 
 	response := fiber.Map{
-		"login_required": loginRequired,
+		"login_required":      passwordConfigured,
+		"password_configured": passwordConfigured,
 	}
 	return RespondSuccess(c, response)
 }
@@ -214,6 +211,29 @@ func (s *Server) handleAuthLogout(c *fiber.Ctx) error {
 	return RespondSuccess(c, response)
 }
 
+// handleClearServerPassword removes the server password and disables login.
+//
+//	@Summary		Clear server password
+//	@Description	Removes the server password. When no password is saved, the web UI opens without login.
+//	@Tags			Auth
+//	@Produce		json
+//	@Success		200	{object}	APIResponse
+//	@Failure		401	{object}	APIResponse
+//	@Failure		500	{object}	APIResponse
+//	@Security		BearerAuth
+//	@Router			/auth/password [delete]
+func (s *Server) handleClearServerPassword(c *fiber.Ctx) error {
+	if auth.GetUserFromContext(c) == nil && !s.isAdminOrLoginDisabled(nil) {
+		return RespondUnauthorized(c, "Not authenticated", "")
+	}
+	if err := s.clearServerPasswordHash(); err != nil {
+		return RespondInternalError(c, "Failed to remove password", err.Error())
+	}
+	clearPasswordSessionCookie(c)
+
+	return RespondMessage(c, "Password removed. Login is disabled.")
+}
+
 // handleAuthRefresh refreshes the current password session
 //
 //	@Summary		Refresh token
@@ -243,8 +263,7 @@ func (s *Server) isAdminOrLoginDisabled(user *database.User) bool {
 	if user != nil && user.IsAdmin {
 		return true
 	}
-	cfg := s.configManager.GetConfig()
-	if cfg != nil && cfg.Auth.LoginRequired != nil && !*cfg.Auth.LoginRequired {
+	if !s.isServerPasswordConfigured() {
 		return true
 	}
 	return false
