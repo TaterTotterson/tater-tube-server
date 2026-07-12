@@ -222,6 +222,11 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 				userName = u
 			}
 
+			playerID := ""
+			if p, ok := ctx.Value(utils.StreamPlayerIDKey).(string); ok && p != "" {
+				playerID = p
+			}
+
 			clientIP := ""
 			if ip, ok := ctx.Value(utils.ClientIPKey).(string); ok {
 				clientIP = ip
@@ -234,6 +239,11 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 
 			// Fallback to FUSE if no tracking info in context
 			streamID = mrf.streamTracker.Add(normalizedName, source, userName, clientIP, userAgent, fileMeta.FileSize)
+			if playerID != "" {
+				if setter, ok := mrf.streamTracker.(interface{ SetPlayerID(string, string) }); ok {
+					setter.SetPlayerID(streamID, playerID)
+				}
+			}
 		}
 	}
 

@@ -21,6 +21,9 @@ import { StatusBadge } from "../ui/StatusBadge";
 interface QueueItemCardProps {
 	item: QueueItem;
 	isSelected: boolean;
+	activityLabel?: string;
+	playedAtLabel?: string;
+	playedByLabel?: string;
 	onSelectChange: (id: number, checked: boolean) => void;
 	onRetry: (id: number) => void;
 	onCancel: (id: number) => void;
@@ -36,6 +39,9 @@ interface QueueItemCardProps {
 export const QueueItemCard = memo(function QueueItemCard({
 	item,
 	isSelected,
+	activityLabel,
+	playedAtLabel,
+	playedByLabel,
 	onSelectChange,
 	onRetry,
 	onCancel,
@@ -86,8 +92,11 @@ export const QueueItemCard = memo(function QueueItemCard({
 								</span>
 							)}
 							<span className="badge badge-ghost badge-xs">
-								{formatRelativeTime(item.created_at)}
+								{playedByLabel || activityLabel || formatRelativeTime(item.created_at)}
 							</span>
+							{playedAtLabel && (
+								<span className="badge badge-primary badge-xs">{playedAtLabel}</span>
+							)}
 							{item.retry_count > 0 && (
 								<span className="badge badge-warning badge-xs font-bold uppercase tracking-tighter">
 									{item.retry_count} Retries

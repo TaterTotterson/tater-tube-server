@@ -583,6 +583,10 @@ class APIClient {
 		return this.request<ActiveStream[]>("/files/active-streams");
 	}
 
+	async getStreamHistory() {
+		return this.request<ActiveStream[]>("/files/streams/history");
+	}
+
 	async exportMetadataToNZB(path: string): Promise<Blob> {
 		const url = `${this.baseURL}/files/export-nzb?path=${encodeURIComponent(path)}`;
 

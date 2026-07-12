@@ -14,7 +14,13 @@ import {
 } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 import { apiClient } from "../api/client";
-import { useActiveStreams, usePoolMetrics, useQueueStats, useSystemStats } from "../hooks/useApi";
+import {
+	useActiveStreams,
+	usePoolMetrics,
+	useQueueStats,
+	useStreamHistory,
+	useSystemStats,
+} from "../hooks/useApi";
 import { useConfig } from "../hooks/useConfig";
 import type { ActiveStream, HealthStats, SystemInfo } from "../types/api";
 
@@ -40,12 +46,20 @@ function timeAgo(value?: string) {
 	const date = new Date(value);
 	if (Number.isNaN(date.getTime())) return "unknown";
 	const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
-	if (seconds < 60) return `${seconds}s ago`;
+	if (seconds < 60) return "<1m ago";
 	const minutes = Math.floor(seconds / 60);
 	if (minutes < 60) return `${minutes}m ago`;
 	const hours = Math.floor(minutes / 60);
 	if (hours < 24) return `${hours}h ago`;
 	return `${Math.floor(hours / 24)}d ago`;
+}
+
+function streamActivityTime(stream?: ActiveStream) {
+	return stream?.last_activity || stream?.started_at;
+}
+
+function playerNameKey(value?: string) {
+	return (value || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function isOnline(lastSeenAt?: string) {
@@ -67,10 +81,7 @@ function formatDuration(seconds?: number) {
 }
 
 function streamPlaybackPosition(stream: ActiveStream): number {
-	if (
-		Number.isFinite(stream.playback_position_seconds) &&
-		stream.playback_position_seconds > 0
-	) {
+	if (Number.isFinite(stream.playback_position_seconds) && stream.playback_position_seconds > 0) {
 		return stream.playback_position_seconds;
 	}
 	const started = new Date(stream.started_at);
@@ -188,6 +199,7 @@ export function Dashboard() {
 	const { data: queueStats } = useQueueStats(10000);
 	const { data: poolMetrics } = usePoolMetrics();
 	const { data: activeStreamData } = useActiveStreams();
+	const { data: streamHistoryData } = useStreamHistory();
 	const { data: systemStats } = useSystemStats();
 	const { data: transcodeDetection } = useQuery({
 		queryKey: ["system", "transcoding-detect"],
@@ -196,6 +208,7 @@ export function Dashboard() {
 	});
 
 	const activeStreams = Array.isArray(activeStreamData) ? activeStreamData : [];
+	const streamHistory = Array.isArray(streamHistoryData) ? streamHistoryData : [];
 	const providerMetrics = Array.isArray(poolMetrics?.providers) ? poolMetrics.providers : [];
 	const configuredProviders = Array.isArray(config?.providers) ? config.providers : [];
 	const systemInfo: Partial<SystemInfo> = systemStats?.system ?? {};
@@ -235,12 +248,44 @@ export function Dashboard() {
 	const streamByPlayerName = useMemo(() => {
 		const map = new Map<string, ActiveStream>();
 		for (const stream of activeStreams) {
-			if (stream.user_name && !map.has(stream.user_name)) {
-				map.set(stream.user_name, stream);
+			const key = playerNameKey(stream.user_name);
+			if (key && !map.has(key)) {
+				map.set(key, stream);
 			}
 		}
 		return map;
 	}, [activeStreams]);
+
+	const streamByPlayerID = useMemo(() => {
+		const map = new Map<string, ActiveStream>();
+		for (const stream of activeStreams) {
+			if (stream.player_id && !map.has(stream.player_id)) {
+				map.set(stream.player_id, stream);
+			}
+		}
+		return map;
+	}, [activeStreams]);
+
+	const lastStreamByPlayerName = useMemo(() => {
+		const map = new Map<string, ActiveStream>();
+		for (const stream of streamHistory) {
+			const key = playerNameKey(stream.user_name);
+			if (key && !map.has(key)) {
+				map.set(key, stream);
+			}
+		}
+		return map;
+	}, [streamHistory]);
+
+	const lastStreamByPlayerID = useMemo(() => {
+		const map = new Map<string, ActiveStream>();
+		for (const stream of streamHistory) {
+			if (stream.player_id && !map.has(stream.player_id)) {
+				map.set(stream.player_id, stream);
+			}
+		}
+		return map;
+	}, [streamHistory]);
 
 	return (
 		<div className="space-y-6">
@@ -249,8 +294,12 @@ export function Dashboard() {
 					<div className="space-y-3">
 						{players.length > 0 ? (
 							players.map((player) => {
-								const stream = streamByPlayerName.get(player.name);
+								const playerKey = playerNameKey(player.name);
+								const stream = streamByPlayerID.get(player.id) || streamByPlayerName.get(playerKey);
+								const lastStream =
+									lastStreamByPlayerID.get(player.id) || lastStreamByPlayerName.get(playerKey);
 								const mode = playbackMode(stream);
+								const playerOnline = Boolean(stream) || isOnline(player.last_seen_at);
 								return (
 									<div
 										key={player.id}
@@ -264,9 +313,9 @@ export function Dashboard() {
 												</div>
 											</div>
 											<span
-												className={`badge ${isOnline(player.last_seen_at) ? "badge-success" : "badge-ghost"}`}
+												className={`badge ${stream ? "badge-primary" : playerOnline ? "badge-success" : "badge-ghost"}`}
 											>
-												{isOnline(player.last_seen_at) ? "Online" : "Idle"}
+												{stream ? "Playing" : playerOnline ? "Online" : "Idle"}
 											</span>
 										</div>
 										<div className="mt-2 text-base-content/70 text-sm">
@@ -279,8 +328,17 @@ export function Dashboard() {
 														<span className={`badge badge-sm ${mode.className}`}>{mode.label}</span>
 													)}
 												</div>
+											) : lastStream ? (
+												<div className="min-w-0">
+													<div className="dashboard-line-clamp">
+														Last played {fileLabel(lastStream.file_path)}
+													</div>
+													<div className="mt-1 text-base-content/50 text-xs">
+														Finished {timeAgo(streamActivityTime(lastStream))}
+													</div>
+												</div>
 											) : (
-												"No active stream"
+												"No playback yet"
 											)}
 											{mode?.detail && (
 												<div className="dashboard-line-clamp mt-1 text-base-content/50 text-xs">
@@ -340,9 +398,7 @@ export function Dashboard() {
 										<div className="mt-2 flex justify-between text-base-content/50 text-xs">
 											<span>Playback {formatDuration(playbackPosition)}</span>
 											<span>
-												{playbackDuration > 0
-													? `/ ${formatDuration(playbackDuration)}`
-													: "elapsed"}
+												{playbackDuration > 0 ? `/ ${formatDuration(playbackDuration)}` : "elapsed"}
 											</span>
 										</div>
 									</div>

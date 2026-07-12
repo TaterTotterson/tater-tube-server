@@ -197,16 +197,21 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var userName string
+	var playerID string
 	if user != nil {
 		if user.Name != nil && *user.Name != "" {
 			userName = *user.Name
 		} else {
 			userName = user.UserID
 		}
+		if user.Provider == "tater" {
+			playerID = user.UserID
+		}
 	}
 
 	// Set stream source and username for tracking
 	ctx = context.WithValue(ctx, utils.StreamSourceKey, "API")
+	ctx = context.WithValue(ctx, utils.StreamPlayerIDKey, playerID)
 	ctx = context.WithValue(ctx, utils.StreamUserNameKey, userName)
 	ctx = context.WithValue(ctx, utils.ClientIPKey, r.RemoteAddr)
 	ctx = context.WithValue(ctx, utils.UserAgentKey, r.UserAgent())
