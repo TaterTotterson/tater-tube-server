@@ -709,10 +709,10 @@ class APIClient {
 		return this.request<{ login_required: boolean }>("/auth/config");
 	}
 
-	async resetAdminPassword(username: string, newPassword: string) {
+	async resetAdminPassword(newPassword: string) {
 		return this.request<{ message: string }>("/auth/reset-admin-password", {
 			method: "POST",
-			body: JSON.stringify({ username, new_password: newPassword }),
+			body: JSON.stringify({ new_password: newPassword }),
 		});
 	}
 

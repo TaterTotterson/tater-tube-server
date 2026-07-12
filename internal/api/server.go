@@ -156,6 +156,44 @@ func (s *Server) IsReady() bool {
 	return s.ready.Load()
 }
 
+func (s *Server) requireAuthWhenEnabled(skipPaths []string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		for _, skipPath := range skipPaths {
+			if strings.HasPrefix(c.Path(), skipPath) {
+				return c.Next()
+			}
+		}
+
+		loginRequired := false
+		if s.configManager != nil {
+			cfg := s.configManager.GetConfig()
+			if cfg != nil && cfg.Auth.LoginRequired != nil {
+				loginRequired = *cfg.Auth.LoginRequired
+			}
+		}
+		if !loginRequired {
+			return c.Next()
+		}
+
+		if s.authService == nil || s.userRepo == nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"success": false,
+				"message": "Authentication service unavailable",
+			})
+		}
+
+		tokenService := s.authService.TokenService()
+		if tokenService == nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"success": false,
+				"message": "Authentication token service unavailable",
+			})
+		}
+
+		return auth.RequireAuth(tokenService, s.userRepo)(c)
+	}
+}
+
 // SetupFiberRoutes configures API routes directly on the Fiber app
 func (s *Server) SetupRoutes(app *fiber.App) {
 	app.Use("/sabnzbd", s.handleSABnzbd)
@@ -209,23 +247,13 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	}))
 	api.Use(recover.New())
 
-	// Apply JWT authentication middleware globally except for public auth routes
-	// Only apply if login is required.
-	if loginRequired && s.authService != nil && s.userRepo != nil {
-		tokenService := s.authService.TokenService()
-		if tokenService != nil {
-			// Define paths that should skip authentication
-			skipPaths := []string{
-				s.config.Prefix + "/auth/login",
-				s.config.Prefix + "/auth/register",
-				s.config.Prefix + "/auth/registration-status",
-				s.config.Prefix + "/auth/config",
-			}
-
-			// Apply authentication middleware with skip paths
-			api.Use(auth.RequireAuthWithSkip(tokenService, s.userRepo, skipPaths))
-		}
+	skipAuthPaths := []string{
+		s.config.Prefix + "/auth/login",
+		s.config.Prefix + "/auth/register",
+		s.config.Prefix + "/auth/registration-status",
+		s.config.Prefix + "/auth/config",
 	}
+	api.Use(s.requireAuthWhenEnabled(skipAuthPaths))
 
 	api.Get("/tater/players", s.handleTaterPlayers)
 	api.Post("/tater/players/codes", s.handleTaterCreatePairingCode)

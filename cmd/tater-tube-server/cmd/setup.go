@@ -187,8 +187,7 @@ func setupRepositories(ctx context.Context, db *database.DB) *repositorySet {
 // setupAuthService creates and initializes the authentication service.
 func setupAuthService(ctx context.Context, cfg *config.Config, userRepo *database.UserRepository, loginRequired bool) (*auth.Service, error) {
 	if !loginRequired {
-		slog.InfoContext(ctx, "Authentication disabled")
-		return nil, nil
+		slog.InfoContext(ctx, "Authentication login disabled; initializing auth service for runtime enable")
 	}
 
 	if cfg.Auth.JWTSecret == "" {
@@ -210,7 +209,7 @@ func setupAuthService(ctx context.Context, cfg *config.Config, userRepo *databas
 		return nil, fmt.Errorf("failed to setup auth providers: %w", err)
 	}
 
-	slog.InfoContext(ctx, "Authentication service initialized")
+	slog.InfoContext(ctx, "Authentication service initialized", "login_required", loginRequired)
 	return authService, nil
 }
 
