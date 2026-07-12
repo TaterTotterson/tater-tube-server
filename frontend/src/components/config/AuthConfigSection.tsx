@@ -53,7 +53,6 @@ export function AuthConfigSection({
 
 	// Reset-password form (used when auth is disabled — no current password required)
 	const [resetPasswordForm, setResetPasswordForm] = useState({
-		username: "",
 		newPassword: "",
 		confirmPassword: "",
 	});
@@ -125,10 +124,6 @@ export function AuthConfigSection({
 	};
 
 	const handleResetPassword = async () => {
-		if (resetPasswordForm.username.trim().length < 1) {
-			setResetPasswordError("Username is required.");
-			return;
-		}
 		if (resetPasswordForm.newPassword.length < 12) {
 			setResetPasswordError("New password must be at least 12 characters.");
 			return;
@@ -141,15 +136,12 @@ export function AuthConfigSection({
 		setResetPasswordError(null);
 		setResetPasswordSuccess(false);
 		try {
-			await apiClient.resetAdminPassword(
-				resetPasswordForm.username.trim(),
-				resetPasswordForm.newPassword,
-			);
+			await apiClient.resetAdminPassword(resetPasswordForm.newPassword);
 			setResetPasswordSuccess(true);
-			setResetPasswordForm({ username: "", newPassword: "", confirmPassword: "" });
+			setResetPasswordForm({ newPassword: "", confirmPassword: "" });
 		} catch (err) {
 			setResetPasswordError(
-				err instanceof Error ? err.message : "Failed to reset password. Check the username.",
+				err instanceof Error ? err.message : "Failed to reset password. Try again.",
 			);
 		} finally {
 			setIsResettingPassword(false);
@@ -393,22 +385,8 @@ export function AuthConfigSection({
 							) : (
 								<>
 									<p className="text-[11px] text-base-content/60 leading-relaxed">
-										Reset the password for an existing account before enabling login.
+										Reset the server password before enabling login.
 									</p>
-
-									<fieldset className="fieldset">
-										<legend className="fieldset-legend">Username</legend>
-										<input
-											type="text"
-											className="input w-full"
-											placeholder="Enter the username"
-											value={resetPasswordForm.username}
-											disabled={isReadOnly || isResettingPassword}
-											onChange={(e) =>
-												setResetPasswordForm((f) => ({ ...f, username: e.target.value }))
-											}
-										/>
-									</fieldset>
 
 									<fieldset className="fieldset">
 										<legend className="fieldset-legend">New Password</legend>
@@ -463,7 +441,6 @@ export function AuthConfigSection({
 												onClick={handleResetPassword}
 												disabled={
 													isResettingPassword ||
-													!resetPasswordForm.username ||
 													!resetPasswordForm.newPassword
 												}
 											>

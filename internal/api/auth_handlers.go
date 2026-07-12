@@ -65,6 +65,9 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 	if req.Password == "" {
 		return RespondBadRequest(c, "Password is required", "")
 	}
+	if s.authService == nil {
+		return RespondInternalError(c, "Authentication service is not initialized", "")
+	}
 
 	// Authenticate user
 	var user *database.User
@@ -541,7 +544,6 @@ func (s *Server) clearJWTCookie(c *fiber.Ctx) {
 
 // ResetAdminPasswordRequest for resetting admin password while login is disabled
 type ResetAdminPasswordRequest struct {
-	Username    string `json:"username"`
 	NewPassword string `json:"new_password"`
 }
 
@@ -572,22 +574,31 @@ func (s *Server) handleResetAdminPassword(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return RespondBadRequest(c, "Invalid request body", err.Error())
 	}
-	if req.Username == "" || req.NewPassword == "" {
-		return RespondBadRequest(c, "Username and new password are required", "")
+	if req.NewPassword == "" {
+		return RespondBadRequest(c, "New password is required", "")
 	}
 	if len(req.NewPassword) < 12 {
 		return RespondValidationError(c, "Password must be at least 12 characters", "")
 	}
+
+	users, err := s.userRepo.GetDirectUsers(c.Context())
+	if err != nil {
+		return RespondInternalError(c, "Failed to load direct users", err.Error())
+	}
+	if len(users) == 0 {
+		return RespondNotFound(c, "Direct user", "primary")
+	}
+	primaryUser := users[0]
 
 	hash, err := s.authService.HashPassword(req.NewPassword)
 	if err != nil {
 		return RespondInternalError(c, "Failed to hash password", err.Error())
 	}
 
-	if err := s.userRepo.UpdatePassword(c.Context(), req.Username, hash); err != nil {
-		return RespondNotFound(c, "User", req.Username)
+	if err := s.userRepo.UpdatePassword(c.Context(), primaryUser.UserID, hash); err != nil {
+		return RespondNotFound(c, "User", primaryUser.UserID)
 	}
 
-	slog.InfoContext(c.Context(), "Admin password reset while login disabled", "username", req.Username)
+	slog.InfoContext(c.Context(), "Admin password reset while login disabled", "user_id", primaryUser.UserID)
 	return RespondMessage(c, "Password updated successfully")
 }
