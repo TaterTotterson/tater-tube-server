@@ -49,11 +49,7 @@ func (s *Server) handleGetLogs(c *fiber.Ctx) error {
 // Response.Body() reading the SSE pipe until EOF that never comes).
 func (s *Server) ServeLogsSSE(w http.ResponseWriter, r *http.Request) {
 	// Replicate RequireAuth logic for net/http requests.
-	loginRequired := true
-	if cfg := s.configManager.GetConfig(); cfg != nil && cfg.Auth.LoginRequired != nil {
-		loginRequired = *cfg.Auth.LoginRequired
-	}
-	if loginRequired && !s.validatePasswordSessionRequest(r) {
+	if s.isPasswordLoginRequired() && !s.validatePasswordSessionRequest(r) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}

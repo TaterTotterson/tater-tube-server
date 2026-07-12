@@ -15,6 +15,8 @@ const DEFAULT_NEWZNAB: NewznabConfig = {
 	api_key: "",
 	username: "",
 	browse_limit: 100,
+	watch_again_limit: 50,
+	watch_again_retention_days: 30,
 };
 
 function formFromConfig(config: ConfigResponse): NewznabConfig {
@@ -26,6 +28,8 @@ function formFromConfig(config: ConfigResponse): NewznabConfig {
 		api_key_set: source.api_key_set ?? false,
 		username: source.username ?? "",
 		browse_limit: source.browse_limit || 100,
+		watch_again_limit: source.watch_again_limit || 50,
+		watch_again_retention_days: source.watch_again_retention_days ?? 30,
 	};
 }
 
@@ -50,6 +54,8 @@ export function NewznabConfigSection({
 			updated.url !== (source.url ?? "") ||
 			updated.username !== (source.username ?? "") ||
 			updated.browse_limit !== (source.browse_limit || 100) ||
+			updated.watch_again_limit !== (source.watch_again_limit || 50) ||
+			updated.watch_again_retention_days !== (source.watch_again_retention_days ?? 30) ||
 			updated.api_key.trim() !== "";
 		setHasChanges(changed);
 	};
@@ -68,6 +74,8 @@ export function NewznabConfigSection({
 			api_key: formData.api_key.trim(),
 			username: formData.username?.trim() ?? "",
 			browse_limit: formData.browse_limit,
+			watch_again_limit: formData.watch_again_limit,
+			watch_again_retention_days: formData.watch_again_retention_days,
 		});
 		setHasChanges(false);
 	};
@@ -120,7 +128,9 @@ export function NewznabConfigSection({
 							<input
 								type="password"
 								className="input input-bordered mt-2 w-full"
-								placeholder={formData.api_key_set ? "Saved - leave blank to keep" : "Newznab API key"}
+								placeholder={
+									formData.api_key_set ? "Saved - leave blank to keep" : "Newznab API key"
+								}
 								value={formData.api_key}
 								disabled={isReadOnly}
 								onChange={(e) => update({ api_key: e.target.value })}
@@ -157,18 +167,56 @@ export function NewznabConfigSection({
 								<option value={500}>500 items</option>
 							</select>
 						</label>
+
+						<label className="form-control">
+							<span className="label-text font-bold text-base-content text-sm">
+								Watch Again Limit
+							</span>
+							<select
+								className="select select-bordered mt-2 w-full"
+								value={formData.watch_again_limit}
+								disabled={isReadOnly}
+								onChange={(e) =>
+									update({ watch_again_limit: Number.parseInt(e.target.value, 10) || 50 })
+								}
+							>
+								<option value={25}>25 items</option>
+								<option value={50}>50 items</option>
+								<option value={100}>100 items</option>
+								<option value={250}>250 items</option>
+								<option value={500}>500 items</option>
+							</select>
+						</label>
+
+						<label className="form-control">
+							<span className="label-text font-bold text-base-content text-sm">
+								Watch Again Retention
+							</span>
+							<select
+								className="select select-bordered mt-2 w-full"
+								value={formData.watch_again_retention_days}
+								disabled={isReadOnly}
+								onChange={(e) =>
+									update({ watch_again_retention_days: Number.parseInt(e.target.value, 10) })
+								}
+							>
+								<option value={0}>Keep until limit</option>
+								<option value={7}>7 days</option>
+								<option value={30}>30 days</option>
+								<option value={90}>90 days</option>
+								<option value={365}>1 year</option>
+							</select>
+						</label>
 					</div>
 				</div>
 
 				<div className="alert items-start rounded-2xl border border-info/20 bg-info/5 p-4 shadow-sm">
 					<Info className="mt-0.5 h-5 w-5 shrink-0 text-info" />
 					<div className="min-w-0 flex-1">
-						<div className="font-bold text-info text-xs uppercase tracking-wider">
-							Player Setup
-						</div>
+						<div className="font-bold text-info text-xs uppercase tracking-wider">Player Setup</div>
 						<div className="mt-1 break-words text-[11px] leading-relaxed opacity-80">
-							In Tater Tube, enter this server URL and a pairing PIN from the Tater Tube Players page.
-							Indexer details stay on the server.
+							In Tater Tube, enter this server URL and a pairing PIN from the Tater Tube Players
+							page. Indexer details stay on the server.
 						</div>
 					</div>
 				</div>

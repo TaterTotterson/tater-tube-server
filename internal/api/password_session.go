@@ -59,6 +59,10 @@ func (s *Server) isServerPasswordConfigured() bool {
 	return s.getServerPasswordHash() != ""
 }
 
+func (s *Server) isPasswordLoginRequired() bool {
+	return s.isServerPasswordConfigured()
+}
+
 func (s *Server) setServerPasswordHash(hash string) error {
 	if s.configManager == nil {
 		return fmt.Errorf("config manager unavailable")

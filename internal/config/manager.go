@@ -148,11 +148,13 @@ type StremioConfig struct {
 
 // NewznabConfig configures the player-facing Stream catalog.
 type NewznabConfig struct {
-	Enabled     *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	URL         string `yaml:"url" mapstructure:"url" json:"url,omitempty"`
-	APIKey      string `yaml:"api_key" mapstructure:"api_key" json:"api_key,omitempty"`
-	Username    string `yaml:"username" mapstructure:"username" json:"username,omitempty"`
-	BrowseLimit int    `yaml:"browse_limit" mapstructure:"browse_limit" json:"browse_limit,omitempty"`
+	Enabled                 *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	URL                     string `yaml:"url" mapstructure:"url" json:"url,omitempty"`
+	APIKey                  string `yaml:"api_key" mapstructure:"api_key" json:"api_key,omitempty"`
+	Username                string `yaml:"username" mapstructure:"username" json:"username,omitempty"`
+	BrowseLimit             int    `yaml:"browse_limit" mapstructure:"browse_limit" json:"browse_limit,omitempty"`
+	WatchAgainLimit         int    `yaml:"watch_again_limit" mapstructure:"watch_again_limit" json:"watch_again_limit,omitempty"`
+	WatchAgainRetentionDays int    `yaml:"watch_again_retention_days" mapstructure:"watch_again_retention_days" json:"watch_again_retention_days,omitempty"`
 }
 
 // LocalMediaConfig configures server-local folders exposed to Tater Tube players.
@@ -816,6 +818,18 @@ func (c *Config) Validate() error {
 	}
 	if c.Newznab.BrowseLimit > 500 {
 		c.Newznab.BrowseLimit = 500
+	}
+	if c.Newznab.WatchAgainLimit <= 0 {
+		c.Newznab.WatchAgainLimit = 50
+	}
+	if c.Newznab.WatchAgainLimit > 500 {
+		c.Newznab.WatchAgainLimit = 500
+	}
+	if c.Newznab.WatchAgainRetentionDays < 0 {
+		c.Newznab.WatchAgainRetentionDays = 30
+	}
+	if c.Newznab.WatchAgainRetentionDays > 3650 {
+		c.Newznab.WatchAgainRetentionDays = 3650
 	}
 	if c.Newznab.Enabled != nil && *c.Newznab.Enabled {
 		if strings.TrimSpace(c.Newznab.URL) == "" {
@@ -1670,11 +1684,13 @@ func DefaultConfig(configDir ...string) *Config {
 			},
 		},
 		Newznab: NewznabConfig{
-			Enabled:     &newznabEnabled,
-			URL:         "",
-			APIKey:      "",
-			Username:    "",
-			BrowseLimit: 100,
+			Enabled:                 &newznabEnabled,
+			URL:                     "",
+			APIKey:                  "",
+			Username:                "",
+			BrowseLimit:             100,
+			WatchAgainLimit:         50,
+			WatchAgainRetentionDays: 30,
 		},
 		LocalMedia: LocalMediaConfig{
 			Enabled:    &localMediaEnabled,

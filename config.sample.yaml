@@ -42,6 +42,8 @@ newznab:
   api_key: ''
   username: ''
   browse_limit: 100
+  watch_again_limit: 50
+  watch_again_retention_days: 30
 
 local_media:
   enabled: false

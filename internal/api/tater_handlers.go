@@ -35,6 +35,8 @@ func (s *Server) handleTaterServerInfo(c *fiber.Ctx) error {
 			"usenet_trending":      "/api/tater/usenet/trending",
 			"usenet_play":          "/api/tater/usenet/play",
 			"active_streams":       "/api/tater/streams/active",
+			"continue_watching":    "/api/tater/playstate/continue",
+			"play_state":           "/api/tater/playstate",
 			"music_libraries":      "/api/tater/music/libraries",
 			"music_albums":         "/api/tater/music/albums",
 			"music_tracks":         "/api/tater/music/tracks",
