@@ -1,57 +1,24 @@
 import { AlertCircle, LockKeyhole, RotateCcw, ShieldCheck } from "lucide-react";
 import type React from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
 
 export function LoginPage() {
 	const {
 		isAuthenticated,
-		checkRegistrationStatus,
 		login,
-		register,
 		isLoading,
 		error,
 		clearError,
 	} = useAuth();
-	const [setupRequired, setSetupRequired] = useState(false);
-	const [statusLoading, setStatusLoading] = useState(true);
 	const [hasConnectionError, setHasConnectionError] = useState(false);
 	const [password, setPassword] = useState("");
-	const [confirmPassword, setConfirmPassword] = useState("");
 	const [localError, setLocalError] = useState<string | null>(null);
 
-	useEffect(() => {
-		const checkStatus = async () => {
-			try {
-				const status = await checkRegistrationStatus();
-				setSetupRequired(
-					status.setup_required === true || status.password_configured === false,
-				);
-				setHasConnectionError(false);
-			} catch (err) {
-				console.error("Failed to check registration status:", err);
-				setHasConnectionError(true);
-			} finally {
-				setStatusLoading(false);
-			}
-		};
-
-		if (!isAuthenticated) {
-			checkStatus();
-		}
-	}, [isAuthenticated, checkRegistrationStatus]);
-
-	const isSetupMode = setupRequired && !hasConnectionError;
-	const title = isSetupMode ? "Set Access Password" : "Enter Password";
-	const message = useMemo(() => {
-		if (hasConnectionError) {
-			return "The server did not answer. Check the container or network, then retry.";
-		}
-		if (isSetupMode) {
-			return "Choose one password for this Tater Tube Server.";
-		}
-		return "Unlock Tater Tube Server.";
-	}, [hasConnectionError, isSetupMode]);
+	const title = "Enter Password";
+	const message = hasConnectionError
+		? "The server did not answer. Check the container or network, then retry."
+		: "Unlock Tater Tube Server.";
 
 	if (isAuthenticated) {
 		return null;
@@ -59,12 +26,7 @@ export function LoginPage() {
 
 	const handlePasswordChange = (value: string) => {
 		setPassword(value);
-		setLocalError(null);
-		clearError();
-	};
-
-	const handleConfirmChange = (value: string) => {
-		setConfirmPassword(value);
+		setHasConnectionError(false);
 		setLocalError(null);
 		clearError();
 	};
@@ -80,21 +42,15 @@ export function LoginPage() {
 			setLocalError("Password is required.");
 			return;
 		}
-		if (isSetupMode && password.length < 12) {
-			setLocalError("Password must be at least 12 characters.");
-			return;
-		}
-		if (isSetupMode && password !== confirmPassword) {
-			setLocalError("Passwords do not match.");
-			return;
-		}
 
-		const success = isSetupMode
-			? await register(password)
-			: await login(password);
+		const success = await login(password);
 		if (success) {
 			setPassword("");
-			setConfirmPassword("");
+			setHasConnectionError(false);
+			return;
+		}
+		if (!error) {
+			setHasConnectionError(false);
 		}
 	};
 
@@ -120,88 +76,59 @@ export function LoginPage() {
 
 						<p className="max-w-md text-base-content/70 text-sm leading-relaxed">{message}</p>
 
-						{statusLoading ? (
-							<div className="flex min-h-36 items-center justify-center">
-								<span className="loading loading-spinner loading-lg text-primary" />
-							</div>
-						) : (
-							<div className="space-y-4">
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">
-										{isSetupMode ? "New Password" : "Password"}
-									</legend>
-									<input
-										id="password"
-										type="password"
-										autoComplete={isSetupMode ? "new-password" : "current-password"}
-										required
-										value={password}
-										onChange={(e) => handlePasswordChange(e.target.value)}
-										className="input input-lg w-full border-primary/25 bg-base-200 font-vcr"
-										placeholder={isSetupMode ? "Choose a password" : "Enter password"}
-										disabled={isLoading || hasConnectionError}
-										autoFocus
-									/>
-								</fieldset>
+						<div className="space-y-4">
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Password</legend>
+								<input
+									id="password"
+									type="password"
+									autoComplete="current-password"
+									required
+									value={password}
+									onChange={(e) => handlePasswordChange(e.target.value)}
+									className="input input-lg w-full border-primary/25 bg-base-200 font-vcr"
+									placeholder="Enter password"
+									disabled={isLoading || hasConnectionError}
+									autoFocus
+								/>
+							</fieldset>
 
-								{isSetupMode && (
-									<fieldset className="fieldset">
-										<legend className="fieldset-legend">Confirm Password</legend>
-										<input
-											id="confirmPassword"
-											type="password"
-											autoComplete="new-password"
-											required
-											value={confirmPassword}
-											onChange={(e) => handleConfirmChange(e.target.value)}
-											className="input input-lg w-full border-primary/25 bg-base-200 font-vcr"
-											placeholder="Confirm password"
-											disabled={isLoading}
-										/>
-									</fieldset>
-								)}
+							{displayedError && (
+								<div role="alert" className="alert alert-error border-error/30 bg-error/10 py-3">
+									<AlertCircle className="h-5 w-5" aria-hidden="true" />
+									<div className="text-sm">{displayedError}</div>
+								</div>
+							)}
 
-								{displayedError && (
-									<div role="alert" className="alert alert-error border-error/30 bg-error/10 py-3">
-										<AlertCircle className="h-5 w-5" aria-hidden="true" />
-										<div className="text-sm">{displayedError}</div>
-									</div>
-								)}
-
-								{hasConnectionError ? (
-									<button
-										type="button"
-										onClick={() => window.location.reload()}
-										className="btn btn-primary w-full gap-2 font-vcr"
-									>
-										<RotateCcw className="h-4 w-4" aria-hidden="true" />
-										Retry
-									</button>
-								) : (
-									<button
-										type="submit"
-										disabled={
-											isLoading ||
-											!password ||
-											(isSetupMode && !confirmPassword)
-										}
-										className="btn btn-primary w-full gap-2 font-vcr"
-									>
-										{isLoading ? (
-											<>
-												<span className="loading loading-spinner loading-sm" />
-												Please Wait
-											</>
-										) : (
-											<>
-												<ShieldCheck className="h-4 w-4" aria-hidden="true" />
-												{isSetupMode ? "Save Password" : "Unlock"}
-											</>
-										)}
-									</button>
-								)}
-							</div>
-						)}
+							{hasConnectionError ? (
+								<button
+									type="button"
+									onClick={() => window.location.reload()}
+									className="btn btn-primary w-full gap-2 font-vcr"
+								>
+									<RotateCcw className="h-4 w-4" aria-hidden="true" />
+									Retry
+								</button>
+							) : (
+								<button
+									type="submit"
+									disabled={isLoading || !password}
+									className="btn btn-primary w-full gap-2 font-vcr"
+								>
+									{isLoading ? (
+										<>
+											<span className="loading loading-spinner loading-sm" />
+											Please Wait
+										</>
+									) : (
+										<>
+											<ShieldCheck className="h-4 w-4" aria-hidden="true" />
+											Unlock
+										</>
+									)}
+								</button>
+							)}
+						</div>
 					</form>
 
 					<div className="relative hidden min-h-[420px] items-end justify-center overflow-hidden rounded-r-box border-primary/10 border-l bg-base-200/60 md:flex">

@@ -18,15 +18,21 @@ type registrationStatusResponse struct {
 	UserCount           int  `json:"user_count"`
 }
 
+type authConfigResponse struct {
+	LoginRequired      bool `json:"login_required"`
+	PasswordConfigured bool `json:"password_configured"`
+}
+
 func TestHandleCheckRegistrationUsesPasswordOnlySetupState(t *testing.T) {
 	tests := []struct {
-		name      string
-		hash      string
-		wantSetup bool
-		wantCount int
+		name             string
+		hash             string
+		wantRegistration bool
+		wantConfigured   bool
+		wantCount        int
 	}{
-		{name: "no password configured", wantSetup: true, wantCount: 0},
-		{name: "password configured", hash: "$2a$10$existing-password-hash", wantSetup: false, wantCount: 1},
+		{name: "no password configured", wantRegistration: true, wantConfigured: false, wantCount: 0},
+		{name: "password configured", hash: "$2a$10$existing-password-hash", wantRegistration: false, wantConfigured: true, wantCount: 1},
 	}
 
 	for _, tt := range tests {
@@ -49,10 +55,46 @@ func TestHandleCheckRegistrationUsesPasswordOnlySetupState(t *testing.T) {
 			var envelope testAPIResponse[registrationStatusResponse]
 			require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope))
 			require.True(t, envelope.Success)
-			require.Equal(t, tt.wantSetup, envelope.Data.RegistrationEnabled)
-			require.Equal(t, tt.wantSetup, envelope.Data.SetupRequired)
-			require.Equal(t, !tt.wantSetup, envelope.Data.PasswordConfigured)
+			require.Equal(t, tt.wantRegistration, envelope.Data.RegistrationEnabled)
+			require.False(t, envelope.Data.SetupRequired)
+			require.Equal(t, tt.wantConfigured, envelope.Data.PasswordConfigured)
 			require.Equal(t, tt.wantCount, envelope.Data.UserCount)
+		})
+	}
+}
+
+func TestHandleGetAuthConfigRequiresLoginOnlyWhenPasswordExists(t *testing.T) {
+	tests := []struct {
+		name              string
+		hash              string
+		wantLoginRequired bool
+	}{
+		{name: "no password opens the web ui", wantLoginRequired: false},
+		{name: "password enables login", hash: "$2a$10$existing-password-hash", wantLoginRequired: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := fiber.New()
+			server := &Server{
+				configManager: &mockConfigManager{
+					cfg: &config.Config{
+						Auth: config.AuthConfig{PasswordHash: tt.hash},
+					},
+				},
+			}
+			app.Get("/config", server.handleGetAuthConfig)
+
+			req := httptest.NewRequest(http.MethodGet, "/config", nil)
+			resp, err := app.Test(req)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+
+			var envelope testAPIResponse[authConfigResponse]
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope))
+			require.True(t, envelope.Success)
+			require.Equal(t, tt.wantLoginRequired, envelope.Data.LoginRequired)
+			require.Equal(t, tt.wantLoginRequired, envelope.Data.PasswordConfigured)
 		})
 	}
 }

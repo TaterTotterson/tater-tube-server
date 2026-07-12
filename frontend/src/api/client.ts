@@ -695,6 +695,12 @@ class APIClient {
 		});
 	}
 
+	async clearServerPassword() {
+		return this.request<{ message: string }>("/auth/password", {
+			method: "DELETE",
+		});
+	}
+
 	async checkRegistrationStatus() {
 		return this.request<{
 			registration_enabled: boolean;
