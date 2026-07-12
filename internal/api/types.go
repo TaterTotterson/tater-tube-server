@@ -156,12 +156,14 @@ type ProwlarrAPIResponse struct {
 
 // NewznabAPIResponse sanitizes Newznab config for API responses.
 type NewznabAPIResponse struct {
-	Enabled     bool   `json:"enabled"`
-	URL         string `json:"url,omitempty"`
-	APIKey      string `json:"api_key"`
-	APIKeySet   bool   `json:"api_key_set"`
-	Username    string `json:"username,omitempty"`
-	BrowseLimit int    `json:"browse_limit,omitempty"`
+	Enabled                 bool   `json:"enabled"`
+	URL                     string `json:"url,omitempty"`
+	APIKey                  string `json:"api_key"`
+	APIKeySet               bool   `json:"api_key_set"`
+	Username                string `json:"username,omitempty"`
+	BrowseLimit             int    `json:"browse_limit,omitempty"`
+	WatchAgainLimit         int    `json:"watch_again_limit"`
+	WatchAgainRetentionDays int    `json:"watch_again_retention_days"`
 }
 
 // LocalMediaAPIResponse exposes server-local media categories for the config UI.
@@ -283,12 +285,14 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	}
 
 	newznabResp := NewznabAPIResponse{
-		Enabled:     cfg.Newznab.Enabled != nil && *cfg.Newznab.Enabled,
-		URL:         cfg.Newznab.URL,
-		APIKey:      "",
-		APIKeySet:   cfg.Newznab.APIKey != "",
-		Username:    cfg.Newznab.Username,
-		BrowseLimit: cfg.Newznab.BrowseLimit,
+		Enabled:                 cfg.Newznab.Enabled != nil && *cfg.Newznab.Enabled,
+		URL:                     cfg.Newznab.URL,
+		APIKey:                  "",
+		APIKeySet:               cfg.Newznab.APIKey != "",
+		Username:                cfg.Newznab.Username,
+		BrowseLimit:             cfg.Newznab.BrowseLimit,
+		WatchAgainLimit:         cfg.Newznab.WatchAgainLimit,
+		WatchAgainRetentionDays: cfg.Newznab.WatchAgainRetentionDays,
 	}
 	if cfg.Newznab.APIKey != "" {
 		newznabResp.APIKey = "********"

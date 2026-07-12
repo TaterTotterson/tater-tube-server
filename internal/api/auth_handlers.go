@@ -335,13 +335,7 @@ func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
 
 	// If no user in context, and authentication is disabled, let's create a default admin user
 	if user == nil && s.userRepo != nil {
-		cfg := s.configManager.GetConfig()
-		loginRequired := true
-		if cfg.Auth.LoginRequired != nil {
-			loginRequired = *cfg.Auth.LoginRequired
-		}
-
-		if !loginRequired {
+		if !s.isPasswordLoginRequired() {
 			// Auto-bootstrap a default admin user when auth is disabled
 			user = &database.User{
 				UserID:   "admin",
@@ -448,12 +442,7 @@ type ResetAdminPasswordRequest struct {
 //	@Failure		403		{object}	APIResponse
 //	@Router			/auth/reset-admin-password [post]
 func (s *Server) handleResetAdminPassword(c *fiber.Ctx) error {
-	cfg := s.configManager.GetConfig()
-	loginRequired := true
-	if cfg != nil && cfg.Auth.LoginRequired != nil {
-		loginRequired = *cfg.Auth.LoginRequired
-	}
-	if loginRequired {
+	if s.isPasswordLoginRequired() {
 		return RespondForbidden(c, "Password reset is only available when login is disabled", "")
 	}
 

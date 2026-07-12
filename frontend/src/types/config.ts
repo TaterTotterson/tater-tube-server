@@ -509,6 +509,8 @@ export interface NewznabConfig {
 	api_key_set?: boolean;
 	username?: string;
 	browse_limit: number;
+	watch_again_limit: number;
+	watch_again_retention_days: number;
 }
 
 export interface LocalMediaCategory {

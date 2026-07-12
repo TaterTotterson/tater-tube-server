@@ -164,13 +164,7 @@ func (s *Server) requireAuthWhenEnabled(skipPaths []string) fiber.Handler {
 			}
 		}
 
-		loginRequired := false
-		if s.configManager != nil {
-			cfg := s.configManager.GetConfig()
-			if cfg != nil && cfg.Auth.LoginRequired != nil {
-				loginRequired = *cfg.Auth.LoginRequired
-			}
-		}
+		loginRequired := s.isPasswordLoginRequired()
 		if !loginRequired {
 			return c.Next()
 		}
@@ -204,6 +198,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/tater/usenet/trending", s.handleTaterUsenetTrending)
 	api.Post("/tater/usenet/play", s.handleTaterUsenetPlay)
 	api.Get("/tater/streams/active", s.handleTaterActiveStreams)
+	api.Get("/tater/playstate/continue", s.handleTaterPlayStateContinue)
+	api.Post("/tater/playstate", s.handleTaterPlayStateSave)
 	api.Get("/tater/music/libraries", s.handleTaterMusicLibraries)
 	api.Get("/tater/music/albums", s.handleTaterMusicAlbums)
 	api.Get("/tater/music/tracks", s.handleTaterMusicTracks)
@@ -224,10 +220,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 		corsOrigins = strings.Join(cfg.API.AllowedOrigins, ",")
 	}
 
-	loginRequired := false
-	if cfg != nil && cfg.Auth.LoginRequired != nil {
-		loginRequired = *cfg.Auth.LoginRequired
-	}
+	loginRequired := s.isPasswordLoginRequired()
 	allowCredentials := loginRequired && corsOrigins != "*"
 
 	api.Use(cors.New(cors.Config{

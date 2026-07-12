@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/auth"
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/require"
@@ -97,4 +98,61 @@ func TestHandleGetAuthConfigRequiresLoginOnlyWhenPasswordExists(t *testing.T) {
 			require.Equal(t, tt.wantLoginRequired, envelope.Data.PasswordConfigured)
 		})
 	}
+}
+
+func TestRequireAuthWhenEnabledUsesPasswordHashNotLegacyFlag(t *testing.T) {
+	legacyLoginRequired := true
+	app := fiber.New()
+	server := &Server{
+		configManager: &mockConfigManager{
+			cfg: &config.Config{
+				Auth: config.AuthConfig{
+					LoginRequired: &legacyLoginRequired,
+					PasswordHash:  "",
+				},
+			},
+		},
+	}
+	app.Use(server.requireAuthWhenEnabled(nil))
+	app.Get("/protected", func(c *fiber.Ctx) error {
+		return c.SendStatus(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+}
+
+func TestHandleClearServerPasswordRemovesHashAndDisablesLogin(t *testing.T) {
+	legacyLoginRequired := true
+	manager := &mockConfigManager{
+		cfg: &config.Config{
+			Auth: config.AuthConfig{
+				LoginRequired: &legacyLoginRequired,
+				PasswordHash:  "$2a$10$existing-password-hash",
+			},
+		},
+	}
+	app := fiber.New()
+	server := &Server{configManager: manager}
+	app.Delete("/auth/password", func(c *fiber.Ctx) error {
+		c.Locals(string(auth.UserContextKey), passwordAdminUser())
+		return server.handleClearServerPassword(c)
+	})
+	app.Get("/protected", server.requireAuthWhenEnabled(nil), func(c *fiber.Ctx) error {
+		return c.SendStatus(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodDelete, "/auth/password", nil)
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Empty(t, manager.cfg.Auth.PasswordHash)
+	require.NotEmpty(t, resp.Header.Values("Set-Cookie"))
+
+	req = httptest.NewRequest(http.MethodGet, "/protected", nil)
+	resp, err = app.Test(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 }

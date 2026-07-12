@@ -73,6 +73,11 @@ type taterUsenetItem struct {
 	Index           int     `json:"index,omitempty"`
 	Duration        int64   `json:"duration,omitempty"`
 	DurationSeconds float64 `json:"durationSeconds,omitempty"`
+	PlayStateID     string  `json:"playStateId,omitempty"`
+	SeriesStateID   string  `json:"seriesStateId,omitempty"`
+	ViewOffset      int64   `json:"viewOffset,omitempty"`
+	ViewOffsetSec   float64 `json:"viewOffsetSeconds,omitempty"`
+	ProgressPercent float64 `json:"progressPercent,omitempty"`
 	LeafCount       int     `json:"leafCount,omitempty"`
 	SizeBytes       int64   `json:"sizeBytes,omitempty"`
 	SizeText        string  `json:"sizeText,omitempty"`
@@ -184,6 +189,7 @@ func (s *Server) handleTaterUsenetCatalog(c *fiber.Ctx) error {
 		streamChildren := []taterUsenetCategory{}
 		streamChildren = append(streamChildren,
 			taterUsenetCategory{Type: "search", Title: "Search", Detail: "ALL MEDIA"},
+			taterUsenetCategory{ID: "watch-again", Type: "watchAgain", Title: "Watch Again", Detail: "RECENT STREAMS"},
 		)
 		streamChildren = append(streamChildren,
 			taterUsenetCategory{Type: "discoverRoot", Title: "Discover", Detail: "GUIDE", Children: taterDiscoverRows()},
@@ -228,6 +234,7 @@ func (s *Server) handleTaterUsenetItems(c *fiber.Ctx) error {
 		if err != nil {
 			return RespondValidationError(c, "Failed to load local media", err.Error())
 		}
+		items = taterAttachLocalPlayStates(cfg, items)
 		title := strings.TrimSpace(c.Query("title"))
 		if title == "" {
 			title = "Local"
@@ -241,6 +248,13 @@ func (s *Server) handleTaterUsenetItems(c *fiber.Ctx) error {
 	title := strings.TrimSpace(c.Query("title"))
 	if title == "" {
 		title = "Stream"
+	}
+	if categoryID == "watch-again" {
+		items, err := taterNzbWatchAgainRows(cfg)
+		if err != nil {
+			return RespondServiceUnavailable(c, "Failed to load Watch Again", err.Error())
+		}
+		return RespondSuccess(c, fiber.Map{"title": "Watch Again", "items": items})
 	}
 
 	body, err := taterFetchNewznab(c.Context(), cfg, map[string]string{
@@ -402,13 +416,20 @@ func (s *Server) handleTaterUsenetPlay(c *fiber.Ctx) error {
 		return RespondServiceUnavailable(c, errMsg, "")
 	}
 
+	watchTitle := req.Title
 	safeFilename := stableTaterNzbFilename(req.Title, downloadURL)
 	if fileinfo.IsProbablyObfuscated(nzbtrim.TrimNzbExtension(safeFilename)) {
 		if derived := deriveNzbNameFromContent(nzbData); derived != "" {
 			safeFilename = stableTaterNzbFilename(derived, downloadURL)
+			if watchTitle == "" || fileinfo.IsProbablyObfuscated(watchTitle) {
+				watchTitle = derived
+			}
 		}
 	}
 	nzbName := nzbtrim.TrimNzbExtension(safeFilename)
+	if watchTitle == "" {
+		watchTitle = nzbName
+	}
 	baseURL := resolveBaseURL(c, "")
 	category := strings.TrimSpace(req.Category)
 	if category == "" {
@@ -482,7 +503,13 @@ func (s *Server) handleTaterUsenetPlay(c *fiber.Ctx) error {
 	if !ok {
 		return RespondInternalError(c, "Unexpected stream result", "")
 	}
-	return s.waitAndRespondWithStreamAuth(c, itemID, baseURL, "player_token", playerToken, nzbName, nil, req.Timeout)
+	if err := s.waitAndRespondWithStreamAuth(c, itemID, baseURL, "player_token", playerToken, nzbName, nil, req.Timeout); err != nil {
+		return err
+	}
+	if err := taterRecordNzbWatchAgain(cfg, watchTitle, req.NzbURL, req.Category); err != nil {
+		slog.WarnContext(ctx, "Failed to record Tater Tube Watch Again item", "error", err)
+	}
+	return nil
 }
 
 func (s *Server) handleTaterMusicLibraries(c *fiber.Ctx) error {
@@ -559,7 +586,13 @@ func taterLocalMediaEnabled(cfg *config.Config) bool {
 }
 
 func taterLocalRootRow(cfg *config.Config) taterUsenetCategory {
-	children := []taterUsenetCategory{}
+	children := []taterUsenetCategory{{
+		Type:      "continue",
+		Title:     "Continue Watching",
+		Detail:    "LOCAL",
+		Group:     "Local",
+		FullTitle: "Local / Continue Watching",
+	}}
 	for _, cat := range cfg.LocalMedia.Categories {
 		if cat.Enabled != nil && !*cat.Enabled {
 			continue
@@ -1255,6 +1288,7 @@ func cleanMovieTitleAndYear(value string) (string, string) {
 		value = value[:strings.Index(value, match[1])]
 	}
 	value = localQualityTail.ReplaceAllString(value, "")
+	value = strings.TrimRight(value, " \t-_.([{")
 	return cleanTaterText(value), year
 }
 
@@ -1660,6 +1694,19 @@ func taterEnsureNewznabKey(rawURL string, cfg *config.Config) string {
 	} else {
 		q.Set("apikey", cleanTaterAPIKey(cfg.Newznab.APIKey))
 	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func taterStripNewznabAuth(rawURL string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return strings.TrimSpace(rawURL)
+	}
+	q := u.Query()
+	q.Del("apikey")
+	q.Del("api")
+	q.Del("user")
 	u.RawQuery = q.Encode()
 	return u.String()
 }
