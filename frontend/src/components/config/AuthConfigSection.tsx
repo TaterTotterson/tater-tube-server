@@ -6,7 +6,6 @@ import type { AuthConfig, ConfigResponse } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 
 interface CredentialForm {
-	username: string;
 	password: string;
 	confirmPassword: string;
 }
@@ -36,7 +35,6 @@ export function AuthConfigSection({
 	const [hasChanges, setHasChanges] = useState(false);
 	const [registrationStatus, setRegistrationStatus] = useState<RegistrationStatus | null>(null);
 	const [credentialForm, setCredentialForm] = useState<CredentialForm>({
-		username: "",
 		password: "",
 		confirmPassword: "",
 	});
@@ -99,8 +97,8 @@ export function AuthConfigSection({
 	const isDirectUser = user?.provider === "direct";
 
 	const handleChangePassword = async () => {
-		if (changePasswordForm.newPassword.length < 8) {
-			setChangePasswordError("New password must be at least 8 characters.");
+		if (changePasswordForm.newPassword.length < 12) {
+			setChangePasswordError("New password must be at least 12 characters.");
 			return;
 		}
 		if (changePasswordForm.newPassword !== changePasswordForm.confirmPassword) {
@@ -131,8 +129,8 @@ export function AuthConfigSection({
 			setResetPasswordError("Username is required.");
 			return;
 		}
-		if (resetPasswordForm.newPassword.length < 8) {
-			setResetPasswordError("New password must be at least 8 characters.");
+		if (resetPasswordForm.newPassword.length < 12) {
+			setResetPasswordError("New password must be at least 12 characters.");
 			return;
 		}
 		if (resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword) {
@@ -159,11 +157,8 @@ export function AuthConfigSection({
 	};
 
 	const validateCredentials = (): string | null => {
-		if (credentialForm.username.trim().length < 3) {
-			return "Username must be at least 3 characters.";
-		}
-		if (credentialForm.password.length < 8) {
-			return "Password must be at least 8 characters.";
+		if (credentialForm.password.length < 12) {
+			return "Password must be at least 12 characters.";
 		}
 		if (credentialForm.password !== credentialForm.confirmPassword) {
 			return "Passwords do not match.";
@@ -184,11 +179,7 @@ export function AuthConfigSection({
 			setIsRegistering(true);
 			setCredentialError(null);
 			try {
-				await apiClient.register(
-					credentialForm.username.trim(),
-					undefined,
-					credentialForm.password,
-				);
+				await apiClient.register("", undefined, credentialForm.password);
 				await fetchRegistrationStatus();
 			} catch (err) {
 				setCredentialError(
@@ -258,28 +249,15 @@ export function AuthConfigSection({
 								</span>
 							</div>
 							<p className="text-[11px] text-base-content/60 leading-relaxed">
-								No users exist yet. Create your admin username and password before enabling login —
-								you'll need these to sign in.
+								No password exists yet. Create the admin password before enabling login.
 							</p>
-
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Username</legend>
-								<input
-									type="text"
-									className="input w-full"
-									placeholder="admin"
-									value={credentialForm.username}
-									disabled={isReadOnly}
-									onChange={(e) => setCredentialForm((f) => ({ ...f, username: e.target.value }))}
-								/>
-							</fieldset>
 
 							<fieldset className="fieldset">
 								<legend className="fieldset-legend">Password</legend>
 								<input
 									type="password"
 									className="input w-full"
-									placeholder="Min. 8 characters"
+									placeholder="Min. 12 characters"
 									value={credentialForm.password}
 									disabled={isReadOnly}
 									onChange={(e) => setCredentialForm((f) => ({ ...f, password: e.target.value }))}
@@ -347,7 +325,7 @@ export function AuthConfigSection({
 										<input
 											type="password"
 											className="input w-full"
-											placeholder="Min. 8 characters"
+											placeholder="Min. 12 characters"
 											value={changePasswordForm.newPassword}
 											disabled={isReadOnly || isChangingPassword}
 											onChange={(e) =>
@@ -437,7 +415,7 @@ export function AuthConfigSection({
 										<input
 											type="password"
 											className="input w-full"
-											placeholder="Min. 8 characters"
+											placeholder="Min. 12 characters"
 											value={resetPasswordForm.newPassword}
 											disabled={isReadOnly || isResettingPassword}
 											onChange={(e) =>

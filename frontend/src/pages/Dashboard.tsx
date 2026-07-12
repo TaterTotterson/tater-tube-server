@@ -54,10 +54,44 @@ function isOnline(lastSeenAt?: string) {
 	return Number.isFinite(age) && age >= 0 && age < 5 * 60 * 1000;
 }
 
-function streamProgress(stream: ActiveStream) {
-	if (!stream.total_size || stream.total_size <= 0) return 0;
-	const sent = Math.max(stream.bytes_sent || 0, stream.current_offset || 0);
-	return Math.max(0, Math.min(100, (sent / stream.total_size) * 100));
+function formatDuration(seconds?: number) {
+	if (!Number.isFinite(seconds) || !seconds || seconds <= 0) return "00:00";
+	const totalSeconds = Math.max(0, Math.floor(seconds));
+	const hours = Math.floor(totalSeconds / 3600);
+	const minutes = Math.floor((totalSeconds % 3600) / 60);
+	const secs = totalSeconds % 60;
+	if (hours > 0) {
+		return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+	}
+	return `${minutes}:${String(secs).padStart(2, "0")}`;
+}
+
+function streamPlaybackPosition(stream: ActiveStream): number {
+	if (
+		Number.isFinite(stream.playback_position_seconds) &&
+		stream.playback_position_seconds > 0
+	) {
+		return stream.playback_position_seconds;
+	}
+	const started = new Date(stream.started_at);
+	if (!Number.isNaN(started.getTime())) {
+		return Math.max(0, (Date.now() - started.getTime()) / 1000);
+	}
+	return 0;
+}
+
+function streamPlaybackDuration(stream: ActiveStream): number {
+	const duration = stream.media_duration_seconds ?? 0;
+	if (Number.isFinite(duration) && duration > 0) {
+		return duration;
+	}
+	return 0;
+}
+
+function streamProgress(stream: ActiveStream): number | undefined {
+	const duration = streamPlaybackDuration(stream);
+	if (duration <= 0) return undefined;
+	return Math.max(0, Math.min(100, (streamPlaybackPosition(stream) / duration) * 100));
 }
 
 function hardwareName(value?: string) {
@@ -139,10 +173,10 @@ function Panel({
 	children: ReactNode;
 }) {
 	return (
-		<section className="rounded-lg border border-base-300 bg-base-200/70 p-5">
-			<div className="mb-4 flex items-center gap-2">
+		<section className="min-w-0 overflow-hidden rounded-lg border border-base-300 bg-base-200/70 p-5">
+			<div className="mb-4 flex min-w-0 items-center gap-2">
 				<Icon className="h-5 w-5 text-primary" />
-				<h2 className="tater-glow font-vcr text-lg text-primary">{title}</h2>
+				<h2 className="tater-glow min-w-0 break-words font-vcr text-lg text-primary">{title}</h2>
 			</div>
 			{children}
 		</section>
@@ -210,7 +244,7 @@ export function Dashboard() {
 
 	return (
 		<div className="space-y-6">
-			<section className="grid gap-4 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)]">
+			<section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)]">
 				<Panel title="Tater Tube Players" icon={Tv}>
 					<div className="space-y-3">
 						{players.length > 0 ? (
@@ -220,11 +254,11 @@ export function Dashboard() {
 								return (
 									<div
 										key={player.id}
-										className="rounded-md border border-base-300 bg-base-100/70 p-3"
+										className="min-w-0 overflow-hidden rounded-md border border-base-300 bg-base-100/70 p-3"
 									>
-										<div className="flex items-start justify-between gap-3">
-											<div className="min-w-0">
-												<div className="truncate font-semibold">{player.name}</div>
+										<div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+											<div className="min-w-0 flex-1">
+												<div className="dashboard-line-clamp font-semibold">{player.name}</div>
 												<div className="text-base-content/60 text-sm">
 													Last seen {timeAgo(player.last_seen_at)}
 												</div>
@@ -237,8 +271,8 @@ export function Dashboard() {
 										</div>
 										<div className="mt-2 text-base-content/70 text-sm">
 											{stream ? (
-												<div className="flex flex-wrap items-center gap-2">
-													<span className="min-w-0 truncate">
+												<div className="flex min-w-0 flex-wrap items-center gap-2">
+													<span className="dashboard-line-clamp min-w-0 flex-1">
 														Playing {fileLabel(stream.file_path)}
 													</span>
 													{mode && (
@@ -249,7 +283,9 @@ export function Dashboard() {
 												"No active stream"
 											)}
 											{mode?.detail && (
-												<div className="mt-1 text-base-content/50 text-xs">{mode.detail}</div>
+												<div className="dashboard-line-clamp mt-1 text-base-content/50 text-xs">
+													{mode.detail}
+												</div>
 											)}
 										</div>
 									</div>
@@ -268,35 +304,46 @@ export function Dashboard() {
 						{activeStreams.length > 0 ? (
 							activeStreams.map((stream) => {
 								const mode = playbackMode(stream);
+								const playbackPosition = streamPlaybackPosition(stream);
+								const playbackDuration = streamPlaybackDuration(stream);
+								const playbackProgress = streamProgress(stream);
 								return (
 									<div
 										key={stream.id}
-										className="rounded-md border border-base-300 bg-base-100/70 p-3"
+										className="min-w-0 overflow-hidden rounded-md border border-base-300 bg-base-100/70 p-3"
 									>
-										<div className="flex items-start justify-between gap-3">
-											<div className="min-w-0">
-												<div className="truncate font-semibold">{fileLabel(stream.file_path)}</div>
-												<div className="text-base-content/60 text-sm">
+										<div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+											<div className="min-w-0 flex-1">
+												<div className="dashboard-line-clamp font-semibold">
+													{fileLabel(stream.file_path)}
+												</div>
+												<div className="dashboard-line-clamp text-base-content/60 text-sm">
 													{stream.user_name || stream.source || "Unknown player"} -{" "}
 													{formatRate(stream.bytes_per_second || stream.download_speed)}
 												</div>
 											</div>
-											<div className="flex flex-wrap justify-end gap-2">
+											<div className="flex min-w-0 flex-wrap gap-2 sm:justify-end">
 												{mode && <span className={`badge ${mode.className}`}>{mode.label}</span>}
 												<span className="badge badge-primary">{stream.status || "Streaming"}</span>
 											</div>
 										</div>
 										{mode?.detail && (
-											<div className="mt-2 text-base-content/50 text-xs">{mode.detail}</div>
+											<div className="dashboard-line-clamp mt-2 text-base-content/50 text-xs">
+												{mode.detail}
+											</div>
 										)}
 										<progress
 											className="progress progress-primary mt-3 h-2 w-full"
-											value={streamProgress(stream)}
+											value={playbackProgress}
 											max={100}
 										/>
 										<div className="mt-2 flex justify-between text-base-content/50 text-xs">
-											<span>{formatBytes(stream.bytes_sent)} sent</span>
-											<span>{formatBytes(stream.total_size)} total</span>
+											<span>Playback {formatDuration(playbackPosition)}</span>
+											<span>
+												{playbackDuration > 0
+													? `/ ${formatDuration(playbackDuration)}`
+													: "elapsed"}
+											</span>
 										</div>
 									</div>
 								);

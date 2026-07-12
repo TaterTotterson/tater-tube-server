@@ -182,7 +182,7 @@ func (s *Server) handleStremioAddonStream(c *fiber.Ctx) error {
 	client := prowlarr.NewClient(
 		prowlarrCfg.Host,
 		prowlarrCfg.APIKey,
-		httpclient.NewForExternal(cfg.Network, 30*time.Second),
+		httpclient.NewForExternal(30*time.Second),
 	)
 	var (
 		results []prowlarr.NZBResult
@@ -421,7 +421,7 @@ func (s *Server) handleStremioAddonPlay(c *fiber.Ctx) error {
 		client := prowlarr.NewClient(
 			prowlarrCfg.Host,
 			prowlarrCfg.APIKey,
-			httpclient.NewForExternal(cfg.Network, httpclient.LongTimeout),
+			httpclient.NewForExternal(httpclient.LongTimeout),
 		)
 		nzbData, err := client.DownloadNZB(workCtx, downloadURL)
 		if err != nil {

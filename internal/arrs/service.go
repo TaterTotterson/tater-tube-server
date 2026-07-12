@@ -84,7 +84,7 @@ type Service struct {
 // NewService creates a new arrs service for health monitoring and file repair
 func NewService(configGetter config.ConfigGetter, configManager model.ConfigManager, userRepo *database.UserRepository, queueRepo *database.Repository) *Service {
 	instManager := instances.NewManager(configGetter, configManager)
-	clientManager := clients.NewManager(httpclient.NewForExternal(configGetter().Network, 30*time.Second))
+	clientManager := clients.NewManager(httpclient.NewForExternal(30 * time.Second))
 	dataManager := data.NewManager()
 	// One failure tracker shared by every Tater Tube Server→arr re-acquire producer: the
 	// queue-cleanup worker and the scanner (repair re-triggers) count the same

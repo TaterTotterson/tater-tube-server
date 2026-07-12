@@ -5,7 +5,6 @@ import {
 	Cpu,
 	Download,
 	Folder,
-	Globe,
 	HardDrive,
 	Link,
 	Radio,
@@ -25,7 +24,6 @@ import { ComingSoonSection } from "../components/config/ComingSoonSection";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { LocalMediaConfigSection } from "../components/config/LocalMediaConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
-import { NetworkConfigSection } from "../components/config/NetworkConfigSection";
 import { NewznabConfigSection } from "../components/config/NewznabConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
@@ -54,9 +52,7 @@ import type {
 	LocalMediaConfig,
 	LogFormData,
 	MetadataConfig,
-	NetworkConfig,
 	NewznabConfig,
-	NzblnkConfig,
 	ProviderConfig,
 	SABnzbdConfig,
 	SegmentCacheConfig,
@@ -68,7 +64,6 @@ import { CONFIG_SECTIONS } from "../types/config";
 // Helper function to get icon component
 const getIconComponent = (iconName: string) => {
 	const iconMap = {
-		Globe,
 		Folder,
 		Download,
 		Shield,
@@ -90,15 +85,15 @@ const getIconComponent = (iconName: string) => {
 const SECTION_GROUPS = [
 	{
 		title: "Streamer",
-		sections: ["players", "local_media", "newznab", "providers", "streaming", "transcoding"],
+		sections: ["players", "local_media", "newznab", "providers"],
 	},
 	{
 		title: "Processing",
-		sections: ["import", "metadata"],
+		sections: ["transcoding", "import", "streaming", "metadata"],
 	},
 	{
 		title: "Access",
-		sections: ["auth", "network"],
+		sections: ["auth"],
 	},
 	{
 		title: "System",
@@ -123,8 +118,6 @@ export function ConfigurationPage() {
 	// Get active section from URL parameter, default to player setup.
 	const activeSection = (() => {
 		if (!section) return "players";
-		// NZBLNK settings now live inside the Network section
-		if (section === "nzblnk") return "network" as ConfigSection;
 		return STREAMER_CONFIG_SECTIONS.has(section as ConfigSection | "system")
 			? (section as ConfigSection | "system")
 			: "players";
@@ -134,8 +127,6 @@ export function ConfigurationPage() {
 	useEffect(() => {
 		if (!section) {
 			navigate("/config/players", { replace: true });
-		} else if (section === "nzblnk") {
-			navigate("/config/network", { replace: true });
 		} else if (!STREAMER_CONFIG_SECTIONS.has(section as ConfigSection | "system")) {
 			navigate("/config/players", { replace: true });
 		}
@@ -269,16 +260,6 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "providers",
 					config: { providers: data as unknown as ProviderConfig[] },
-				});
-			} else if (section === "nzblnk") {
-				await updateConfigSection.mutateAsync({
-					section: "nzblnk",
-					config: { nzblnk: data as unknown as NzblnkConfig },
-				});
-			} else if (section === "network") {
-				await updateConfigSection.mutateAsync({
-					section: "network",
-					config: { network: data as unknown as NetworkConfig },
 				});
 			} else if (section === "log") {
 				const logData = data as unknown as LogFormData & { profiler_enabled?: boolean };
@@ -552,13 +533,6 @@ export function ConfigurationPage() {
 										}}
 									/>
 								)}
-								{activeSection === "network" && (
-									<NetworkConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
 								{![
 									"auth",
 									"import",
@@ -572,7 +546,6 @@ export function ConfigurationPage() {
 									"health",
 									"newznab",
 									"players",
-									"network",
 								].includes(activeSection) && (
 									<ComingSoonSection
 										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}

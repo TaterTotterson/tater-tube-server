@@ -2,12 +2,9 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/database"
@@ -35,8 +32,7 @@ type Config struct {
 	CookieSameSite         http.SameSite // SameSite cookie attribute
 
 	// Direct authentication
-	DirectAuthEnabled bool   // Enable direct username/password authentication
-	DirectAuthSalt    string // Salt for direct authentication
+	DirectAuthEnabled bool // Enable direct username/password authentication
 
 	// Application settings
 	Issuer   string // JWT issuer
@@ -48,64 +44,21 @@ type Config struct {
 // DefaultConfig returns default authentication configuration
 func DefaultConfig() *Config {
 	return &Config{
-		TokenDuration:          24 * time.Hour,       // 24 hours
-		CookieDomain:           "",                   // Empty string allows browser to use current domain
-		CookieSecure:           false,                // Only used when CookieSecureAutoDetect is false
-		CookieSecureAutoDetect: true,                 // Auto-detect Secure flag from request protocol
-		CookieSameSite:         http.SameSiteLaxMode, // Use Lax mode for Safari compatibility
+		TokenDuration:          10 * 365 * 24 * time.Hour, // Appliance-style persistent login
+		CookieDomain:           "",                        // Empty string allows browser to use current domain
+		CookieSecure:           false,                     // Only used when CookieSecureAutoDetect is false
+		CookieSecureAutoDetect: true,                      // Auto-detect Secure flag from request protocol
+		CookieSameSite:         http.SameSiteLaxMode,      // Use Lax mode for Safari compatibility
 		DirectAuthEnabled:      true,
 		Issuer:                 "tater-tube-server",
 		Audience:               "tater-tube-server-api",
 	}
 }
 
-// LoadConfigFromEnv loads configuration from environment variables.
-// Returns an error if JWT_SECRET is not set, as a missing secret is a security risk.
-func LoadConfigFromEnv() (*Config, error) {
-	config := DefaultConfig()
-
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		return nil, fmt.Errorf("JWT_SECRET environment variable must be set")
-	}
-	config.JWTSecret = secret
-
-	if domain := os.Getenv("COOKIE_DOMAIN"); domain != "" {
-		config.CookieDomain = domain
-	}
-
-	if secure := os.Getenv("COOKIE_SECURE"); secure != "" {
-		// Explicit env var disables auto-detection and forces a fixed value
-		config.CookieSecureAutoDetect = false
-		config.CookieSecure = secure != "false"
-	}
-
-	if salt := os.Getenv("DIRECT_AUTH_SALT"); salt != "" {
-		config.DirectAuthSalt = salt
-	} else {
-		// Generate a random salt for direct authentication
-		salt, err := generateRandomSalt()
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate random salt: %w", err)
-		}
-		config.DirectAuthSalt = salt
-	}
-
-	if directAuth := os.Getenv("DIRECT_AUTH_ENABLED"); directAuth == "false" {
-		config.DirectAuthEnabled = false
-	}
-
-	return config, nil
-}
-
 // NewService creates a new authentication service
 func NewService(config *Config, userRepo *database.UserRepository) (*Service, error) {
 	if config == nil {
-		var err error
-		config, err = LoadConfigFromEnv()
-		if err != nil {
-			return nil, err
-		}
+		config = DefaultConfig()
 	}
 
 	// Create auth service options
@@ -381,6 +334,27 @@ func (s *Service) AuthenticateUser(ctx context.Context, username, password strin
 	return user, nil
 }
 
+// AuthenticatePassword verifies a password against direct-auth users and returns
+// the first matching admin/user. This supports the appliance-style password-only
+// login screen while preserving existing direct-auth accounts.
+func (s *Service) AuthenticatePassword(ctx context.Context, password string) (*database.User, error) {
+	users, err := s.userRepo.GetDirectUsers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get users: %w", err)
+	}
+
+	for _, user := range users {
+		if user.PasswordHash == nil {
+			continue
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(*user.PasswordHash), []byte(password)); err == nil {
+			return user, nil
+		}
+	}
+
+	return nil, fmt.Errorf("invalid credentials")
+}
+
 // HashPassword hashes a password using bcrypt
 func (s *Service) HashPassword(password string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -439,13 +413,4 @@ func (d *directCredChecker) Check(user, password string) (bool, error) {
 	}
 
 	return true, nil
-}
-
-// generateRandomSalt generates a cryptographically random salt for authentication
-func generateRandomSalt() (string, error) {
-	bytes := make([]byte, 32)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", fmt.Errorf("failed to generate random bytes: %w", err)
-	}
-	return hex.EncodeToString(bytes), nil
 }

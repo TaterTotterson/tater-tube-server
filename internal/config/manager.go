@@ -1,7 +1,9 @@
 package config
 
 import (
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"os"
@@ -55,41 +57,10 @@ type Config struct {
 	Fuse            FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"-"`
 	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
 	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
-	Nzblnk          NzblnkConfig       `yaml:"nzblnk" mapstructure:"nzblnk" json:"nzblnk"`
-	Network         NetworkConfig      `yaml:"network" mapstructure:"network" json:"network"`
 	MountPath       string             `yaml:"mount_path" mapstructure:"mount_path" json:"-"`
 	MountType       MountType          `yaml:"mount_type" mapstructure:"mount_type" json:"-"`
 	ProfilerEnabled bool               `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
 }
-
-// NzblnkConfig configures the NZBLNK resolver (used for nzblnk:// link resolution via public indexers).
-type NzblnkConfig struct {
-	// UserAgent is the HTTP User-Agent sent to indexers when resolving nzblnk:// links.
-	// Defaults to a browser-like string. Leave empty to use the default.
-	UserAgent string `yaml:"user_agent" mapstructure:"user_agent" json:"user_agent,omitempty"`
-}
-
-// NetworkConfig holds outbound HTTP routing options applied to every external
-// client (indexers, arrs, SABnzbd fallback, NZBLNK resolver). Internal
-// endpoints (RC server, self-loopback) are unaffected.
-//
-// Semantics mirror Go's standard HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars.
-// Empty strings disable proxying for that scheme.
-type NetworkConfig struct {
-	HTTPProxy  string `yaml:"http_proxy" mapstructure:"http_proxy" json:"http_proxy,omitempty"`
-	HTTPSProxy string `yaml:"https_proxy" mapstructure:"https_proxy" json:"https_proxy,omitempty"`
-	NoProxy    string `yaml:"no_proxy" mapstructure:"no_proxy" json:"no_proxy,omitempty"`
-}
-
-// GetHTTPProxy returns the configured HTTP proxy URL. Implements the
-// httpclient.NetworkProxyConfig interface to avoid config↔httpclient import cycles.
-func (n NetworkConfig) GetHTTPProxy() string { return n.HTTPProxy }
-
-// GetHTTPSProxy returns the configured HTTPS proxy URL.
-func (n NetworkConfig) GetHTTPSProxy() string { return n.HTTPSProxy }
-
-// GetNoProxy returns the comma-separated bypass list.
-func (n NetworkConfig) GetNoProxy() string { return n.NoProxy }
 
 // SegmentCacheConfig configures the segment-aligned disk cache shared by FUSE and Server.
 // When enabled, this cache replaces the FUSE VFS disk cache and additionally benefits Server.
@@ -230,7 +201,8 @@ type PlayerPairingCode struct {
 
 // AuthConfig represents authentication configuration
 type AuthConfig struct {
-	LoginRequired *bool `yaml:"login_required" mapstructure:"login_required" json:"login_required"`
+	LoginRequired *bool  `yaml:"login_required" mapstructure:"login_required" json:"login_required"`
+	JWTSecret     string `yaml:"jwt_secret,omitempty" mapstructure:"jwt_secret" json:"-"`
 }
 
 // DatabaseConfig represents database configuration
@@ -1877,9 +1849,6 @@ func DefaultConfig(configDir ...string) *Config {
 			HistoryRetentionMinutes: 10080,
 		},
 		Providers: []ProviderConfig{},
-		Nzblnk: NzblnkConfig{
-			UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-		},
 		Arrs: ArrsConfig{
 			Enabled:                        &scrapperEnabled, // Disabled by default
 			MaxWorkers:                     5,                // Default to 5 concurrent workers
@@ -1982,6 +1951,35 @@ func SaveToFile(config *Config, filename string) error {
 	return nil
 }
 
+func generateJWTSecret() (string, error) {
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", fmt.Errorf("failed to generate JWT secret: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(bytes), nil
+}
+
+func ensureJWTSecret(config *Config, filename string) error {
+	if config.Auth.JWTSecret != "" {
+		return nil
+	}
+
+	secret, err := generateJWTSecret()
+	if err != nil {
+		return err
+	}
+	config.Auth.JWTSecret = secret
+
+	if filename == "" {
+		return nil
+	}
+	if err := SaveToFile(config, filename); err != nil {
+		return fmt.Errorf("failed to persist generated JWT secret: %w", err)
+	}
+	slog.Info("Generated and persisted authentication secret", "path", filename)
+	return nil
+}
+
 // LoadConfig loads configuration from file and merges with defaults
 func LoadConfig(configFile string) (*Config, error) {
 	config := DefaultConfig()
@@ -2077,6 +2075,10 @@ func LoadConfig(configFile string) (*Config, error) {
 		}
 		config.Server.Port = port
 		slog.Info("Using PORT from environment variable", "port", port)
+	}
+
+	if err := ensureJWTSecret(config, targetConfigFile); err != nil {
+		return nil, err
 	}
 
 	// Validate configuration

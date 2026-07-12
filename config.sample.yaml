@@ -67,8 +67,6 @@ players:
 import:
   max_processor_workers: 2
   max_unpack_workers: 2
-  import_strategy: 'strm'
-  import_dir: '/config/imports'
 
 segment_cache:
   enabled: true

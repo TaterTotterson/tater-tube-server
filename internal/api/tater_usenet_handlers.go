@@ -1366,7 +1366,7 @@ func taterFetchURL(ctx context.Context, cfg *config.Config, rawURL string) ([]by
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "Tater Tube Server/1.0")
-	client := httpclient.NewForExternal(cfg.Network, httpclient.LongTimeout)
+	client := httpclient.NewForExternal(httpclient.LongTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

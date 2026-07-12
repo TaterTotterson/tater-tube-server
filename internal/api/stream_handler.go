@@ -269,6 +269,7 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 
 			streamObj := h.streamTracker.GetStream(streamID)
 			if streamObj != nil {
+				h.setStreamMediaInfoFromPath(ctx, streamID, path, 0)
 				// Wrap the file with monitoring
 				monitoredFile := &MonitoredFile{
 					file:          file,
@@ -440,7 +441,8 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	videoCodec, _ := transcodeVideoSettings(accel, transcodeCfg.HardwareDevice, profile)
 	effectiveAccel := effectiveTranscodeHardwareAccel(videoCodec)
 	hardwareDevice := effectiveTranscodeHardwareDevice(effectiveAccel, transcodeCfg.HardwareDevice)
-	h.markTranscodedStream(w, file, profileID, profile.Name, effectiveAccel, hardwareDevice, videoCodec)
+	durationSeconds := h.probeMediaDuration(ctx, path)
+	h.markTranscodedStream(w, file, profileID, profile.Name, effectiveAccel, hardwareDevice, videoCodec, startSeconds, durationSeconds)
 
 	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
 	if inputPath == "" {
@@ -485,7 +487,77 @@ func parseTranscodeStartSeconds(value string) float64 {
 	return start
 }
 
-func (h *StreamHandler) markTranscodedStream(w http.ResponseWriter, file afero.File, profileID, profileName, hardwareAccel, hardwareDevice, videoCodec string) {
+func (h *StreamHandler) probeMediaDuration(ctx context.Context, path string) float64 {
+	if strings.TrimSpace(path) == "" {
+		return 0
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return 0
+	}
+	ffmpegPath := "ffmpeg"
+	if h.configGetter != nil {
+		if cfg := h.configGetter(); cfg != nil {
+			ffmpegPath = effectiveFFmpegPath(cfg.Transcoding.FFmpegPath)
+		}
+	}
+	return probeMediaDurationSeconds(ctx, ffmpegPath, path)
+}
+
+func (h *StreamHandler) setStreamMediaInfoFromPath(ctx context.Context, streamID, path string, playbackStart float64) {
+	if h.streamTracker == nil || streamID == "" {
+		return
+	}
+	durationSeconds := h.probeMediaDuration(ctx, path)
+	if durationSeconds <= 0 && playbackStart <= 0 {
+		return
+	}
+	h.streamTracker.SetMediaInfo(streamID, durationSeconds, playbackStart)
+}
+
+func probeMediaDurationSeconds(parent context.Context, ffmpegPath, path string) float64 {
+	ffprobePath := effectiveFFprobePath(ffmpegPath)
+	if ffprobePath == "" {
+		return 0
+	}
+	ctx, cancel := context.WithTimeout(parent, 4*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, ffprobePath,
+		"-v", "error",
+		"-show_entries", "format=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		path,
+	).Output()
+	if err != nil || ctx.Err() != nil {
+		return 0
+	}
+	duration, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	if err != nil || duration <= 0 {
+		return 0
+	}
+	return duration
+}
+
+func effectiveFFprobePath(ffmpegPath string) string {
+	ffmpegPath = strings.TrimSpace(ffmpegPath)
+	if ffmpegPath != "" && ffmpegPath != "ffmpeg" {
+		dir := filepath.Dir(ffmpegPath)
+		base := filepath.Base(ffmpegPath)
+		candidateBase := strings.Replace(base, "ffmpeg", "ffprobe", 1)
+		if candidateBase != base {
+			candidate := filepath.Join(dir, candidateBase)
+			if _, err := exec.LookPath(candidate); err == nil {
+				return candidate
+			}
+		}
+	}
+	if path, err := exec.LookPath("ffprobe"); err == nil {
+		return path
+	}
+	return ""
+}
+
+func (h *StreamHandler) markTranscodedStream(w http.ResponseWriter, file afero.File, profileID, profileName, hardwareAccel, hardwareDevice, videoCodec string, playbackStartSeconds, durationSeconds float64) {
 	if h.streamTracker == nil {
 		return
 	}
@@ -509,6 +581,9 @@ func (h *StreamHandler) markTranscodedStream(w http.ResponseWriter, file afero.F
 		videoCodec,
 		hardwareAccel != "" && hardwareAccel != "none",
 	)
+	if durationSeconds > 0 || playbackStartSeconds > 0 {
+		h.streamTracker.SetMediaInfo(streamID, durationSeconds, playbackStartSeconds)
+	}
 }
 
 func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, inputPath string, startSeconds float64) []string {

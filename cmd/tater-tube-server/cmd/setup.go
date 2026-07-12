@@ -185,19 +185,18 @@ func setupRepositories(ctx context.Context, db *database.DB) *repositorySet {
 }
 
 // setupAuthService creates and initializes the authentication service.
-// When loginRequired is true, JWT_SECRET must be set or an error is returned.
 func setupAuthService(ctx context.Context, cfg *config.Config, userRepo *database.UserRepository, loginRequired bool) (*auth.Service, error) {
 	if !loginRequired {
 		slog.InfoContext(ctx, "Authentication disabled")
 		return nil, nil
 	}
 
-	authConfig, err := auth.LoadConfigFromEnv()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load auth configuration: %w", err)
+	if cfg.Auth.JWTSecret == "" {
+		return nil, fmt.Errorf("authentication secret is missing from config")
 	}
 
-	// Override with values from config file
+	authConfig := auth.DefaultConfig()
+	authConfig.JWTSecret = cfg.Auth.JWTSecret
 	authConfig.Host = cfg.Server.Host
 	authConfig.Port = cfg.Server.Port
 

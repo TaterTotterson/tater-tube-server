@@ -16,13 +16,20 @@ export function ImportConfigSection({
 	isReadOnly = false,
 	isUpdating = false,
 }: ImportConfigSectionProps) {
-	const [formData, setFormData] = useState<ImportConfig>(config.import);
+	const normalizeImportConfig = (data: ImportConfig): ImportConfig => ({
+		...data,
+		import_strategy: "NONE",
+		import_dir: null,
+		watch_dir: null,
+	});
+
+	const [formData, setFormData] = useState<ImportConfig>(normalizeImportConfig(config.import));
 	const [hasChanges, setHasChanges] = useState(false);
 	const [extensionInput, setExtensionInput] = useState("");
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
-		setFormData(config.import);
+		setFormData(normalizeImportConfig(config.import));
 		setHasChanges(false);
 	}, [config.import]);
 
@@ -30,14 +37,14 @@ export function ImportConfigSection({
 		field: keyof ImportConfig,
 		value: number | boolean | string | string[],
 	) => {
-		const newData = { ...formData, [field]: value };
+		const newData = normalizeImportConfig({ ...formData, [field]: value });
 		setFormData(newData);
-		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.import));
+		setHasChanges(JSON.stringify(newData) !== JSON.stringify(normalizeImportConfig(config.import)));
 	};
 
 	const handleSave = async () => {
 		if (onUpdate && hasChanges) {
-			await onUpdate("import", formData);
+			await onUpdate("import", normalizeImportConfig(formData));
 			setHasChanges(false);
 		}
 	};
@@ -305,109 +312,6 @@ export function ImportConfigSection({
 								</span>
 							</div>
 						</label>
-					</div>
-				</div>
-
-				{/* Strategy Configuration */}
-				<div className="min-w-0 space-y-8 overflow-hidden rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-					<div className="flex items-center gap-2">
-						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-							Library Strategy
-						</h4>
-						<div className="h-px flex-1 bg-base-300/50" />
-					</div>
-
-					<div className="grid min-w-0 grid-cols-1 gap-8 md:grid-cols-2">
-						<fieldset className="fieldset min-w-0">
-							<legend className="fieldset-legend font-semibold">Strategy Type</legend>
-							<select
-								className="select select-bordered w-full min-w-0 max-w-full bg-base-100"
-								value={formData.import_strategy}
-								disabled={isReadOnly}
-								onChange={(e) => handleInputChange("import_strategy", e.target.value)}
-							>
-								<option value="NONE">None (Virtual Only)</option>
-								<option value="SYMLINK">Physical Symlinks</option>
-								<option value="STRM">STRM URL Files</option>
-							</select>
-							<p className="label mt-2 min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs leading-relaxed">
-								{formData.import_strategy === "NONE" &&
-									"Files are kept in streamer metadata and served through direct stream URLs."}
-								{formData.import_strategy === "SYMLINK" &&
-									"Creates real .mkv/.mp4 files in a target folder that point to Tater Tube Server."}
-								{formData.import_strategy === "STRM" &&
-									"Generates small .strm text files containing streaming URLs."}
-							</p>
-						</fieldset>
-
-						{formData.import_strategy !== "NONE" && (
-							<fieldset className="fieldset slide-in-from-right-2 min-w-0 animate-in">
-								<legend className="fieldset-legend font-semibold">
-									{formData.import_strategy === "SYMLINK" ? "Symlink Root" : "STRM Output Root"}
-								</legend>
-								<input
-									type="text"
-									className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
-									value={formData.import_dir || ""}
-									readOnly={isReadOnly}
-									placeholder="/path/to/media"
-									onChange={(e) => handleInputChange("import_dir", e.target.value)}
-								/>
-								<p className="label mt-2 min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
-									Absolute path for strategy output.
-								</p>
-							</fieldset>
-						)}
-					</div>
-
-					<div className="divider text-base-content/70" />
-
-					<div className="space-y-6">
-						<div>
-							<h5 className="font-bold text-sm">NZB Watch Directory</h5>
-							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-								Monitor a specific folder for new NZB files and import them automatically.
-							</p>
-						</div>
-
-						<div className="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-2">
-							<fieldset className="fieldset min-w-0">
-								<legend className="fieldset-legend font-semibold">Watch Directory Path</legend>
-								<input
-									type="text"
-									className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
-									value={formData.watch_dir || ""}
-									readOnly={isReadOnly}
-									placeholder="/path/to/watch"
-									onChange={(e) => handleInputChange("watch_dir", e.target.value)}
-								/>
-								<p className="label mt-2 min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
-									Absolute path to monitor.
-								</p>
-							</fieldset>
-
-							<fieldset className="fieldset min-w-0">
-								<legend className="fieldset-legend font-semibold">
-									Polling Interval (Seconds)
-								</legend>
-								<input
-									type="number"
-									className="input input-bordered w-full min-w-0 max-w-full bg-base-100 font-mono text-sm"
-									value={formData.watch_interval_seconds || 10}
-									readOnly={isReadOnly}
-									min={1}
-									onChange={(e) =>
-										handleInputChange(
-											"watch_interval_seconds",
-											Number.parseInt(e.target.value, 10) || 10,
-										)
-									}
-								/>
-								<p className="label mt-2 min-w-0 max-w-full whitespace-normal break-words text-base-content/70 text-xs">
-									How often to check for new files.
-								</p>
-							</fieldset>
-						</div>
 					</div>
 				</div>
 

@@ -193,6 +193,42 @@ func (r *UserRepository) GetUserByUsername(ctx context.Context, username string)
 	return &user, nil
 }
 
+// GetDirectUsers retrieves direct-auth users for password-only appliance login.
+func (r *UserRepository) GetDirectUsers(ctx context.Context) ([]*User, error) {
+	query := `
+		SELECT id, user_id, email, name, avatar_url, provider, provider_id,
+		       password_hash, api_key, is_admin, created_at, updated_at, last_login
+		FROM users
+		WHERE provider = 'direct'
+		ORDER BY is_admin DESC, created_at
+	`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query direct users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []*User
+	for rows.Next() {
+		var user User
+		if err := rows.Scan(
+			&user.ID, &user.UserID, &user.Email, &user.Name, &user.AvatarURL,
+			&user.Provider, &user.ProviderID, &user.PasswordHash, &user.APIKey, &user.IsAdmin,
+			&user.CreatedAt, &user.UpdatedAt, &user.LastLogin,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan direct user: %w", err)
+		}
+		users = append(users, &user)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating direct users: %w", err)
+	}
+
+	return users, nil
+}
+
 // UpdatePassword updates a user's password hash
 func (r *UserRepository) UpdatePassword(ctx context.Context, userID string, passwordHash string) error {
 	query := `
