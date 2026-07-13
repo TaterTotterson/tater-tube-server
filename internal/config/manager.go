@@ -51,6 +51,7 @@ type Config struct {
 	Stremio         StremioConfig      `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
 	Newznab         NewznabConfig      `yaml:"newznab" mapstructure:"newznab" json:"newznab"`
 	LocalMedia      LocalMediaConfig   `yaml:"local_media" mapstructure:"local_media" json:"local_media"`
+	TubeTV          TubeTVConfig       `yaml:"tube_tv" mapstructure:"tube_tv" json:"tube_tv"`
 	Players         PlayersConfig      `yaml:"players" mapstructure:"players" json:"players"`
 	Fuse            FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"-"`
 	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
@@ -170,6 +171,33 @@ type LocalMediaCategory struct {
 	LibraryType string   `yaml:"library_type" mapstructure:"library_type" json:"library_type"`
 	Paths       []string `yaml:"paths" mapstructure:"paths" json:"paths"`
 	Enabled     *bool    `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+}
+
+// TubeTVConfig stores server-side The Tube TV Mode settings.
+type TubeTVConfig struct {
+	AutoChannels         *bool                 `yaml:"auto_channels" mapstructure:"auto_channels" json:"auto_channels"`
+	CommercialsEnabled   *bool                 `yaml:"commercials_enabled" mapstructure:"commercials_enabled" json:"commercials_enabled"`
+	MidrollCommercials   *bool                 `yaml:"midroll_commercials" mapstructure:"midroll_commercials" json:"midroll_commercials"`
+	CommercialCategories []string              `yaml:"commercial_categories" mapstructure:"commercial_categories" json:"commercial_categories"`
+	CommercialsPath      string                `yaml:"commercials_path" mapstructure:"commercials_path" json:"commercials_path"`
+	CustomChannels       []TubeTVCustomChannel `yaml:"custom_channels" mapstructure:"custom_channels" json:"custom_channels"`
+}
+
+// TubeTVCustomChannel stores a user-created The Tube TV channel.
+type TubeTVCustomChannel struct {
+	ID                 string               `yaml:"id" mapstructure:"id" json:"id"`
+	Title              string               `yaml:"title" mapstructure:"title" json:"title"`
+	CommercialCategory string               `yaml:"commercial_category,omitempty" mapstructure:"commercial_category" json:"commercial_category,omitempty"`
+	Sources            []TubeTVCustomSource `yaml:"sources" mapstructure:"sources" json:"sources"`
+}
+
+// TubeTVCustomSource points at one server-local media row/folder.
+type TubeTVCustomSource struct {
+	CategoryID  string `yaml:"category_id" mapstructure:"category_id" json:"category_id"`
+	SourceIndex int    `yaml:"source_index" mapstructure:"source_index" json:"source_index"`
+	Path        string `yaml:"path" mapstructure:"path" json:"path"`
+	Title       string `yaml:"title,omitempty" mapstructure:"title" json:"title,omitempty"`
+	MediaType   string `yaml:"media_type,omitempty" mapstructure:"media_type" json:"media_type,omitempty"`
 }
 
 // PlayersConfig stores Tater Tube players paired to this server.
@@ -842,6 +870,71 @@ func (c *Config) Validate() error {
 	if c.LocalMedia.Enabled == nil {
 		enabled := false
 		c.LocalMedia.Enabled = &enabled
+	}
+	if c.TubeTV.AutoChannels == nil {
+		enabled := true
+		c.TubeTV.AutoChannels = &enabled
+	}
+	if c.TubeTV.CommercialsEnabled == nil {
+		enabled := true
+		c.TubeTV.CommercialsEnabled = &enabled
+	}
+	if c.TubeTV.MidrollCommercials == nil {
+		enabled := false
+		c.TubeTV.MidrollCommercials = &enabled
+	}
+	if strings.TrimSpace(c.TubeTV.CommercialsPath) == "" {
+		c.TubeTV.CommercialsPath = filepath.Join(c.Metadata.RootPath, "tube-tv-commercials")
+	}
+	if !filepath.IsAbs(c.TubeTV.CommercialsPath) {
+		return fmt.Errorf("tube_tv commercials_path must be absolute: %s", c.TubeTV.CommercialsPath)
+	}
+	c.TubeTV.CommercialsPath = filepath.Clean(c.TubeTV.CommercialsPath)
+	cleanCommercialCategories := make([]string, 0, len(c.TubeTV.CommercialCategories))
+	seenCommercialCategories := make(map[string]bool, len(c.TubeTV.CommercialCategories))
+	for _, rawCategory := range c.TubeTV.CommercialCategories {
+		category := sanitizeLocalMediaID(rawCategory)
+		if category == "" || seenCommercialCategories[category] {
+			continue
+		}
+		seenCommercialCategories[category] = true
+		cleanCommercialCategories = append(cleanCommercialCategories, category)
+	}
+	c.TubeTV.CommercialCategories = cleanCommercialCategories
+	seenTubeTVChannels := make(map[string]bool, len(c.TubeTV.CustomChannels))
+	for i := range c.TubeTV.CustomChannels {
+		channel := &c.TubeTV.CustomChannels[i]
+		channel.Title = strings.TrimSpace(channel.Title)
+		if channel.Title == "" {
+			return fmt.Errorf("tube_tv custom channel title is required")
+		}
+		if channel.ID = sanitizeLocalMediaID(channel.ID); channel.ID == "" {
+			channel.ID = sanitizeLocalMediaID(channel.Title)
+		}
+		if channel.ID == "" {
+			return fmt.Errorf("tube_tv custom channel id is required")
+		}
+		if seenTubeTVChannels[channel.ID] {
+			return fmt.Errorf("tube_tv custom channel id %q is duplicated", channel.ID)
+		}
+		seenTubeTVChannels[channel.ID] = true
+		channel.CommercialCategory = sanitizeLocalMediaID(channel.CommercialCategory)
+		cleanSources := make([]TubeTVCustomSource, 0, len(channel.Sources))
+		for _, source := range channel.Sources {
+			source.CategoryID = sanitizeLocalMediaID(strings.TrimPrefix(strings.TrimSpace(source.CategoryID), "local:"))
+			source.Path = filepath.ToSlash(filepath.Clean("/" + strings.TrimSpace(source.Path)))
+			source.Path = strings.TrimPrefix(source.Path, "/")
+			source.Title = strings.TrimSpace(source.Title)
+			source.MediaType = strings.ToLower(strings.TrimSpace(source.MediaType))
+			if source.CategoryID == "" {
+				continue
+			}
+			if source.SourceIndex < 0 {
+				source.SourceIndex = -1
+			}
+			cleanSources = append(cleanSources, source)
+		}
+		channel.Sources = cleanSources
 	}
 	seenLocalMediaIDs := make(map[string]bool, len(c.LocalMedia.Categories))
 	for i := range c.LocalMedia.Categories {
@@ -1627,6 +1720,9 @@ func DefaultConfig(configDir ...string) *Config {
 	transcodingEnabled := false     // Direct play by default; FFmpeg transcode is opt-in
 	newznabEnabled := false         // Player-facing Stream catalog disabled by default
 	localMediaEnabled := false      // Server-local media catalog disabled by default
+	tubeTVAutoChannels := true      // The Tube TV Mode auto-generates channels by default
+	tubeTVCommercials := true       // Commercial breaks enabled when commercials exist
+	tubeTVMidroll := false          // Mid-roll breaks opt-in by default
 	prowlarrEnabled := false        // Prowlarr integration disabled by default
 	watchIntervalSeconds := 10      // Default watch interval
 	failedItemRetentionHours := 24  // Default: auto-remove failed items after 24 hours
@@ -1695,6 +1791,14 @@ func DefaultConfig(configDir ...string) *Config {
 		LocalMedia: LocalMediaConfig{
 			Enabled:    &localMediaEnabled,
 			Categories: []LocalMediaCategory{},
+		},
+		TubeTV: TubeTVConfig{
+			AutoChannels:         &tubeTVAutoChannels,
+			CommercialsEnabled:   &tubeTVCommercials,
+			MidrollCommercials:   &tubeTVMidroll,
+			CommercialCategories: []string{},
+			CommercialsPath:      filepath.Join(metadataPath, "tube-tv-commercials"),
+			CustomChannels:       []TubeTVCustomChannel{},
 		},
 		Players: PlayersConfig{
 			Paired:       []PlayerConfig{},

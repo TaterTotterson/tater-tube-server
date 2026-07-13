@@ -18,6 +18,7 @@ export interface ConfigResponse {
 	stremio: StremioConfig;
 	newznab: NewznabConfig;
 	local_media: LocalMediaConfig;
+	tube_tv: TubeTVConfig;
 	players: TaterPlayersConfig;
 	providers: ProviderConfig[];
 	api_key?: string;
@@ -275,6 +276,7 @@ export interface ConfigUpdateRequest {
 	stremio?: Partial<StremioConfig>;
 	newznab?: Partial<NewznabConfig>;
 	local_media?: Partial<LocalMediaConfig>;
+	tube_tv?: Partial<TubeTVConfig>;
 	providers?: ProviderUpdateRequest[];
 	profiler_enabled?: boolean;
 }
@@ -411,6 +413,7 @@ export type ConfigSection =
 	| "stremio"
 	| "newznab"
 	| "local_media"
+	| "tube_tv"
 	| "players"
 	| "system";
 
@@ -524,6 +527,54 @@ export interface LocalMediaCategory {
 export interface LocalMediaConfig {
 	enabled: boolean;
 	categories: LocalMediaCategory[];
+}
+
+export interface TubeTVCustomSource {
+	category_id: string;
+	source_index: number;
+	path: string;
+	title?: string;
+	media_type?: string;
+}
+
+export interface TubeTVCustomChannel {
+	id: string;
+	title: string;
+	commercial_category?: string;
+	sources: TubeTVCustomSource[];
+}
+
+export interface TubeTVConfig {
+	auto_channels: boolean;
+	commercials_enabled: boolean;
+	midroll_commercials: boolean;
+	commercial_categories: string[];
+	commercials_path: string;
+	custom_channels: TubeTVCustomChannel[];
+}
+
+export interface TubeTVCommercialVideo {
+	title: string;
+	categoryId: string;
+	category: string;
+	name: string;
+	url?: string;
+	kind: string;
+	local: boolean;
+	duration: number;
+	fullDuration: number;
+}
+
+export interface TubeTVCommercialCategory {
+	id: string;
+	title: string;
+	count: number;
+	videos: TubeTVCommercialVideo[];
+}
+
+export interface TubeTVCommercialLibrary {
+	root: string;
+	categories: TubeTVCommercialCategory[];
 }
 
 export interface TaterPlayer {
@@ -699,6 +750,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		title: "Local Media",
 		description: "Expose server-local folders as The Tube categories.",
 		icon: "Folder",
+		canEdit: true,
+	},
+	tube_tv: {
+		title: "Tube TV Mode",
+		description: "Server-side The Tube channels, custom lineups, and commercial breaks.",
+		icon: "Tv",
 		canEdit: true,
 	},
 	players: {

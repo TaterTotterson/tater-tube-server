@@ -241,6 +241,21 @@ func (s *Server) handleTaterUsenetItems(c *fiber.Ctx) error {
 		}
 		return RespondSuccess(c, fiber.Map{"title": title, "items": items})
 	}
+	if strings.HasPrefix(categoryID, "local-discover:") {
+		if !taterLocalMediaEnabled(cfg) {
+			return RespondServiceUnavailable(c, "Local media is not configured", "")
+		}
+		items, err := taterLocalDiscoverItems(cfg, resolveBaseURL(c, ""), playerToken, categoryID)
+		if err != nil {
+			return RespondValidationError(c, "Failed to load local discovery", err.Error())
+		}
+		items = taterAttachLocalPlayStates(cfg, items)
+		title := strings.TrimSpace(c.Query("title"))
+		if title == "" {
+			title = "Local Discover"
+		}
+		return RespondSuccess(c, fiber.Map{"title": title, "items": items})
+	}
 
 	if !taterNewznabEnabled(cfg) {
 		return RespondServiceUnavailable(c, "Newznab Stream catalog is not configured", "")
@@ -593,6 +608,18 @@ func taterLocalRootRow(cfg *config.Config) taterUsenetCategory {
 		Group:     "Local",
 		FullTitle: "Local / Continue Watching",
 	}}
+	if discoverRows := taterLocalDiscoverRows(cfg); len(discoverRows) > 0 {
+		children = append(children, taterUsenetCategory{
+			Type:      "localDiscoverRoot",
+			Title:     "Discover",
+			Detail:    "LOCAL",
+			Group:     "Local",
+			FullTitle: "Local / Discover",
+			IsGroup:   true,
+			Count:     len(discoverRows),
+			Children:  discoverRows,
+		})
+	}
 	for _, cat := range cfg.LocalMedia.Categories {
 		if cat.Enabled != nil && !*cat.Enabled {
 			continue
@@ -645,6 +672,446 @@ func taterLocalMediaItems(cfg *config.Config, baseURL, playerToken, categoryID s
 	default:
 		return taterLocalMovieItems(cfg, cat, paths, baseURL, playerToken)
 	}
+}
+
+type taterLocalDiscoverDefinition struct {
+	ID     string
+	Title  string
+	Detail string
+}
+
+type taterLocalDiscoverGenre struct {
+	ID       string
+	Title    string
+	Keywords []string
+}
+
+type taterLocalNFO struct {
+	Title     string   `xml:"title"`
+	Plot      string   `xml:"plot"`
+	Outline   string   `xml:"outline"`
+	Year      string   `xml:"year"`
+	Premiered string   `xml:"premiered"`
+	Genres    []string `xml:"genre"`
+}
+
+func taterLocalDiscoverDefinitions() []taterLocalDiscoverDefinition {
+	rows := []taterLocalDiscoverDefinition{
+		{ID: "local-discover:recent", Title: "Recently Added", Detail: "LOCAL"},
+		{ID: "local-discover:movies", Title: "Movies", Detail: "LOCAL"},
+		{ID: "local-discover:series", Title: "Series", Detail: "LOCAL"},
+	}
+	for _, genre := range taterLocalDiscoverGenres() {
+		rows = append(rows, taterLocalDiscoverDefinition{
+			ID:     "local-discover:genre:" + genre.ID,
+			Title:  genre.Title,
+			Detail: "GENRE",
+		})
+	}
+	for _, decade := range []int{1930, 1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020} {
+		rows = append(rows, taterLocalDiscoverDefinition{
+			ID:     fmt.Sprintf("local-discover:decade:%d", decade),
+			Title:  fmt.Sprintf("%ds", decade),
+			Detail: "DECADE",
+		})
+	}
+	return rows
+}
+
+func taterLocalDiscoverGenres() []taterLocalDiscoverGenre {
+	return []taterLocalDiscoverGenre{
+		{ID: "animation", Title: "Animation & Cartoons", Keywords: []string{"animation", "animated", "cartoon", "cartoons", "looney", "tom and jerry", "disney", "pixar"}},
+		{ID: "action", Title: "Action", Keywords: []string{"action", "mission", "martial", "kung fu", "explosion", "commando", "rampage"}},
+		{ID: "comedy", Title: "Comedy", Keywords: []string{"comedy", "stand up", "standup", "funny", "sitcom"}},
+		{ID: "horror", Title: "Horror", Keywords: []string{"horror", "haunting", "ghost", "zombie", "vampire", "frankenstein", "dracula", "scream", "slasher", "terror", "evil dead", "halloween"}},
+		{ID: "scifi", Title: "Sci-Fi", Keywords: []string{"sci fi", "sci-fi", "scifi", "science fiction", "space", "alien", "star trek", "star wars"}},
+		{ID: "crime", Title: "Crime", Keywords: []string{"crime", "detective", "murder", "mafia", "gangster", "police"}},
+		{ID: "thriller", Title: "Thriller", Keywords: []string{"thriller", "suspense", "mystery"}},
+		{ID: "documentary", Title: "Documentary", Keywords: []string{"documentary", "docu", "history", "nature"}},
+		{ID: "family", Title: "Family", Keywords: []string{"family", "kids", "children", "holiday special"}},
+		{ID: "fantasy", Title: "Fantasy", Keywords: []string{"fantasy", "magic", "dragon", "wizard"}},
+		{ID: "holiday", Title: "Holiday", Keywords: []string{"christmas", "xmas", "halloween", "thanksgiving", "holiday"}},
+		{ID: "drama", Title: "Drama", Keywords: []string{"drama"}},
+	}
+}
+
+func taterLocalDiscoverRows(cfg *config.Config) []taterUsenetCategory {
+	items, err := taterLocalDiscoverLibraryItems(cfg, "", "")
+	if err != nil || len(items) == 0 {
+		return []taterUsenetCategory{}
+	}
+	rows := []taterUsenetCategory{}
+	for _, def := range taterLocalDiscoverDefinitions() {
+		count := len(taterFilterLocalDiscoverItems(items, def.ID))
+		if count == 0 {
+			continue
+		}
+		rows = append(rows, taterUsenetCategory{
+			ID:        def.ID,
+			Type:      "localDiscover",
+			Title:     def.Title,
+			Detail:    def.Detail,
+			Group:     "Local",
+			FullTitle: "Local / Discover / " + def.Title,
+			Count:     count,
+		})
+	}
+	return rows
+}
+
+func taterLocalDiscoverItems(cfg *config.Config, baseURL, playerToken, discoverID string) ([]taterUsenetItem, error) {
+	items, err := taterLocalDiscoverLibraryItems(cfg, baseURL, playerToken)
+	if err != nil {
+		return nil, err
+	}
+	rows := taterFilterLocalDiscoverItems(items, discoverID)
+	if len(rows) > 200 {
+		rows = rows[:200]
+	}
+	return rows, nil
+}
+
+func taterLocalDiscoverLibraryItems(cfg *config.Config, baseURL, playerToken string) ([]taterUsenetItem, error) {
+	if !taterLocalMediaEnabled(cfg) {
+		return []taterUsenetItem{}, nil
+	}
+	rows := []taterUsenetItem{}
+	for _, cat := range cfg.LocalMedia.Categories {
+		if cat.Enabled != nil && !*cat.Enabled {
+			continue
+		}
+		id := strings.TrimSpace(cat.ID)
+		if id == "" || strings.ToLower(strings.TrimSpace(cat.LibraryType)) == "music" {
+			continue
+		}
+		paths := taterLocalMediaCategoryPaths(cat)
+		if len(paths) == 0 {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(cat.LibraryType)) {
+		case "tv":
+			shows, err := taterLocalTVItems(cfg, cat, paths, baseURL, playerToken, -1, "")
+			if err != nil {
+				continue
+			}
+			for i := range shows {
+				taterApplyLocalDiscoverInfo(&shows[i], paths)
+			}
+			rows = append(rows, shows...)
+		case "folders":
+			videos, err := taterLocalDiscoverVideoItems(cfg, cat, paths, baseURL, playerToken, "video")
+			if err != nil {
+				continue
+			}
+			rows = append(rows, videos...)
+		default:
+			movies, err := taterLocalDiscoverVideoItems(cfg, cat, paths, baseURL, playerToken, "movie")
+			if err != nil {
+				continue
+			}
+			rows = append(rows, movies...)
+		}
+	}
+	return rows, nil
+}
+
+func taterLocalDiscoverVideoItems(cfg *config.Config, cat config.LocalMediaCategory, paths []string, baseURL, playerToken, mediaType string) ([]taterUsenetItem, error) {
+	items := []taterUsenetItem{}
+	for sourceIndex, root := range paths {
+		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			name := entry.Name()
+			if strings.HasPrefix(name, ".") {
+				if entry.IsDir() && path != root {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if entry.IsDir() || !isMediaExtension(filepath.Ext(name)) {
+				return nil
+			}
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return nil
+			}
+			rel = filepath.ToSlash(rel)
+			titleSource := movieTitleSource(root, rel)
+			title, year := cleanMovieTitleAndYear(titleSource)
+			if title == "" {
+				title = cleanMovieTitleFromName(strings.TrimSuffix(name, filepath.Ext(name)))
+			}
+			item := taterUsenetItem{
+				Title:       title,
+				Type:        "localFile",
+				MediaType:   mediaType,
+				CategoryID:  "local:" + cat.ID,
+				SourceIndex: sourceIndex,
+				Path:        rel,
+				StreamURL:   taterLocalStreamURL(baseURL, cat.ID, sourceIndex, rel, playerToken),
+				SeekMode:    taterLocalSeekMode(cfg, filepath.Ext(name)),
+				Date:        year,
+				SizeText:    localMovieDetail(year),
+			}
+			if info, statErr := entry.Info(); statErr == nil && info != nil {
+				item.SizeBytes = info.Size()
+				item.Index = int(info.ModTime().Unix())
+			}
+			if mediaType == "video" {
+				item.SizeText = "VIDEO"
+			}
+			taterApplyLocalMetadata(path, &item)
+			if item.Category == "" {
+				if genre := taterLocalDiscoverGenreLabel(item); genre != "" {
+					item.Category = genre
+				}
+			}
+			items = append(items, item)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return strings.ToLower(items[i].Title) < strings.ToLower(items[j].Title)
+	})
+	return items, nil
+}
+
+func taterApplyLocalMetadata(mediaPath string, item *taterUsenetItem) {
+	if item == nil {
+		return
+	}
+	dir := mediaPath
+	base := ""
+	if filepath.Ext(mediaPath) != "" {
+		dir = filepath.Dir(mediaPath)
+		base = strings.TrimSuffix(filepath.Base(mediaPath), filepath.Ext(mediaPath))
+	}
+	meta, ok := taterReadLocalMetadata(dir, base)
+	if !ok {
+		return
+	}
+	if title := cleanTaterText(meta.Title); title != "" {
+		item.Title = title
+	}
+	if description := cleanTaterText(meta.Plot); description != "" {
+		item.Description = description
+	} else if description := cleanTaterText(meta.Outline); description != "" {
+		item.Description = description
+	}
+	if year := taterLocalMetadataYear(meta); year != "" {
+		item.Date = year
+		if item.MediaType == "movie" {
+			item.SizeText = localMovieDetail(year)
+		}
+	}
+	if genres := taterLocalMetadataGenres(meta); len(genres) > 0 {
+		item.Category = strings.Join(genres, ", ")
+	}
+}
+
+func taterReadLocalMetadata(dir, base string) (taterLocalNFO, bool) {
+	candidates := []string{}
+	if base != "" {
+		candidates = append(candidates, filepath.Join(dir, base+".nfo"))
+	}
+	candidates = append(candidates,
+		filepath.Join(dir, "movie.nfo"),
+		filepath.Join(dir, "tvshow.nfo"),
+		filepath.Join(dir, "series.nfo"),
+	)
+	if matches, err := filepath.Glob(filepath.Join(dir, "*.nfo")); err == nil {
+		sort.Strings(matches)
+		candidates = append(candidates, matches...)
+	}
+
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		if seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		data, err := os.ReadFile(candidate)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		var meta taterLocalNFO
+		if err := xml.Unmarshal(data, &meta); err != nil {
+			continue
+		}
+		if cleanTaterText(meta.Title) == "" &&
+			cleanTaterText(meta.Plot) == "" &&
+			cleanTaterText(meta.Outline) == "" &&
+			taterLocalMetadataYear(meta) == "" &&
+			len(taterLocalMetadataGenres(meta)) == 0 {
+			continue
+		}
+		return meta, true
+	}
+	return taterLocalNFO{}, false
+}
+
+func taterLocalMetadataYear(meta taterLocalNFO) string {
+	for _, value := range []string{meta.Year, meta.Premiered} {
+		if match := localYearPattern.FindStringSubmatch(value); len(match) > 1 {
+			return match[1]
+		}
+	}
+	return ""
+}
+
+func taterLocalMetadataGenres(meta taterLocalNFO) []string {
+	genres := []string{}
+	seen := map[string]bool{}
+	for _, raw := range meta.Genres {
+		for _, part := range strings.Split(raw, "/") {
+			for _, value := range strings.Split(part, ",") {
+				genre := cleanTaterText(value)
+				key := strings.ToLower(genre)
+				if genre == "" || seen[key] {
+					continue
+				}
+				seen[key] = true
+				genres = append(genres, genre)
+			}
+		}
+	}
+	return genres
+}
+
+func taterApplyLocalDiscoverInfo(item *taterUsenetItem, roots []string) {
+	if item == nil {
+		return
+	}
+	if item.SourceIndex >= 0 && item.SourceIndex < len(roots) && item.Path != "" {
+		absPath := filepath.Join(roots[item.SourceIndex], filepath.FromSlash(item.Path))
+		if info, err := os.Stat(absPath); err == nil && info != nil {
+			item.Index = int(info.ModTime().Unix())
+		}
+		taterApplyLocalMetadata(absPath, item)
+	}
+	year := taterLocalDiscoverYear(*item)
+	if item.Date == "" && year > 0 {
+		item.Date = strconv.Itoa(year)
+	}
+	if item.Category == "" {
+		if genre := taterLocalDiscoverGenreLabel(*item); genre != "" {
+			item.Category = genre
+		}
+	}
+}
+
+func taterFilterLocalDiscoverItems(items []taterUsenetItem, discoverID string) []taterUsenetItem {
+	key := strings.TrimPrefix(strings.TrimSpace(discoverID), "local-discover:")
+	rows := []taterUsenetItem{}
+	for _, item := range items {
+		if taterLocalDiscoverMatches(item, key) {
+			rows = append(rows, item)
+		}
+	}
+	taterSortLocalDiscoverItems(rows, key)
+	return rows
+}
+
+func taterLocalDiscoverMatches(item taterUsenetItem, key string) bool {
+	switch {
+	case key == "recent":
+		return item.Type == "localFile" || item.MediaType == "show"
+	case key == "movies":
+		return item.MediaType == "movie"
+	case key == "series":
+		return item.MediaType == "show"
+	case strings.HasPrefix(key, "genre:"):
+		return taterLocalDiscoverMatchesGenre(item, strings.TrimPrefix(key, "genre:"))
+	case strings.HasPrefix(key, "decade:"):
+		decade, err := strconv.Atoi(strings.TrimPrefix(key, "decade:"))
+		if err != nil {
+			return false
+		}
+		year := taterLocalDiscoverYear(item)
+		return year >= decade && year < decade+10
+	default:
+		return false
+	}
+}
+
+func taterSortLocalDiscoverItems(items []taterUsenetItem, key string) {
+	if key == "recent" {
+		sort.SliceStable(items, func(i, j int) bool {
+			if items[i].Index != items[j].Index {
+				return items[i].Index > items[j].Index
+			}
+			return strings.ToLower(items[i].Title) < strings.ToLower(items[j].Title)
+		})
+		return
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		leftYear := taterLocalDiscoverYear(items[i])
+		rightYear := taterLocalDiscoverYear(items[j])
+		if leftYear != rightYear && strings.HasPrefix(key, "decade:") {
+			return leftYear < rightYear
+		}
+		return strings.ToLower(items[i].Title) < strings.ToLower(items[j].Title)
+	})
+}
+
+func taterLocalDiscoverMatchesGenre(item taterUsenetItem, genreID string) bool {
+	for _, genre := range taterLocalDiscoverGenres() {
+		if genre.ID != genreID {
+			continue
+		}
+		text := taterLocalDiscoverText(item)
+		for _, keyword := range genre.Keywords {
+			if strings.Contains(text, taterLocalDiscoverNormalize(keyword)) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+func taterLocalDiscoverGenreLabel(item taterUsenetItem) string {
+	labels := []string{}
+	for _, genre := range taterLocalDiscoverGenres() {
+		if taterLocalDiscoverMatchesGenre(item, genre.ID) {
+			labels = append(labels, genre.Title)
+		}
+	}
+	return strings.Join(labels, ", ")
+}
+
+func taterLocalDiscoverText(item taterUsenetItem) string {
+	return taterLocalDiscoverNormalize(strings.Join([]string{
+		item.Title,
+		item.Path,
+		item.Category,
+		item.Description,
+	}, " "))
+}
+
+func taterLocalDiscoverNormalize(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "-", " ")
+	value = strings.ReplaceAll(value, "_", " ")
+	value = strings.ReplaceAll(value, ".", " ")
+	value = localSeparatorPattern.ReplaceAllString(value, " ")
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func taterLocalDiscoverYear(item taterUsenetItem) int {
+	for _, value := range []string{item.Date, item.Title, item.Path} {
+		if match := localYearPattern.FindStringSubmatch(value); len(match) > 1 {
+			year, _ := strconv.Atoi(match[1])
+			if year > 0 {
+				return year
+			}
+		}
+	}
+	return 0
 }
 
 func taterLocalFolderItems(cfg *config.Config, cat config.LocalMediaCategory, paths []string, baseURL, playerToken string, sourceIndex int, relPath string) ([]taterUsenetItem, error) {
