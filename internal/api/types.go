@@ -37,6 +37,7 @@ type ConfigAPIResponse struct {
 	Stremio         StremioAPIResponse    `json:"stremio"`
 	Newznab         NewznabAPIResponse    `json:"newznab"`
 	LocalMedia      LocalMediaAPIResponse `json:"local_media"`
+	TubeTV          config.TubeTVConfig   `json:"tube_tv"`
 	Players         taterPlayersResponse  `json:"players"`
 	APIKey          string                `json:"api_key,omitempty"` // User's API key for authentication
 	ProfilerEnabled bool                  `json:"profiler_enabled"`
@@ -315,6 +316,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		Stremio:         stremioResp,
 		Newznab:         newznabResp,
 		LocalMedia:      localMediaResp,
+		TubeTV:          cfg.TubeTV,
 		Players:         taterPlayersConfigResponse(cfg.Players, time.Now().UTC()),
 		APIKey:          apiKey,
 		ProfilerEnabled: cfg.ProfilerEnabled,

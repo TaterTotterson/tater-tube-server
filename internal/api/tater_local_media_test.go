@@ -285,6 +285,109 @@ func TestTaterLocalMusicItemsBrowseAlbumsAndTracks(t *testing.T) {
 	}
 }
 
+func TestTaterLocalDiscoverRowsAndItems(t *testing.T) {
+	movieRoot := t.TempDir()
+	tvRoot := t.TempDir()
+	horrorDir := filepath.Join(movieRoot, "Halloween.Horror.1978")
+	metadataDir := filepath.Join(movieRoot, "Plain.File")
+	cartoonDir := filepath.Join(tvRoot, "Looney.Tunes.1941", "Season 01")
+	if err := os.MkdirAll(horrorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(metadataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cartoonDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(horrorDir, "Halloween.Horror.1978.mkv"), []byte("media"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(movieRoot, "Funny.Comedy.1999.mp4"), []byte("media"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(metadataDir, "Plain.File.mkv"), []byte("media"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(metadataDir, "movie.nfo"), []byte(`<movie><title>Metadata Action</title><year>1988</year><genre>Action</genre><plot>From sidecar metadata.</plot></movie>`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cartoonDir, "Looney.Tunes.S1941E01.mkv"), []byte("media"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{LocalMedia: config.LocalMediaConfig{
+		Enabled: boolPtr(true),
+		Categories: []config.LocalMediaCategory{
+			{
+				ID:          "movies",
+				Name:        "Movies",
+				LibraryType: "movies",
+				Paths:       []string{movieRoot},
+				Enabled:     boolPtr(true),
+			},
+			{
+				ID:          "tv",
+				Name:        "TV",
+				LibraryType: "tv",
+				Paths:       []string{tvRoot},
+				Enabled:     boolPtr(true),
+			},
+		},
+	}}
+
+	rows := taterLocalDiscoverRows(cfg)
+	for _, title := range []string{"Movies", "Series", "Action", "Horror", "Comedy", "Animation & Cartoons", "1940s", "1970s", "1980s", "1990s"} {
+		if !hasTaterLocalDiscoverTitle(rows, title) {
+			t.Fatalf("expected discover row %q in %#v", title, rows)
+		}
+	}
+
+	horrorItems, err := taterLocalDiscoverItems(cfg, "http://server", "token", "local-discover:genre:horror")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(horrorItems) != 1 || horrorItems[0].Title != "Halloween Horror" || horrorItems[0].MediaType != "movie" {
+		t.Fatalf("unexpected horror discover items: %#v", horrorItems)
+	}
+	if !strings.Contains(horrorItems[0].StreamURL, "/api/tater/local/stream") || !strings.Contains(horrorItems[0].StreamURL, "player_token=token") {
+		t.Fatalf("local discovery item should include a playable stream URL: %s", horrorItems[0].StreamURL)
+	}
+
+	seriesItems, err := taterLocalDiscoverItems(cfg, "http://server", "token", "local-discover:series")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seriesItems) != 1 || seriesItems[0].Title != "Looney Tunes" || seriesItems[0].MediaType != "show" {
+		t.Fatalf("unexpected series discover items: %#v", seriesItems)
+	}
+
+	decadeItems, err := taterLocalDiscoverItems(cfg, "http://server", "token", "local-discover:decade:1970")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decadeItems) != 1 || decadeItems[0].Title != "Halloween Horror" {
+		t.Fatalf("unexpected 1970s discover items: %#v", decadeItems)
+	}
+
+	actionItems, err := taterLocalDiscoverItems(cfg, "http://server", "token", "local-discover:genre:action")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(actionItems) != 1 || actionItems[0].Title != "Metadata Action" || actionItems[0].Date != "1988" || actionItems[0].Category != "Action" {
+		t.Fatalf("expected NFO metadata to feed action discovery, got %#v", actionItems)
+	}
+}
+
+func hasTaterLocalDiscoverTitle(rows []taterUsenetCategory, title string) bool {
+	for _, row := range rows {
+		if row.Title == title && row.Type == "localDiscover" {
+			return true
+		}
+	}
+	return false
+}
+
 func TestTaterNzbWatchAgainRecordsLatestAndTrims(t *testing.T) {
 	cfg := config.DefaultConfig(t.TempDir())
 	cfg.Newznab.WatchAgainLimit = 2
@@ -374,4 +477,75 @@ func TestAttachTaterDurationAddsPlayerFields(t *testing.T) {
 
 func boolPtr(value bool) *bool {
 	return &value
+}
+
+func TestTaterBuildTVLineupUsesServerLocalMediaAndCommercials(t *testing.T) {
+	configDir := t.TempDir()
+	mediaRoot := filepath.Join(configDir, "media")
+	episodeDir := filepath.Join(mediaRoot, "Looney.Tunes", "Season 1936")
+	if err := os.MkdirAll(episodeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(episodeDir, "Looney.Tunes.S1936E01.mkv"), []byte("episode"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	commercialRoot := filepath.Join(configDir, "commercials")
+	commercialDir := filepath.Join(commercialRoot, "cartoon-network")
+	if err := os.MkdirAll(commercialDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(commercialDir, "Snack.Ad.mp4"), []byte("ad"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig(configDir)
+	cfg.LocalMedia.Enabled = boolPtr(true)
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID:          "tv",
+		Name:        "TV",
+		LibraryType: "tv",
+		Paths:       []string{mediaRoot},
+		Enabled:     boolPtr(true),
+	}}
+	cfg.TubeTV.AutoChannels = boolPtr(false)
+	cfg.TubeTV.CommercialsEnabled = boolPtr(true)
+	cfg.TubeTV.CommercialsPath = commercialRoot
+	cfg.TubeTV.CustomChannels = []config.TubeTVCustomChannel{{
+		ID:                 "cartoons",
+		Title:              "Cartoons",
+		CommercialCategory: "cartoon-network",
+		Sources: []config.TubeTVCustomSource{{
+			CategoryID:  "tv",
+			SourceIndex: -1,
+		}},
+	}}
+
+	channels, err := taterBuildTVLineup(cfg, "http://server", "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(channels) != 1 {
+		t.Fatalf("expected one custom channel, got %d: %#v", len(channels), channels)
+	}
+	if channels[0].Number != "02" || channels[0].Title != "Cartoons" {
+		t.Fatalf("unexpected channel metadata: %#v", channels[0])
+	}
+	if !strings.Contains(channels[0].StreamURL, "/api/tater/tv/channel/02/stream") {
+		t.Fatalf("expected channel stream URL, got %q", channels[0].StreamURL)
+	}
+
+	hasEpisode := false
+	hasCommercial := false
+	for _, row := range channels[0].Schedule {
+		switch row["kind"] {
+		case "episode":
+			hasEpisode = strings.Contains(row["streamUrl"].(string), "/api/tater/local/stream")
+		case "commercial":
+			hasCommercial = strings.Contains(row["url"].(string), "/api/tater/tv/commercials/file")
+		}
+	}
+	if !hasEpisode || !hasCommercial {
+		t.Fatalf("expected episode and commercial schedule entries: %#v", channels[0].Schedule)
+	}
 }

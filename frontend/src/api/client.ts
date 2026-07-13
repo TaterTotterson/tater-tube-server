@@ -39,6 +39,7 @@ import type {
 	ProviderUpdateRequest,
 	TaterPairingCodeCreateResponse,
 	TaterPlayersConfig,
+	TubeTVCommercialLibrary,
 	TranscodingHardwareDetection,
 } from "../types/config";
 import type { UpdateChannel, UpdateStatusResponse } from "../types/update";
@@ -758,6 +759,43 @@ class APIClient {
 		return this.request<ConfigResponse>(`/config/${section}`, {
 			method: "PATCH",
 			body: JSON.stringify(config),
+		});
+	}
+
+	async getTubeTVCommercials() {
+		return this.request<TubeTVCommercialLibrary>("/tube-tv/commercials");
+	}
+
+	async createTubeTVCommercialCategory(name: string) {
+		return this.request<TubeTVCommercialLibrary>("/tube-tv/commercials/category", {
+			method: "POST",
+			body: JSON.stringify({ name }),
+		});
+	}
+
+	async uploadTubeTVCommercials(category: string, files: FileList | File[]) {
+		const formData = new FormData();
+		formData.set("category", category);
+		Array.from(files).forEach((file) => formData.append("files", file));
+
+		return this.request<TubeTVCommercialLibrary>("/tube-tv/commercials/upload", {
+			method: "POST",
+			headers: {},
+			body: formData,
+		});
+	}
+
+	async deleteTubeTVCommercialFile(category: string, name: string) {
+		const params = new URLSearchParams({ category, name });
+		return this.request<TubeTVCommercialLibrary>(`/tube-tv/commercials/file?${params}`, {
+			method: "DELETE",
+		});
+	}
+
+	async deleteTubeTVCommercialCategory(category: string) {
+		const params = new URLSearchParams({ category });
+		return this.request<TubeTVCommercialLibrary>(`/tube-tv/commercials/category?${params}`, {
+			method: "DELETE",
 		});
 	}
 

@@ -203,6 +203,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/tater/music/libraries", s.handleTaterMusicLibraries)
 	api.Get("/tater/music/albums", s.handleTaterMusicAlbums)
 	api.Get("/tater/music/tracks", s.handleTaterMusicTracks)
+	api.Get("/tater/tv/lineup", s.handleTaterTVLineup)
+	api.Get("/tater/tv/commercials/file", s.handleTaterTVCommercialFile)
 
 	cfg := s.configManager.GetConfig()
 
@@ -243,6 +245,11 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/tater/players/codes", s.handleTaterCreatePairingCode)
 	api.Patch("/tater/players/:id", s.handleTaterUpdatePlayer)
 	api.Delete("/tater/players/:id", s.handleTaterRevokePlayer)
+	api.Get("/tube-tv/commercials", s.handleTubeTVCommercialLibrary)
+	api.Post("/tube-tv/commercials/category", s.handleTubeTVCreateCommercialCategory)
+	api.Post("/tube-tv/commercials/upload", s.handleTubeTVUploadCommercials)
+	api.Delete("/tube-tv/commercials/file", s.handleTubeTVDeleteCommercialFile)
+	api.Delete("/tube-tv/commercials/category", s.handleTubeTVDeleteCommercialCategory)
 
 	// Queue endpoints
 	api.Get("/queue", s.handleListQueue)

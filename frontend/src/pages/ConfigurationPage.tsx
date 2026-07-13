@@ -31,6 +31,7 @@ import { StreamingConfigSection } from "../components/config/StreamingConfigSect
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
 import { TaterPlayersConfigSection } from "../components/config/TaterPlayersConfigSection";
 import { TranscodingConfigSection } from "../components/config/TranscodingConfigSection";
+import { TubeTVConfigSection } from "../components/config/TubeTVConfigSection";
 import { ImportConfigSection } from "../components/config/WorkersConfigSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
@@ -57,6 +58,7 @@ import type {
 	SABnzbdConfig,
 	SegmentCacheConfig,
 	StreamingConfig,
+	TubeTVConfig,
 	TranscodingConfig,
 } from "../types/config";
 import { CONFIG_SECTIONS } from "../types/config";
@@ -85,7 +87,7 @@ const getIconComponent = (iconName: string) => {
 const SECTION_GROUPS = [
 	{
 		title: "Streamer",
-		sections: ["players", "local_media", "newznab", "providers"],
+		sections: ["players", "tube_tv", "local_media", "newznab", "providers"],
 	},
 	{
 		title: "Processing",
@@ -255,6 +257,11 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "local_media",
 					config: { local_media: data as unknown as LocalMediaConfig },
+				});
+			} else if (section === "tube_tv") {
+				await updateConfigSection.mutateAsync({
+					section: "tube_tv",
+					config: { tube_tv: data as unknown as TubeTVConfig },
 				});
 			} else if (section === "providers") {
 				await updateConfigSection.mutateAsync({
@@ -525,6 +532,13 @@ export function ConfigurationPage() {
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
+								{activeSection === "tube_tv" && (
+									<TubeTVConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
 								{activeSection === "players" && (
 									<TaterPlayersConfigSection
 										config={config}
@@ -545,6 +559,8 @@ export function ConfigurationPage() {
 									"arrs",
 									"health",
 									"newznab",
+									"local_media",
+									"tube_tv",
 									"players",
 								].includes(activeSection) && (
 									<ComingSoonSection
