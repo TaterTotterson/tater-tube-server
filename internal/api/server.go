@@ -624,7 +624,7 @@ func (s *Server) handleKillStream(c *fiber.Ctx) error {
 // handleGetStreamHistory handles GET /api/files/streams/history
 //
 //	@Summary		Get stream history
-//	@Description	Returns a history of recently completed NZB file streams.
+//	@Description	Returns active and recently completed local/NZB file streams.
 //	@Tags			Files
 //	@Produce		json
 //	@Success		200	{object}	APIResponse
