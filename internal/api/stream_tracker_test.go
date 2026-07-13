@@ -91,3 +91,44 @@ func TestStreamTracker_GetAll_IncludesTranscodingInfo(t *testing.T) {
 	assert.Equal(t, "/dev/dri/renderD128", streams[0].HardwareDevice)
 	assert.Equal(t, "h264_vaapi", streams[0].VideoCodec)
 }
+
+func TestStreamTracker_GetHistory_IncludesActivePlayback(t *testing.T) {
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+
+	stream := tracker.AddStream("/media/local/movie.mkv", "Local", "Tater Tube CRT", "10.0.0.2", "TaterTube", 2048)
+	tracker.SetPlayerID(stream.ID, "player-crt")
+	tracker.UpdateProgress(stream.ID, 512)
+
+	history := tracker.GetHistory()
+
+	assert.Len(t, history, 1)
+	assert.Equal(t, "/media/local/movie.mkv", history[0].FilePath)
+	assert.Equal(t, "Local", history[0].Source)
+	assert.Equal(t, "Tater Tube CRT", history[0].UserName)
+	assert.Equal(t, "player-crt", history[0].PlayerID)
+	assert.Equal(t, int64(512), history[0].BytesSent)
+}
+
+func TestStreamTracker_GetHistory_KeepsCompletedPlayback(t *testing.T) {
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+
+	stream := tracker.AddStream("/stream/nzb/show.mkv", "API", "Tater Tube Gamer Room", "10.0.0.3", "TaterTube", 4096)
+	tracker.SetPlayerID(stream.ID, "player-game")
+	tracker.SetMediaInfo(stream.ID, 120, 0)
+	tracker.UpdateProgress(stream.ID, 2048)
+	tracker.UpdateCurrentOffset(stream.ID, 2048)
+	tracker.Remove(stream.ID)
+
+	history := tracker.GetHistory()
+
+	assert.Len(t, history, 1)
+	assert.Equal(t, "/stream/nzb/show.mkv", history[0].FilePath)
+	assert.Equal(t, "Completed", history[0].Status)
+	assert.Equal(t, "player-game", history[0].PlayerID)
+	assert.Equal(t, int64(2048), history[0].BytesSent)
+	assert.Equal(t, int64(2048), history[0].CurrentOffset)
+	assert.NotZero(t, history[0].LastActivity)
+	assert.Greater(t, history[0].PlaybackPosition, 0.0)
+}

@@ -412,9 +412,17 @@ func (t *StreamTracker) Remove(id string) {
 		finalStream := *internal.ActiveStream
 		finalStream.BytesSent = atomic.LoadInt64(&internal.BytesSent)
 		finalStream.BytesDownloaded = atomic.LoadInt64(&internal.BytesDownloaded)
+		finalStream.CurrentOffset = atomic.LoadInt64(&internal.CurrentOffset)
+		finalStream.BufferedOffset = atomic.LoadInt64(&internal.BufferedOffset)
 		finalStream.BytesPerSecond = 0
 		finalStream.DownloadSpeed = 0
 		finalStream.Status = "Completed"
+		if !internal.lastReadAt.IsZero() {
+			finalStream.LastActivity = internal.lastReadAt
+		} else {
+			finalStream.LastActivity = time.Now()
+		}
+		updatePlaybackPosition(&finalStream, finalStream.LastActivity)
 
 		t.mu.Lock()
 		// Keep last 50 streams in history
@@ -442,17 +450,23 @@ func (t *StreamTracker) KillStream(id string) bool {
 	return false
 }
 
-// GetHistory returns the recent stream history
+// GetHistory returns active and recently completed stream history.
 func (t *StreamTracker) GetHistory() []nzbfilesystem.ActiveStream {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	streams := t.GetAll()
 
-	// Return a copy of history, reversed (newest first)
-	res := make([]nzbfilesystem.ActiveStream, len(t.history))
-	for i, s := range t.history {
-		res[len(t.history)-1-i] = s
+	t.mu.Lock()
+	for _, s := range t.history {
+		streams = append(streams, s)
 	}
-	return res
+	t.mu.Unlock()
+
+	sort.SliceStable(streams, func(i, j int) bool {
+		return streamSortTime(streams[i]).After(streamSortTime(streams[j]))
+	})
+	if len(streams) > 50 {
+		streams = streams[:50]
+	}
+	return streams
 }
 
 func valueToInternal(val any) *streamInternal {
@@ -575,6 +589,13 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 	})
 
 	return streams
+}
+
+func streamSortTime(stream nzbfilesystem.ActiveStream) time.Time {
+	if !stream.LastActivity.IsZero() {
+		return stream.LastActivity
+	}
+	return stream.StartedAt
 }
 
 func updatePlaybackPosition(stream *nzbfilesystem.ActiveStream, lastReadAt time.Time) {
