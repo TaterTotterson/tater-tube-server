@@ -118,8 +118,8 @@ func (s *Server) handleTaterTVLineup(c *fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
-	if !taterLocalMediaEnabled(cfg) {
-		return RespondServiceUnavailable(c, "Local media is not configured", "")
+	if !taterTubeTVEnabled(cfg) {
+		return RespondServiceUnavailable(c, "Tube TV is not enabled", "")
 	}
 	baseURL := resolveBaseURL(c, "")
 	guide, err := taterTVEnsureGuide(cfg, baseURL, time.Now())
@@ -131,6 +131,7 @@ func (s *Server) handleTaterTVLineup(c *fiber.Ctx) error {
 		"startedAt":    guide.StartedAt,
 		"plannedUntil": guide.PlannedUntil,
 		"settings": fiber.Map{
+			"enabled":               cfg.TubeTV.Enabled == nil || *cfg.TubeTV.Enabled,
 			"auto_channels":         cfg.TubeTV.AutoChannels == nil || *cfg.TubeTV.AutoChannels,
 			"commercials_enabled":   cfg.TubeTV.CommercialsEnabled == nil || *cfg.TubeTV.CommercialsEnabled,
 			"midroll_commercials":   cfg.TubeTV.MidrollCommercials != nil && *cfg.TubeTV.MidrollCommercials,
@@ -144,7 +145,7 @@ func (s *Server) handleTubeTVGuide(c *fiber.Ctx) error {
 	if cfg == nil {
 		return RespondInternalError(c, "Configuration not available", "CONFIG_NOT_FOUND")
 	}
-	if !taterLocalMediaEnabled(cfg) {
+	if !taterTubeTVEnabled(cfg) {
 		return RespondSuccess(c, tubeTVGuideResponse{
 			Channels:             []taterTVChannel{},
 			HorizonHours:         int(taterTVGuideHorizon / time.Hour),

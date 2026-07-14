@@ -423,7 +423,7 @@ func (s *Server) runTVGuidePlanner(ctx context.Context) {
 			return
 		}
 		cfg := s.configManager.GetConfig()
-		if cfg == nil || !taterLocalMediaEnabled(cfg) {
+		if cfg == nil || !taterTubeTVEnabled(cfg) {
 			return
 		}
 		if _, err := taterTVEnsureGuide(cfg, "", time.Now()); err != nil {

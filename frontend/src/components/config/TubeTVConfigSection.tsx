@@ -36,6 +36,7 @@ interface TubeTVConfigSectionProps {
 }
 
 const DEFAULT_TUBE_TV: TubeTVConfig = {
+	enabled: true,
 	auto_channels: true,
 	commercials_enabled: true,
 	midroll_commercials: false,
@@ -81,6 +82,7 @@ function cleanDisplay(value: string) {
 function normalize(config: ConfigResponse): TubeTVConfig {
 	const source = config.tube_tv ?? DEFAULT_TUBE_TV;
 	return {
+		enabled: source.enabled ?? true,
 		auto_channels: source.auto_channels ?? true,
 		commercials_enabled: source.commercials_enabled ?? true,
 		midroll_commercials: source.midroll_commercials ?? false,
@@ -443,12 +445,12 @@ export function TubeTVConfigSection({
 						<div className="mb-3 flex items-center gap-2">
 							<Clapperboard className="h-4 w-4 text-base-content/60" />
 							<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-								Server TV Mode
+								Tube TV
 							</h4>
 						</div>
 						<p className="max-w-2xl text-base-content/60 text-sm leading-relaxed">
-							Build The Tube TV Mode on the server so every paired Tater Tube player receives the
-							same channels, commercials, and custom lineups.
+							Build Tube TV on the server so every paired Tater Tube player receives the same
+							channels, commercials, and custom lineups.
 						</p>
 					</div>
 					<button
@@ -466,7 +468,17 @@ export function TubeTVConfigSection({
 					</button>
 				</div>
 
-				<div className="grid gap-4 md:grid-cols-3">
+				<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+					<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
+						<span className="font-bold text-sm">Enabled</span>
+						<input
+							type="checkbox"
+							className="toggle toggle-primary"
+							checked={formData.enabled}
+							disabled={isReadOnly}
+							onChange={(event) => update({ ...formData, enabled: event.target.checked })}
+						/>
+					</label>
 					<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
 						<span className="font-bold text-sm">Auto Channels</span>
 						<input
@@ -528,7 +540,7 @@ export function TubeTVConfigSection({
 							</h4>
 						</div>
 						<p className="text-base-content/60 text-sm">
-							Upload local commercial videos and pick which categories TV Mode can use.
+							Upload local commercial videos and pick which categories Tube TV can use.
 						</p>
 					</div>
 					<button
@@ -656,7 +668,7 @@ export function TubeTVConfigSection({
 							</h4>
 						</div>
 						<p className="text-base-content/60 text-sm">
-							Custom channels appear before auto-generated channels in The Tube TV Mode.
+							Custom channels appear before auto-generated channels in Tube TV.
 						</p>
 					</div>
 					<button type="button" className="btn btn-outline btn-sm" onClick={addChannel}>

@@ -163,7 +163,7 @@ func (s *Server) handleTaterUsenetStatus(c *fiber.Ctx) error {
 		return nil
 	}
 	return RespondSuccess(c, fiber.Map{
-		"configured": taterNewznabEnabled(cfg) || taterLocalMediaEnabled(cfg),
+		"configured": taterTubeTVEnabled(cfg) || taterNewznabEnabled(cfg) || taterLocalMediaEnabled(cfg),
 	})
 }
 
@@ -172,11 +172,19 @@ func (s *Server) handleTaterUsenetCatalog(c *fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
-	if !taterNewznabEnabled(cfg) && !taterLocalMediaEnabled(cfg) {
+	if !taterTubeTVEnabled(cfg) && !taterNewznabEnabled(cfg) && !taterLocalMediaEnabled(cfg) {
 		return RespondServiceUnavailable(c, "Stream catalog is not configured", "")
 	}
 
 	categories := []taterUsenetCategory{}
+	if taterTubeTVEnabled(cfg) {
+		categories = append(categories, taterUsenetCategory{
+			ID:     "tube-tv",
+			Title:  "Tube TV",
+			Detail: "SERVER",
+			Type:   "tubeTv",
+		})
+	}
 	if taterNewznabEnabled(cfg) {
 		body, err := taterFetchNewznab(c.Context(), cfg, map[string]string{"t": "caps"})
 		if err != nil {
@@ -598,6 +606,12 @@ func taterLocalMediaEnabled(cfg *config.Config) bool {
 		}
 	}
 	return false
+}
+
+func taterTubeTVEnabled(cfg *config.Config) bool {
+	return cfg != nil &&
+		(cfg.TubeTV.Enabled == nil || *cfg.TubeTV.Enabled) &&
+		taterLocalMediaEnabled(cfg)
 }
 
 func taterLocalRootRow(cfg *config.Config) taterUsenetCategory {
