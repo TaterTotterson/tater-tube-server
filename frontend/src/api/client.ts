@@ -41,6 +41,7 @@ import type {
 	TaterPlayersConfig,
 	TranscodingHardwareDetection,
 	TubeTVCommercialLibrary,
+	TubeTVGuideResponse,
 	TubeTVLocalLibraryResponse,
 } from "../types/config";
 import type { UpdateChannel, UpdateStatusResponse } from "../types/update";
@@ -780,6 +781,16 @@ class APIClient {
 		return this.request<TubeTVLocalLibraryResponse>(
 			`/tube-tv/local-library${query ? `?${query}` : ""}`,
 		);
+	}
+
+	async getTubeTVGuide() {
+		return this.request<TubeTVGuideResponse>("/tube-tv/guide");
+	}
+
+	async rebuildTubeTVGuide() {
+		return this.request<TubeTVGuideResponse>("/tube-tv/guide/rebuild", {
+			method: "POST",
+		});
 	}
 
 	async createTubeTVCommercialCategory(name: string) {

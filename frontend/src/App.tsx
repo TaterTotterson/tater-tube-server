@@ -14,6 +14,7 @@ import { ConfigurationPage } from "./pages/ConfigurationPage";
 import { Dashboard } from "./pages/Dashboard";
 import { LogsPage } from "./pages/LogsPage";
 import { QueuePage } from "./pages/QueuePage";
+import { TVGuidePage } from "./pages/TVGuidePage";
 
 function App() {
 	return (
@@ -35,6 +36,7 @@ function App() {
 											}
 										>
 											<Route index element={<Dashboard />} />
+											<Route path="tv-guide" element={<TVGuidePage />} />
 											<Route path="queue" element={<QueuePage />} />
 											<Route path="logs" element={<LogsPage />} />
 

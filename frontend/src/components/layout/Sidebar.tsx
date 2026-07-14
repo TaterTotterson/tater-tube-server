@@ -1,5 +1,5 @@
-import { Activity, Cpu, Database, Home, ScrollText, Settings, Tv } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { Activity, Cpu, Database, Home, ScrollText, Settings, Tv } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { apiClient } from "../../api/client";
 import { useActiveStreams, useQueueStats } from "../../hooks/useApi";
@@ -10,6 +10,11 @@ const navigation = [
 		name: "Dashboard",
 		href: "/",
 		icon: Home,
+	},
+	{
+		name: "TV Guide",
+		href: "/tv-guide",
+		icon: Tv,
 	},
 	{
 		name: "Activity",

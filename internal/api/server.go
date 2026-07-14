@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"runtime"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/TaterTotterson/tater-tube-server/internal/arrs"
 	"github.com/TaterTotterson/tater-tube-server/internal/auth"
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"github.com/TaterTotterson/tater-tube-server/internal/database"
 	"github.com/TaterTotterson/tater-tube-server/internal/health"
 	"github.com/TaterTotterson/tater-tube-server/internal/importer"
@@ -70,11 +72,13 @@ type Server struct {
 
 	// stremioPlayGroup coalesces concurrent Stremio plays of the same title (download once).
 	stremioPlayGroup singleflight.Group
+
+	tvGuidePlannerCancel context.CancelFunc
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
 func NewServer(
-	config *Config,
+	apiConfig *Config,
 	queueRepo *database.Repository,
 	healthRepo *database.HealthRepository,
 	authService *auth.Service,
@@ -90,12 +94,12 @@ func NewServer(
 	streamTracker *StreamTracker,
 	cacheSource *segcache.Source,
 ) *Server {
-	if config == nil {
-		config = DefaultConfig()
+	if apiConfig == nil {
+		apiConfig = DefaultConfig()
 	}
 
 	server := &Server{
-		config:              config,
+		config:              apiConfig,
 		queueRepo:           queueRepo,
 		healthRepo:          healthRepo,
 		authService:         authService,
@@ -121,6 +125,17 @@ func NewServer(
 	if poolManager != nil && streamTracker != nil {
 		streamTracker.SetChangeNotifier(poolManager)
 		poolManager.SetStreamSource(streamTracker)
+	}
+
+	if configManager != nil {
+		configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
+			if taterTVGuideConfigChanged(oldConfig, newConfig) {
+				taterTVResetGuide()
+			}
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		server.tvGuidePlannerCancel = cancel
+		go server.runTVGuidePlanner(ctx)
 	}
 
 	return server
@@ -247,6 +262,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Delete("/tater/players/:id", s.handleTaterRevokePlayer)
 	api.Get("/tube-tv/commercials", s.handleTubeTVCommercialLibrary)
 	api.Get("/tube-tv/local-library", s.handleTubeTVLocalLibrary)
+	api.Get("/tube-tv/guide", s.handleTubeTVGuide)
+	api.Post("/tube-tv/guide/rebuild", s.handleTubeTVGuideRebuild)
 	api.Post("/tube-tv/commercials/category", s.handleTubeTVCreateCommercialCategory)
 	api.Post("/tube-tv/commercials/upload", s.handleTubeTVUploadCommercials)
 	api.Delete("/tube-tv/commercials/file", s.handleTubeTVDeleteCommercialFile)
@@ -392,8 +409,38 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 
 // Shutdown shuts down the API server and its managed resources
 func (s *Server) Shutdown(ctx context.Context) {
+	if s.tvGuidePlannerCancel != nil {
+		s.tvGuidePlannerCancel()
+	}
 	if s.speedtest != nil {
 		s.speedtest.shutdown()
+	}
+}
+
+func (s *Server) runTVGuidePlanner(ctx context.Context) {
+	build := func() {
+		if s.configManager == nil {
+			return
+		}
+		cfg := s.configManager.GetConfig()
+		if cfg == nil || !taterLocalMediaEnabled(cfg) {
+			return
+		}
+		if _, err := taterTVEnsureGuide(cfg, "", time.Now()); err != nil {
+			slog.WarnContext(ctx, "Failed to refresh Tube TV guide", "error", err)
+		}
+	}
+
+	build()
+	ticker := time.NewTicker(taterTVGuidePlannerInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			build()
+		}
 	}
 }
 
