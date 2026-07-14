@@ -79,6 +79,18 @@ function cleanDisplay(value: string) {
 		.replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function cleanChannelNumberInput(value: string) {
+	return value.replace(/\D+/g, "").slice(0, 2);
+}
+
+function formatChannelNumber(value: string) {
+	const digits = cleanChannelNumberInput(value);
+	if (digits === "") return "";
+	const number = Number.parseInt(digits, 10);
+	if (!Number.isFinite(number) || number < 2 || number > 99) return "";
+	return number.toString().padStart(2, "0");
+}
+
 function normalize(config: ConfigResponse): TubeTVConfig {
 	const source = config.tube_tv ?? DEFAULT_TUBE_TV;
 	return {
@@ -91,6 +103,7 @@ function normalize(config: ConfigResponse): TubeTVConfig {
 		custom_channels: (source.custom_channels ?? []).map((channel) => ({
 			id: channel.id || slug(channel.title || "channel"),
 			title: channel.title || "Custom Channel",
+			channel_number: formatChannelNumber(channel.channel_number || ""),
 			commercial_category: channel.commercial_category || "",
 			sources: (channel.sources ?? []).map((row) => ({
 				category_id: row.category_id || "",
@@ -243,6 +256,7 @@ export function TubeTVConfigSection({
 				{
 					id: `custom-${count}`,
 					title: `Custom ${count}`,
+					channel_number: "",
 					commercial_category: "",
 					sources: [],
 				},
@@ -668,7 +682,8 @@ export function TubeTVConfigSection({
 							</h4>
 						</div>
 						<p className="text-base-content/60 text-sm">
-							Custom channels appear before auto-generated channels in Tube TV.
+							Custom channels can reserve a VCR-style channel number. Auto channels fill the open
+							slots.
 						</p>
 					</div>
 					<button type="button" className="btn btn-outline btn-sm" onClick={addChannel}>
@@ -688,7 +703,28 @@ export function TubeTVConfigSection({
 							key={`tube-tv-channel-${channelIndex}`}
 							className="rounded-xl border border-base-300 bg-base-100/70 p-4"
 						>
-							<div className="grid gap-3 md:grid-cols-[1fr_1fr_14rem_auto] md:items-end">
+							<div className="grid gap-3 md:grid-cols-[7rem_1fr_1fr_14rem_auto] md:items-end">
+								<label className="form-control">
+									<span className="label-text font-bold text-base-content text-sm">Channel</span>
+									<input
+										type="text"
+										inputMode="numeric"
+										maxLength={2}
+										className="input input-bordered mt-2"
+										value={channel.channel_number || ""}
+										placeholder="Auto"
+										onChange={(event) =>
+											updateChannel(channelIndex, {
+												channel_number: cleanChannelNumberInput(event.target.value),
+											})
+										}
+										onBlur={() =>
+											updateChannel(channelIndex, {
+												channel_number: formatChannelNumber(channel.channel_number || ""),
+											})
+										}
+									/>
+								</label>
 								<label className="form-control">
 									<span className="label-text font-bold text-base-content text-sm">
 										Channel Name
