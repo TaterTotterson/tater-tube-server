@@ -600,6 +600,42 @@ export interface TubeTVLocalLibraryResponse {
 	rows: TubeTVLocalLibraryRow[];
 }
 
+export interface TubeTVGuideScheduleItem {
+	title?: string;
+	kind?: string;
+	type?: string;
+	mediaType?: string;
+	category?: string;
+	categoryId?: string;
+	path?: string;
+	start?: number;
+	end?: number;
+	duration?: number;
+	fullDuration?: number;
+	mediaOffset?: number;
+	durationKnown?: boolean;
+	forceAdvance?: boolean;
+	local?: boolean;
+}
+
+export interface TubeTVGuideChannel {
+	number: string;
+	title: string;
+	streamUrl?: string;
+	totalDuration: number;
+	schedule: TubeTVGuideScheduleItem[];
+}
+
+export interface TubeTVGuideResponse {
+	channels: TubeTVGuideChannel[];
+	startedAt?: string;
+	generatedAt?: string;
+	updatedAt?: string;
+	plannedUntil?: string;
+	horizonHours: number;
+	refillThresholdHours: number;
+}
+
 export interface TaterPlayer {
 	id: string;
 	name: string;

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -83,13 +84,34 @@ type tubeTVLocalLibraryResponse struct {
 	Rows        []tubeTVLocalLibraryRow    `json:"rows"`
 }
 
-type taterTVLineupCacheEntry struct {
-	Channels  []taterTVChannel
-	StartedAt time.Time
-	ExpiresAt time.Time
+type taterTVGuideCacheEntry struct {
+	Channels     []taterTVChannel `json:"channels"`
+	StartedAt    time.Time        `json:"startedAt"`
+	GeneratedAt  time.Time        `json:"generatedAt"`
+	UpdatedAt    time.Time        `json:"updatedAt"`
+	PlannedUntil time.Time        `json:"plannedUntil"`
 }
 
-var taterTVLineupCache sync.Map
+type tubeTVGuideResponse struct {
+	Channels             []taterTVChannel `json:"channels"`
+	StartedAt            time.Time        `json:"startedAt"`
+	GeneratedAt          time.Time        `json:"generatedAt"`
+	UpdatedAt            time.Time        `json:"updatedAt"`
+	PlannedUntil         time.Time        `json:"plannedUntil"`
+	HorizonHours         int              `json:"horizonHours"`
+	RefillThresholdHours int              `json:"refillThresholdHours"`
+}
+
+const (
+	taterTVGuideHorizon         = 12 * time.Hour
+	taterTVGuideRefillThreshold = 2 * time.Hour
+	taterTVGuidePlannerInterval = 5 * time.Minute
+)
+
+var (
+	taterTVGuideMu    sync.Mutex
+	taterTVGuideCache *taterTVGuideCacheEntry
+)
 
 func (s *Server) handleTaterTVLineup(c *fiber.Ctx) error {
 	cfg, playerToken, ok := s.taterAuthorizedConfig(c)
@@ -99,13 +121,15 @@ func (s *Server) handleTaterTVLineup(c *fiber.Ctx) error {
 	if !taterLocalMediaEnabled(cfg) {
 		return RespondServiceUnavailable(c, "Local media is not configured", "")
 	}
-	channels, err := taterBuildTVLineup(cfg, resolveBaseURL(c, ""), playerToken)
+	baseURL := resolveBaseURL(c, "")
+	guide, err := taterTVEnsureGuide(cfg, baseURL, time.Now())
 	if err != nil {
 		return RespondServiceUnavailable(c, "Failed to build TV lineup", err.Error())
 	}
-	taterTVStoreLineup(playerToken, channels)
 	return RespondSuccess(c, fiber.Map{
-		"channels": channels,
+		"channels":     taterTVPersonalizeChannels(guide.Channels, baseURL, playerToken),
+		"startedAt":    guide.StartedAt,
+		"plannedUntil": guide.PlannedUntil,
 		"settings": fiber.Map{
 			"auto_channels":         cfg.TubeTV.AutoChannels == nil || *cfg.TubeTV.AutoChannels,
 			"commercials_enabled":   cfg.TubeTV.CommercialsEnabled == nil || *cfg.TubeTV.CommercialsEnabled,
@@ -113,6 +137,30 @@ func (s *Server) handleTaterTVLineup(c *fiber.Ctx) error {
 			"commercial_categories": cfg.TubeTV.CommercialCategories,
 		},
 	})
+}
+
+func (s *Server) handleTubeTVGuide(c *fiber.Ctx) error {
+	cfg := s.configManager.GetConfig()
+	if cfg == nil {
+		return RespondInternalError(c, "Configuration not available", "CONFIG_NOT_FOUND")
+	}
+	if !taterLocalMediaEnabled(cfg) {
+		return RespondSuccess(c, tubeTVGuideResponse{
+			Channels:             []taterTVChannel{},
+			HorizonHours:         int(taterTVGuideHorizon / time.Hour),
+			RefillThresholdHours: int(taterTVGuideRefillThreshold / time.Hour),
+		})
+	}
+	guide, err := taterTVEnsureGuide(cfg, resolveBaseURL(c, ""), time.Now())
+	if err != nil {
+		return RespondServiceUnavailable(c, "Failed to build TV guide", err.Error())
+	}
+	return RespondSuccess(c, taterTVGuideResponse(guide, "", ""))
+}
+
+func (s *Server) handleTubeTVGuideRebuild(c *fiber.Ctx) error {
+	taterTVResetGuide()
+	return s.handleTubeTVGuide(c)
 }
 
 func (s *Server) handleTubeTVCommercialLibrary(c *fiber.Ctx) error {
@@ -213,6 +261,7 @@ func (s *Server) handleTubeTVCreateCommercialCategory(c *fiber.Ctx) error {
 	if err := os.MkdirAll(filepath.Join(taterTVCommercialRoot(cfg), name), 0755); err != nil {
 		return RespondInternalError(c, "Failed to create commercial category", err.Error())
 	}
+	taterTVResetGuide()
 	return s.handleTubeTVCommercialLibrary(c)
 }
 
@@ -258,6 +307,7 @@ func (s *Server) handleTubeTVUploadCommercials(c *fiber.Ctx) error {
 			return RespondInternalError(c, "Failed to finish commercial upload", closeErr.Error())
 		}
 	}
+	taterTVResetGuide()
 	return s.handleTubeTVCommercialLibrary(c)
 }
 
@@ -274,6 +324,7 @@ func (s *Server) handleTubeTVDeleteCommercialFile(c *fiber.Ctx) error {
 	if err := os.Remove(filepath.Join(taterTVCommercialRoot(cfg), category, name)); err != nil && !os.IsNotExist(err) {
 		return RespondInternalError(c, "Failed to delete commercial", err.Error())
 	}
+	taterTVResetGuide()
 	return s.handleTubeTVCommercialLibrary(c)
 }
 
@@ -289,6 +340,7 @@ func (s *Server) handleTubeTVDeleteCommercialCategory(c *fiber.Ctx) error {
 	if err := os.RemoveAll(filepath.Join(taterTVCommercialRoot(cfg), category)); err != nil {
 		return RespondInternalError(c, "Failed to delete commercial category", err.Error())
 	}
+	taterTVResetGuide()
 	return s.handleTubeTVCommercialLibrary(c)
 }
 
@@ -314,7 +366,49 @@ func (s *Server) handleTaterTVCommercialFile(c *fiber.Ctx) error {
 }
 
 func taterBuildTVLineup(cfg *config.Config, baseURL, playerToken string) ([]taterTVChannel, error) {
+	return taterBuildTVLineupUntil(cfg, baseURL, playerToken, taterTVGuideHorizon.Seconds(), nil)
+}
+
+func taterBuildTVLineupUntil(cfg *config.Config, baseURL, playerToken string, minDurationSeconds float64, existing []taterTVChannel) ([]taterTVChannel, error) {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	ordered, err := taterTVOrderedSources(cfg, baseURL, playerToken)
+	if err != nil {
+		return nil, err
+	}
+	if len(ordered) == 0 {
+		return []taterTVChannel{}, nil
+	}
+
+	commercials := taterTVCommercialCategories(cfg, baseURL, playerToken)
+	channels := []taterTVChannel{}
+	for index, source := range ordered {
+		number := fmt.Sprintf("%02d", len(channels)+2)
+		var schedule []map[string]any
+		total := 0.0
+		if index < len(existing) &&
+			strings.EqualFold(existing[index].Number, number) &&
+			strings.EqualFold(existing[index].Title, source.Title) {
+			schedule = append(schedule, existing[index].Schedule...)
+			total = existing[index].TotalDuration
+		}
+		added, nextTotal := taterTVBuildScheduleUntil(cfg, source, commercials, rng, total, minDurationSeconds)
+		schedule = append(schedule, added...)
+		total = nextTotal
+		if len(schedule) == 0 || total <= 0 {
+			continue
+		}
+		channels = append(channels, taterTVChannel{
+			Number:        number,
+			Title:         source.Title,
+			StreamURL:     taterTVChannelStreamURL(baseURL, number, playerToken),
+			Schedule:      schedule,
+			TotalDuration: total,
+		})
+	}
+	return channels, nil
+}
+
+func taterTVOrderedSources(cfg *config.Config, baseURL, playerToken string) ([]taterTVSource, error) {
 	sources := []taterTVSource{}
 	custom, err := taterTVCustomSources(cfg, baseURL, playerToken)
 	if err != nil {
@@ -329,7 +423,7 @@ func taterBuildTVLineup(cfg *config.Config, baseURL, playerToken string) ([]tate
 		sources = append(sources, auto...)
 	}
 	if len(sources) == 0 {
-		return []taterTVChannel{}, nil
+		return []taterTVSource{}, nil
 	}
 
 	ordered := []taterTVSource{}
@@ -339,24 +433,7 @@ func taterBuildTVLineup(cfg *config.Config, baseURL, playerToken string) ([]tate
 			ordered = append(ordered, taterTVThemedSources(source)...)
 		}
 	}
-
-	commercials := taterTVCommercialCategories(cfg, baseURL, playerToken)
-	channels := []taterTVChannel{}
-	for _, source := range ordered {
-		schedule, total := taterTVBuildSchedule(cfg, source, commercials, rng)
-		if len(schedule) == 0 || total <= 0 {
-			continue
-		}
-		number := fmt.Sprintf("%02d", len(channels)+2)
-		channels = append(channels, taterTVChannel{
-			Number:        number,
-			Title:         source.Title,
-			StreamURL:     taterTVChannelStreamURL(baseURL, number, playerToken),
-			Schedule:      schedule,
-			TotalDuration: total,
-		})
-	}
-	return channels, nil
+	return ordered, nil
 }
 
 func taterTVAutoSources(cfg *config.Config, baseURL, playerToken string) ([]taterTVSource, error) {
@@ -615,10 +692,32 @@ func taterTVThemedSources(source taterTVSource) []taterTVSource {
 }
 
 func taterTVBuildSchedule(cfg *config.Config, source taterTVSource, commercialCategories []taterTVCommercialCategory, rng *rand.Rand) ([]map[string]any, float64) {
+	return taterTVBuildSchedulePass(cfg, source, commercialCategories, rng, 0)
+}
+
+func taterTVBuildScheduleUntil(cfg *config.Config, source taterTVSource, commercialCategories []taterTVCommercialCategory, rng *rand.Rand, start, minEnd float64) ([]map[string]any, float64) {
+	schedule := []map[string]any{}
+	total := start
+	for total < minEnd {
+		before := total
+		var added []map[string]any
+		added, total = taterTVBuildSchedulePass(cfg, source, commercialCategories, rng, total)
+		schedule = append(schedule, added...)
+		if total <= before {
+			break
+		}
+	}
+	if len(schedule) == 0 && start <= 0 {
+		return taterTVBuildSchedulePass(cfg, source, commercialCategories, rng, 0)
+	}
+	return schedule, total
+}
+
+func taterTVBuildSchedulePass(cfg *config.Config, source taterTVSource, commercialCategories []taterTVCommercialCategory, rng *rand.Rand, start float64) ([]map[string]any, float64) {
 	commercials := taterTVCommercialPool(cfg, commercialCategories, source.CommercialCategory)
 	deck := []taterTVCommercial{}
 	schedule := []map[string]any{}
-	total := 0.0
+	total := start
 	if len(source.Groups) > 0 && len(source.Programs) == 0 {
 		total = taterTVAppendEpisodeSchedule(cfg, schedule, &schedule, total, source.Groups, commercials, &deck, rng)
 	} else if len(source.Groups) > 0 {
@@ -994,41 +1093,102 @@ func taterTVChannelStreamURL(baseURL, number, playerToken string) string {
 	return u.String()
 }
 
-func taterTVLineupCacheKey(playerToken string) string {
-	playerToken = strings.TrimSpace(playerToken)
-	if playerToken == "" {
-		return ""
+func taterTVEnsureGuide(cfg *config.Config, baseURL string, now time.Time) (taterTVGuideCacheEntry, error) {
+	taterTVGuideMu.Lock()
+	defer taterTVGuideMu.Unlock()
+
+	if now.IsZero() {
+		now = time.Now()
 	}
-	return hashTaterSecret(playerToken)
+	if taterTVGuideCache == nil || taterTVGuideCache.StartedAt.IsZero() || now.After(taterTVGuideCache.PlannedUntil.Add(-taterTVGuideRefillThreshold)) {
+		targetEndSeconds := taterTVGuideHorizon.Seconds()
+		var existing []taterTVChannel
+		startedAt := now.Truncate(time.Second)
+		generatedAt := now
+		if taterTVGuideCache != nil && !taterTVGuideCache.StartedAt.IsZero() {
+			startedAt = taterTVGuideCache.StartedAt
+			generatedAt = taterTVGuideCache.GeneratedAt
+			existing = taterTVGuideCache.Channels
+			elapsed := math.Max(0, now.Sub(startedAt).Seconds())
+			targetEndSeconds = elapsed + taterTVGuideHorizon.Seconds()
+		}
+		channels, err := taterBuildTVLineupUntil(cfg, baseURL, "", targetEndSeconds, existing)
+		if err != nil {
+			return taterTVGuideCacheEntry{}, err
+		}
+		plannedUntil := startedAt
+		if len(channels) > 0 {
+			minDuration := channels[0].TotalDuration
+			for _, channel := range channels[1:] {
+				if channel.TotalDuration < minDuration {
+					minDuration = channel.TotalDuration
+				}
+			}
+			plannedUntil = startedAt.Add(time.Duration(minDuration * float64(time.Second)))
+		}
+		taterTVGuideCache = &taterTVGuideCacheEntry{
+			Channels:     channels,
+			StartedAt:    startedAt,
+			GeneratedAt:  generatedAt,
+			UpdatedAt:    now,
+			PlannedUntil: plannedUntil,
+		}
+	}
+	return taterTVCloneGuide(*taterTVGuideCache), nil
 }
 
-func taterTVStoreLineup(playerToken string, channels []taterTVChannel) {
-	key := taterTVLineupCacheKey(playerToken)
-	if key == "" {
-		return
-	}
-	taterTVLineupCache.Store(key, taterTVLineupCacheEntry{
-		Channels:  channels,
-		StartedAt: time.Now(),
-		ExpiresAt: time.Now().Add(6 * time.Hour),
-	})
+func taterTVResetGuide() {
+	taterTVGuideMu.Lock()
+	defer taterTVGuideMu.Unlock()
+	taterTVGuideCache = nil
 }
 
-func taterTVCachedLineup(playerToken string) ([]taterTVChannel, time.Time, bool) {
-	key := taterTVLineupCacheKey(playerToken)
-	if key == "" {
-		return nil, time.Time{}, false
+func taterTVGuideResponse(entry taterTVGuideCacheEntry, baseURL, playerToken string) tubeTVGuideResponse {
+	return tubeTVGuideResponse{
+		Channels:             taterTVPersonalizeChannels(entry.Channels, baseURL, playerToken),
+		StartedAt:            entry.StartedAt,
+		GeneratedAt:          entry.GeneratedAt,
+		UpdatedAt:            entry.UpdatedAt,
+		PlannedUntil:         entry.PlannedUntil,
+		HorizonHours:         int(taterTVGuideHorizon / time.Hour),
+		RefillThresholdHours: int(taterTVGuideRefillThreshold / time.Hour),
 	}
-	value, ok := taterTVLineupCache.Load(key)
-	if !ok {
-		return nil, time.Time{}, false
+}
+
+func taterTVPersonalizeChannels(channels []taterTVChannel, baseURL, playerToken string) []taterTVChannel {
+	out := make([]taterTVChannel, 0, len(channels))
+	for _, channel := range channels {
+		next := channel
+		next.StreamURL = taterTVChannelStreamURL(baseURL, channel.Number, playerToken)
+		next.Schedule = cloneTaterTVSchedule(channel.Schedule)
+		out = append(out, next)
 	}
-	entry, ok := value.(taterTVLineupCacheEntry)
-	if !ok || time.Now().After(entry.ExpiresAt) {
-		taterTVLineupCache.Delete(key)
-		return nil, time.Time{}, false
+	return out
+}
+
+func taterTVCloneGuide(entry taterTVGuideCacheEntry) taterTVGuideCacheEntry {
+	entry.Channels = taterTVPersonalizeChannels(entry.Channels, "", "")
+	return entry
+}
+
+func cloneTaterTVSchedule(schedule []map[string]any) []map[string]any {
+	out := make([]map[string]any, 0, len(schedule))
+	for _, row := range schedule {
+		next := make(map[string]any, len(row))
+		for key, value := range row {
+			next[key] = value
+		}
+		out = append(out, next)
 	}
-	return entry.Channels, entry.StartedAt, true
+	return out
+}
+
+func taterTVGuideConfigChanged(oldConfig, newConfig *config.Config) bool {
+	if oldConfig == nil || newConfig == nil {
+		return true
+	}
+	return !reflect.DeepEqual(oldConfig.TubeTV, newConfig.TubeTV) ||
+		!reflect.DeepEqual(oldConfig.LocalMedia, newConfig.LocalMedia)
 }
 
 func taterTVMediaMap(item taterUsenetItem) map[string]any {

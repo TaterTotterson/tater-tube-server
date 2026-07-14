@@ -25,6 +25,11 @@ type TaterTVStreamHandler struct {
 	streamTracker *StreamTracker
 }
 
+const (
+	taterTVConcatRunWindow = 6 * time.Hour
+	taterTVMaxConcatItems  = 256
+)
+
 func NewTaterTVStreamHandler(configGetter config.ConfigGetter, streamTracker *StreamTracker) *TaterTVStreamHandler {
 	return &TaterTVStreamHandler{configGetter: configGetter, streamTracker: streamTracker}
 }
@@ -69,19 +74,15 @@ func (h *TaterTVStreamHandler) serveChannel(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	channels, startedAt, ok := taterTVCachedLineup(token)
-	if !ok {
-		var err error
-		startedAt = time.Now()
-		channels, err = taterBuildTVLineup(cfg, taterHTTPRequestBaseURL(r), token)
-		if err != nil {
-			http.Error(w, "Failed to build TV lineup", http.StatusServiceUnavailable)
-			return
-		}
-		taterTVStoreLineup(token, channels)
+	baseURL := taterHTTPRequestBaseURL(r)
+	guide, err := taterTVEnsureGuide(cfg, baseURL, time.Now())
+	if err != nil {
+		http.Error(w, "Failed to build TV lineup", http.StatusServiceUnavailable)
+		return
 	}
+	startedAt := guide.StartedAt
 
-	channel, ok := taterTVFindChannel(channels, number)
+	channel, ok := taterTVFindChannel(guide.Channels, number)
 	if !ok || channel.TotalDuration <= 0 || len(channel.Schedule) == 0 {
 		http.Error(w, "Channel not found", http.StatusNotFound)
 		return
@@ -142,68 +143,74 @@ func (h *TaterTVStreamHandler) serveChannel(w http.ResponseWriter, r *http.Reque
 		streamTracker: h.streamTracker,
 	}
 
-	index, startOffset, segmentRemaining := taterTVCurrentSchedulePosition(channel, startedAt, time.Now())
 	consecutiveFailures := 0
 	for streamReq.Context().Err() == nil {
-		if index < 0 || index >= len(channel.Schedule) {
-			index = 0
-			startOffset = 0
-			segmentRemaining = 0
-		}
-
-		row := channel.Schedule[index]
-		item, err := taterTVResolveStreamItem(cfg, row, startOffset, segmentRemaining)
+		guide, err := taterTVEnsureGuide(cfg, baseURL, time.Now())
 		if err != nil {
 			consecutiveFailures++
-			slog.WarnContext(streamReq.Context(), "Skipping Tube TV schedule item", "channel", channel.Number, "title", rowString(row, "title"), "error", err)
+			slog.WarnContext(streamReq.Context(), "Failed to refresh Tube TV guide for stream", "channel", channel.Number, "error", err)
+			time.Sleep(time.Duration(consecutiveFailures) * 500 * time.Millisecond)
+			continue
+		}
+		if nextChannel, ok := taterTVFindChannel(guide.Channels, number); ok {
+			channel = nextChannel
+			startedAt = guide.StartedAt
+		}
+		if len(channel.Schedule) == 0 || channel.TotalDuration <= 0 {
+			return
+		}
+
+		items, err := taterTVResolveConcatItems(cfg, channel, startedAt, time.Now(), taterTVConcatRunWindow.Seconds())
+		if err != nil {
+			consecutiveFailures++
+			slog.WarnContext(streamReq.Context(), "Failed to prepare Tube TV channel run", "channel", channel.Number, "error", err)
+			time.Sleep(time.Duration(consecutiveFailures) * 500 * time.Millisecond)
+			continue
+		}
+		concatPath, cleanup, err := taterTVWriteConcatFile(items)
+		if err != nil {
+			consecutiveFailures++
+			slog.WarnContext(streamReq.Context(), "Failed to write Tube TV concat plan", "channel", channel.Number, "error", err)
+			time.Sleep(time.Duration(consecutiveFailures) * 500 * time.Millisecond)
+			continue
+		}
+
+		if h.streamTracker != nil && stream != nil && len(items) > 0 {
+			h.streamTracker.SetMediaInfo(stream.ID, items[0].FullDuration, items[0].StartSeconds)
+		}
+		args := buildTaterTVChannelConcatTranscodeArgs(transcodeCfg, profile, accel, concatPath)
+		var stderr limitedBuffer
+		cmd := exec.CommandContext(streamReq.Context(), ffmpegPath, args...)
+		cmd.Stdout = writer
+		cmd.Stderr = &stderr
+		firstTitle := ""
+		firstKind := ""
+		if len(items) > 0 {
+			firstTitle = items[0].Title
+			firstKind = items[0].Kind
+		}
+		slog.InfoContext(streamReq.Context(), "Starting Tube TV channel run",
+			"channel", channel.Number,
+			"items", len(items),
+			"first_title", firstTitle,
+			"first_kind", firstKind,
+			"profile", profileID,
+			"hardware_acceleration", effectiveAccel,
+			"video_codec", videoCodec)
+		err = cmd.Run()
+		cleanup()
+		if err != nil && streamReq.Context().Err() == nil {
+			consecutiveFailures++
+			slog.WarnContext(streamReq.Context(), "Tube TV channel run failed",
+				"channel", channel.Number,
+				"error", err,
+				"stderr", stderr.String())
 			if consecutiveFailures >= 3 {
 				time.Sleep(time.Duration(consecutiveFailures) * 500 * time.Millisecond)
 			}
-			if consecutiveFailures >= len(channel.Schedule)+3 {
-				return
-			}
-		} else {
-			consecutiveFailures = 0
-			if h.streamTracker != nil && stream != nil {
-				h.streamTracker.SetMediaInfo(stream.ID, item.FullDuration, item.StartSeconds)
-			}
-			args := buildTaterTVChannelTranscodeArgs(transcodeCfg, profile, accel, item.Path, item.StartSeconds, item.DurationSeconds)
-			var stderr limitedBuffer
-			cmd := exec.CommandContext(streamReq.Context(), ffmpegPath, args...)
-			cmd.Stdout = writer
-			cmd.Stderr = &stderr
-			slog.InfoContext(streamReq.Context(), "Starting Tube TV channel segment",
-				"channel", channel.Number,
-				"title", item.Title,
-				"kind", item.Kind,
-				"profile", profileID,
-				"hardware_acceleration", effectiveAccel,
-				"video_codec", videoCodec,
-				"start_seconds", item.StartSeconds,
-				"duration_seconds", item.DurationSeconds)
-			if err := cmd.Run(); err != nil && streamReq.Context().Err() == nil {
-				consecutiveFailures++
-				slog.WarnContext(streamReq.Context(), "Tube TV channel segment failed",
-					"channel", channel.Number,
-					"title", item.Title,
-					"path", item.Path,
-					"error", err,
-					"stderr", stderr.String())
-				if consecutiveFailures >= 3 {
-					time.Sleep(time.Duration(consecutiveFailures) * 500 * time.Millisecond)
-				}
-				if consecutiveFailures >= len(channel.Schedule)+3 {
-					return
-				}
-			}
+			continue
 		}
-
-		index++
-		if index >= len(channel.Schedule) {
-			index = 0
-		}
-		startOffset = rowFloat(channel.Schedule[index], "mediaOffset")
-		segmentRemaining = rowFloat(channel.Schedule[index], "duration")
+		consecutiveFailures = 0
 	}
 }
 
@@ -313,6 +320,48 @@ func taterTVCurrentSchedulePosition(channel taterTVChannel, startedAt, now time.
 	return 0, math.Max(0, rowFloat(row, "mediaOffset")), math.Max(0, rowFloat(row, "duration"))
 }
 
+func taterTVResolveConcatItems(cfg *config.Config, channel taterTVChannel, startedAt, now time.Time, maxDurationSeconds float64) ([]taterTVStreamItem, error) {
+	index, startOffset, segmentRemaining := taterTVCurrentSchedulePosition(channel, startedAt, now)
+	if index < 0 || index >= len(channel.Schedule) {
+		return nil, fmt.Errorf("schedule position unavailable")
+	}
+	if maxDurationSeconds <= 0 {
+		maxDurationSeconds = taterTVConcatRunWindow.Seconds()
+	}
+
+	items := make([]taterTVStreamItem, 0, 24)
+	total := 0.0
+	failures := 0
+	for i := index; i < len(channel.Schedule) && total < maxDurationSeconds && len(items) < taterTVMaxConcatItems; i++ {
+		row := channel.Schedule[i]
+		offset := rowFloat(row, "mediaOffset")
+		remaining := rowFloat(row, "duration")
+		if i == index {
+			offset = startOffset
+			remaining = segmentRemaining
+		}
+		item, err := taterTVResolveStreamItem(cfg, row, offset, remaining)
+		if err != nil {
+			failures++
+			continue
+		}
+		if item.DurationSeconds <= 0 {
+			item.DurationSeconds = math.Max(0, rowFloat(row, "duration"))
+		}
+		if item.DurationSeconds <= 0 && item.FullDuration > item.StartSeconds {
+			item.DurationSeconds = item.FullDuration - item.StartSeconds
+		}
+		items = append(items, item)
+		if item.DurationSeconds > 0 {
+			total += item.DurationSeconds
+		}
+	}
+	if len(items) == 0 {
+		return nil, fmt.Errorf("no playable schedule items found; skipped %d entries", failures)
+	}
+	return items, nil
+}
+
 func taterTVResolveStreamItem(cfg *config.Config, row map[string]any, startOffset, durationOverride float64) (taterTVStreamItem, error) {
 	kind := strings.ToLower(strings.TrimSpace(rowString(row, "kind")))
 	if kind == "" {
@@ -397,6 +446,72 @@ func taterTVResolveSchedulePath(cfg *config.Config, row map[string]any) (string,
 	return path, nil
 }
 
+func taterTVWriteConcatFile(items []taterTVStreamItem) (string, func(), error) {
+	if len(items) == 0 {
+		return "", func() {}, fmt.Errorf("no concat items")
+	}
+	file, err := os.CreateTemp("", "tater-tv-channel-*.ffconcat")
+	if err != nil {
+		return "", func() {}, err
+	}
+	cleanup := func() {
+		_ = os.Remove(file.Name())
+	}
+	var b strings.Builder
+	b.WriteString("ffconcat version 1.0\n")
+	for _, item := range items {
+		if strings.ContainsAny(item.Path, "\r\n") {
+			_ = file.Close()
+			cleanup()
+			return "", func() {}, fmt.Errorf("media path contains unsupported newline")
+		}
+		b.WriteString("file ")
+		b.WriteString(taterTVFFConcatQuote(item.Path))
+		b.WriteByte('\n')
+		if item.StartSeconds > 0 {
+			b.WriteString("inpoint ")
+			b.WriteString(strconv.FormatFloat(item.StartSeconds, 'f', 3, 64))
+			b.WriteByte('\n')
+		}
+		if item.DurationSeconds > 0 {
+			outpoint := item.StartSeconds + item.DurationSeconds
+			if outpoint > item.StartSeconds {
+				b.WriteString("outpoint ")
+				b.WriteString(strconv.FormatFloat(outpoint, 'f', 3, 64))
+				b.WriteByte('\n')
+			}
+		}
+	}
+	if _, err := file.WriteString(b.String()); err != nil {
+		_ = file.Close()
+		cleanup()
+		return "", func() {}, err
+	}
+	if err := file.Close(); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	return file.Name(), cleanup, nil
+}
+
+func taterTVFFConcatQuote(path string) string {
+	var b strings.Builder
+	b.Grow(len(path) + 2)
+	b.WriteByte('\'')
+	for _, r := range path {
+		switch r {
+		case '\'':
+			b.WriteString("'\\''")
+		case '\\':
+			b.WriteString("\\\\")
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('\'')
+	return b.String()
+}
+
 func buildTaterTVChannelTranscodeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, inputPath string, startSeconds, durationSeconds float64) []string {
 	args := []string{
 		"-hide_banner",
@@ -437,6 +552,50 @@ func buildTaterTVChannelTranscodeArgs(cfg config.TranscodingConfig, profile tran
 		"-fflags", "+genpts",
 		"-muxdelay", "0",
 		"-muxpreload", "0",
+		"-f", "mpegts",
+		"pipe:1",
+	)
+	return args
+}
+
+func buildTaterTVChannelConcatTranscodeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, concatPath string) []string {
+	args := []string{
+		"-hide_banner",
+		"-loglevel", "warning",
+		"-nostdin",
+	}
+	args = append(args, transcodeHardwareInitArgs(cfg, accel)...)
+	args = append(args,
+		"-readrate", "1.0",
+		"-f", "concat",
+		"-safe", "0",
+		"-protocol_whitelist", "file,http,tcp,https,tls,pipe",
+		"-i", concatPath,
+		"-map", "0:v:0",
+		"-map", "0:a:0?",
+		"-sn",
+	)
+
+	videoCodec, filters := transcodeVideoSettings(accel, cfg.HardwareDevice, profile)
+	if filters != "" {
+		args = append(args, "-vf", filters)
+	}
+	args = append(args,
+		"-c:v", videoCodec,
+		"-b:v", profile.VideoBitrate,
+		"-maxrate", profile.MaxRate,
+		"-bufsize", profile.BufferSize,
+	)
+	args = appendVideoEncoderOptions(args, videoCodec, profile)
+	args = append(args,
+		"-c:a", "aac",
+		"-b:a", profile.AudioBitrate,
+		"-ac", "2",
+		"-ar", "48000",
+		"-fflags", "+genpts",
+		"-muxdelay", "0",
+		"-muxpreload", "0",
+		"-mpegts_flags", "+resend_headers",
 		"-f", "mpegts",
 		"pipe:1",
 	)

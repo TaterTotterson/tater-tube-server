@@ -597,3 +597,169 @@ func TestTaterBuildTVLineupUsesServerLocalMediaAndCommercials(t *testing.T) {
 		t.Fatalf("expected episode and commercial schedule entries: %#v", channels[0].Schedule)
 	}
 }
+
+func TestTaterTVGuideBuildsAndExtendsSharedSchedule(t *testing.T) {
+	taterTVResetGuide()
+	defer taterTVResetGuide()
+
+	configDir := t.TempDir()
+	mediaRoot := filepath.Join(configDir, "movies")
+	movieDir := filepath.Join(mediaRoot, "Guide.Movie.2024")
+	if err := os.MkdirAll(movieDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(movieDir, "Guide.Movie.2024.mkv"), []byte("movie"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig(configDir)
+	cfg.LocalMedia.Enabled = boolPtr(true)
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID:          "movies",
+		Name:        "Movies",
+		LibraryType: "movies",
+		Paths:       []string{mediaRoot},
+		Enabled:     boolPtr(true),
+	}}
+	cfg.TubeTV.AutoChannels = boolPtr(false)
+	cfg.TubeTV.CustomChannels = []config.TubeTVCustomChannel{{
+		ID:    "movie-channel",
+		Title: "Movie Channel",
+		Sources: []config.TubeTVCustomSource{{
+			CategoryID:  "movies",
+			SourceIndex: -1,
+		}},
+	}}
+
+	now := time.Now().Truncate(time.Second)
+	guide, err := taterTVEnsureGuide(cfg, "http://server", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(guide.Channels) != 1 {
+		t.Fatalf("expected one guide channel, got %#v", guide.Channels)
+	}
+	firstDuration := guide.Channels[0].TotalDuration
+	if firstDuration < taterTVGuideHorizon.Seconds() {
+		t.Fatalf("expected guide to plan at least %s, got %s", taterTVGuideHorizon, time.Duration(firstDuration*float64(time.Second)))
+	}
+
+	taterTVGuideMu.Lock()
+	taterTVGuideCache.PlannedUntil = guide.StartedAt.Add(90 * time.Minute)
+	taterTVGuideMu.Unlock()
+
+	extended, err := taterTVEnsureGuide(cfg, "http://server", guide.StartedAt.Add(11*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if extended.StartedAt != guide.StartedAt {
+		t.Fatalf("expected shared guide start to remain stable, got %s want %s", extended.StartedAt, guide.StartedAt)
+	}
+	if extended.Channels[0].TotalDuration <= firstDuration {
+		t.Fatalf("expected guide extension beyond %f, got %f", firstDuration, extended.Channels[0].TotalDuration)
+	}
+}
+
+func TestTaterTVConcatPlanStartsAtLivePosition(t *testing.T) {
+	configDir := t.TempDir()
+	mediaRoot := filepath.Join(configDir, "movies")
+	movieDir := filepath.Join(mediaRoot, "That Movie")
+	if err := os.MkdirAll(movieDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	moviePath := filepath.Join(movieDir, "That Movie's Cut.mkv")
+	if err := os.WriteFile(moviePath, []byte("movie"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	commercialRoot := filepath.Join(configDir, "commercials")
+	commercialDir := filepath.Join(commercialRoot, "retro-ads")
+	if err := os.MkdirAll(commercialDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	commercialPath := filepath.Join(commercialDir, "Ad Spot.mp4")
+	if err := os.WriteFile(commercialPath, []byte("ad"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig(configDir)
+	cfg.LocalMedia.Enabled = boolPtr(true)
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID:          "movies",
+		Name:        "Movies",
+		LibraryType: "movies",
+		Paths:       []string{mediaRoot},
+		Enabled:     boolPtr(true),
+	}}
+	cfg.TubeTV.CommercialsPath = commercialRoot
+
+	channel := taterTVChannel{
+		Number:        "02",
+		Title:         "Movies",
+		TotalDuration: 150,
+		Schedule: []map[string]any{
+			{
+				"title":        "That Movie",
+				"kind":         "movie",
+				"categoryId":   "local:movies",
+				"sourceIndex":  0,
+				"path":         "That Movie/That Movie's Cut.mkv",
+				"duration":     120.0,
+				"fullDuration": 120.0,
+				"mediaOffset":  0.0,
+				"start":        0.0,
+				"end":          120.0,
+			},
+			{
+				"title":        "Ad Spot",
+				"kind":         "commercial",
+				"categoryId":   "retro-ads",
+				"name":         "Ad Spot.mp4",
+				"duration":     30.0,
+				"fullDuration": 30.0,
+				"start":        120.0,
+				"end":          150.0,
+			},
+		},
+	}
+
+	startedAt := time.Now().Add(-45 * time.Second)
+	items, err := taterTVResolveConcatItems(cfg, channel, startedAt, time.Now(), 90)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected movie and commercial, got %#v", items)
+	}
+	if items[0].Path != moviePath {
+		t.Fatalf("unexpected movie path %q", items[0].Path)
+	}
+	if items[0].StartSeconds < 44 || items[0].StartSeconds > 46 {
+		t.Fatalf("expected live start near 45 seconds, got %f", items[0].StartSeconds)
+	}
+	if items[0].DurationSeconds < 74 || items[0].DurationSeconds > 76 {
+		t.Fatalf("expected remaining movie duration near 75 seconds, got %f", items[0].DurationSeconds)
+	}
+
+	concatPath, cleanup, err := taterTVWriteConcatFile(items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	data, err := os.ReadFile(concatPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := string(data)
+	if !strings.Contains(manifest, "ffconcat version 1.0") {
+		t.Fatalf("missing concat header: %s", manifest)
+	}
+	if !strings.Contains(manifest, "That Movie'\\''s Cut.mkv") {
+		t.Fatalf("expected quoted apostrophe in manifest: %s", manifest)
+	}
+	if !strings.Contains(manifest, "inpoint 45.") || !strings.Contains(manifest, "outpoint 120.") {
+		t.Fatalf("expected live in/out points in manifest: %s", manifest)
+	}
+	if !strings.Contains(manifest, commercialPath) {
+		t.Fatalf("expected commercial in manifest: %s", manifest)
+	}
+}
