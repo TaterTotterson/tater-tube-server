@@ -4,6 +4,7 @@ import {
 	Clapperboard,
 	Film,
 	Folder,
+	Image,
 	Layers,
 	Plus,
 	RefreshCw,
@@ -26,6 +27,7 @@ import type {
 	TubeTVCustomSource,
 	TubeTVLocalLibraryResponse,
 	TubeTVLocalLibraryRow,
+	TubeTVLogoResult,
 } from "../../types/config";
 
 interface TubeTVConfigSectionProps {
@@ -40,10 +42,13 @@ const DEFAULT_TUBE_TV: TubeTVConfig = {
 	auto_channels: true,
 	commercials_enabled: true,
 	midroll_commercials: false,
+	channel_logos_enabled: true,
 	commercial_categories: [],
 	commercials_path: "",
 	custom_channels: [],
 };
+
+const TUBE_TV_LOGO_RAW_BASE = "https://raw.githubusercontent.com/tv-logo/tv-logos/main/";
 
 interface LibraryRequest {
 	categoryId: string;
@@ -91,6 +96,18 @@ function formatChannelNumber(value: string) {
 	return number.toString().padStart(2, "0");
 }
 
+function logoPreviewURL(path?: string) {
+	if (!path) return "";
+	return (
+		TUBE_TV_LOGO_RAW_BASE +
+		path
+			.replace(/^\/+/, "")
+			.split("/")
+			.map((part) => encodeURIComponent(part))
+			.join("/")
+	);
+}
+
 function normalize(config: ConfigResponse): TubeTVConfig {
 	const source = config.tube_tv ?? DEFAULT_TUBE_TV;
 	return {
@@ -98,6 +115,7 @@ function normalize(config: ConfigResponse): TubeTVConfig {
 		auto_channels: source.auto_channels ?? true,
 		commercials_enabled: source.commercials_enabled ?? true,
 		midroll_commercials: source.midroll_commercials ?? false,
+		channel_logos_enabled: source.channel_logos_enabled ?? true,
 		commercial_categories: source.commercial_categories ?? [],
 		commercials_path: source.commercials_path ?? "",
 		custom_channels: (source.custom_channels ?? []).map((channel) => ({
@@ -105,6 +123,8 @@ function normalize(config: ConfigResponse): TubeTVConfig {
 			title: channel.title || "Custom Channel",
 			channel_number: formatChannelNumber(channel.channel_number || ""),
 			commercial_category: channel.commercial_category || "",
+			logo_path: channel.logo_path || "",
+			logo_title: channel.logo_title || "",
 			sources: (channel.sources ?? []).map((row) => ({
 				category_id: row.category_id || "",
 				source_index: row.source_index ?? -1,
@@ -172,6 +192,9 @@ export function TubeTVConfigSection({
 	const [browserData, setBrowserData] = useState<TubeTVLocalLibraryResponse | null>(null);
 	const [browserSearch, setBrowserSearch] = useState("");
 	const [isBrowserLoading, setIsBrowserLoading] = useState(false);
+	const [logoSearch, setLogoSearch] = useState<Record<number, string>>({});
+	const [logoResults, setLogoResults] = useState<Record<number, TubeTVLogoResult[]>>({});
+	const [logoLoading, setLogoLoading] = useState<Record<number, boolean>>({});
 	const [hasChanges, setHasChanges] = useState(false);
 
 	const localCategories = (config.local_media?.categories ?? []).filter(
@@ -180,6 +203,9 @@ export function TubeTVConfigSection({
 
 	useEffect(() => {
 		setFormData(normalize(config));
+		setLogoSearch({});
+		setLogoResults({});
+		setLogoLoading({});
 		setHasChanges(false);
 	}, [config]);
 
@@ -258,6 +284,8 @@ export function TubeTVConfigSection({
 					title: `Custom ${count}`,
 					channel_number: "",
 					commercial_category: "",
+					logo_path: "",
+					logo_title: "",
 					sources: [],
 				},
 			]),
@@ -355,6 +383,33 @@ export function TubeTVConfigSection({
 		updateChannel(channelIndex, { sources: channel.sources.concat([normalized]) });
 	};
 
+	const searchLogos = async (channelIndex: number) => {
+		const channel = formData.custom_channels[channelIndex];
+		if (!channel) return;
+		const query = (logoSearch[channelIndex] || channel.title || "").trim();
+		if (!query) return;
+		setLogoLoading((current) => ({ ...current, [channelIndex]: true }));
+		try {
+			const data = await apiClient.searchTubeTVLogos(query);
+			setLogoResults((current) => ({ ...current, [channelIndex]: data.logos }));
+			if (data.logos.length === 0) {
+				showToast({
+					type: "info",
+					title: "No Logos Found",
+					message: "Try a shorter channel or network name.",
+				});
+			}
+		} catch (error) {
+			showToast({
+				type: "error",
+				title: "Logo Search Failed",
+				message: error instanceof Error ? error.message : "Unable to search channel logos.",
+			});
+		} finally {
+			setLogoLoading((current) => ({ ...current, [channelIndex]: false }));
+		}
+	};
+
 	const addCurrentBrowserView = (channelIndex: number) => {
 		if (!browserData?.source) return;
 		addSourceToChannel(channelIndex, browserData.source);
@@ -378,6 +433,8 @@ export function TubeTVConfigSection({
 					id: slug(channel.id || channel.title),
 					title: channel.title.trim(),
 					commercial_category: slug(channel.commercial_category || ""),
+					logo_path: (channel.logo_path || "").trim().replace(/^\/+/, ""),
+					logo_title: (channel.logo_title || "").trim(),
 					sources: channel.sources
 						.map((source) => ({
 							category_id: normalizeSourceCategoryId(source.category_id),
@@ -482,7 +539,7 @@ export function TubeTVConfigSection({
 					</button>
 				</div>
 
-				<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+				<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
 					<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
 						<span className="font-bold text-sm">Enabled</span>
 						<input
@@ -524,6 +581,18 @@ export function TubeTVConfigSection({
 							disabled={isReadOnly}
 							onChange={(event) =>
 								update({ ...formData, midroll_commercials: event.target.checked })
+							}
+						/>
+					</label>
+					<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
+						<span className="font-bold text-sm">Channel Logos</span>
+						<input
+							type="checkbox"
+							className="toggle toggle-primary"
+							checked={formData.channel_logos_enabled}
+							disabled={isReadOnly}
+							onChange={(event) =>
+								update({ ...formData, channel_logos_enabled: event.target.checked })
 							}
 						/>
 					</label>
@@ -774,6 +843,124 @@ export function TubeTVConfigSection({
 									<Trash2 className="h-4 w-4" />
 									Remove
 								</button>
+							</div>
+
+							<div className="mt-4 rounded-xl border border-base-300 bg-base-200/60 p-4">
+								<div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+									<div>
+										<div className="flex items-center gap-2 font-bold text-base-content/50 text-xs uppercase tracking-widest">
+											<Image className="h-4 w-4" />
+											Channel Logo
+										</div>
+										<p className="mt-1 text-base-content/60 text-xs">
+											Optional bottom-right watermark for this Tube TV channel.
+										</p>
+									</div>
+									{channel.logo_path && (
+										<button
+											type="button"
+											className="btn btn-ghost btn-xs"
+											disabled={isReadOnly}
+											onClick={() => updateChannel(channelIndex, { logo_path: "", logo_title: "" })}
+										>
+											Clear
+										</button>
+									)}
+								</div>
+
+								<div className="grid gap-3 md:grid-cols-[7rem_1fr_auto] md:items-center">
+									<div className="flex h-20 w-28 items-center justify-center rounded-lg border border-base-300 bg-black/80 p-2">
+										{channel.logo_path ? (
+											<img
+												src={logoPreviewURL(channel.logo_path)}
+												alt={channel.logo_title || "Channel logo"}
+												className="max-h-full max-w-full object-contain"
+												loading="lazy"
+											/>
+										) : (
+											<Image className="h-7 w-7 text-base-content/35" />
+										)}
+									</div>
+									<label className="input input-bordered flex items-center gap-2">
+										<Search className="h-4 w-4 text-base-content/45" />
+										<input
+											type="search"
+											className="grow"
+											value={logoSearch[channelIndex] ?? ""}
+											onChange={(event) =>
+												setLogoSearch((current) => ({
+													...current,
+													[channelIndex]: event.target.value,
+												}))
+											}
+											onKeyDown={(event) => {
+												if (event.key === "Enter") {
+													event.preventDefault();
+													void searchLogos(channelIndex);
+												}
+											}}
+											placeholder={channel.logo_title || channel.title || "Search network logo"}
+											disabled={isReadOnly}
+										/>
+									</label>
+									<button
+										type="button"
+										className="btn btn-outline"
+										disabled={isReadOnly || logoLoading[channelIndex]}
+										onClick={() => void searchLogos(channelIndex)}
+									>
+										{logoLoading[channelIndex] ? (
+											<span className="loading loading-spinner loading-xs" />
+										) : (
+											<Search className="h-4 w-4" />
+										)}
+										Search
+									</button>
+								</div>
+
+								{channel.logo_path && (
+									<div className="mt-3 truncate text-base-content/55 text-xs">
+										Selected: {channel.logo_title || channel.logo_path}
+									</div>
+								)}
+
+								{(logoResults[channelIndex] ?? []).length > 0 && (
+									<div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+										{logoResults[channelIndex].map((logo) => (
+											<button
+												type="button"
+												key={logo.path}
+												className={`flex min-w-0 items-center gap-3 rounded-lg border p-2 text-left transition ${
+													channel.logo_path === logo.path
+														? "border-primary bg-primary/10"
+														: "border-base-300 bg-base-100/75 hover:border-primary/60"
+												}`}
+												disabled={isReadOnly}
+												onClick={() =>
+													updateChannel(channelIndex, {
+														logo_path: logo.path,
+														logo_title: logo.title,
+													})
+												}
+											>
+												<span className="flex h-10 w-16 shrink-0 items-center justify-center rounded bg-black/80 p-1">
+													<img
+														src={logo.url}
+														alt=""
+														className="max-h-full max-w-full object-contain"
+														loading="lazy"
+													/>
+												</span>
+												<span className="min-w-0">
+													<span className="block truncate font-bold text-xs">{logo.title}</span>
+													<span className="block truncate text-base-content/45 text-[0.65rem]">
+														{logo.path}
+													</span>
+												</span>
+											</button>
+										))}
+									</div>
+								)}
 							</div>
 
 							<div className="mt-5 space-y-4">

@@ -43,6 +43,7 @@ import type {
 	TubeTVCommercialLibrary,
 	TubeTVGuideResponse,
 	TubeTVLocalLibraryResponse,
+	TubeTVLogoSearchResponse,
 } from "../types/config";
 import type { UpdateChannel, UpdateStatusResponse } from "../types/update";
 
@@ -781,6 +782,13 @@ class APIClient {
 		return this.request<TubeTVLocalLibraryResponse>(
 			`/tube-tv/local-library${query ? `?${query}` : ""}`,
 		);
+	}
+
+	async searchTubeTVLogos(query: string, limit = 60) {
+		const params = new URLSearchParams();
+		if (query.trim()) params.set("q", query.trim());
+		params.set("limit", String(limit));
+		return this.request<TubeTVLogoSearchResponse>(`/tube-tv/logos/search?${params}`);
 	}
 
 	async getTubeTVGuide() {

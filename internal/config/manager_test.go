@@ -190,6 +190,31 @@ func TestConfig_Validate_TubeTVChannelNumbers(t *testing.T) {
 	assert.Contains(t, err.Error(), "02 to 99")
 }
 
+func TestConfig_Validate_TubeTVLogoPaths(t *testing.T) {
+	cfg := DefaultConfig(t.TempDir())
+	cfg.TubeTV.ChannelLogosEnabled = nil
+	cfg.TubeTV.CustomChannels = []TubeTVCustomChannel{
+		{
+			ID:       "cartoons",
+			Title:    "Cartoons",
+			LogoPath: "/countries/united-states/cartoon-network-us.png",
+		},
+	}
+
+	assert.NoError(t, cfg.Validate())
+	assert.NotNil(t, cfg.TubeTV.ChannelLogosEnabled)
+	assert.True(t, *cfg.TubeTV.ChannelLogosEnabled)
+	assert.Equal(t, "countries/united-states/cartoon-network-us.png", cfg.TubeTV.CustomChannels[0].LogoPath)
+
+	invalid := DefaultConfig(t.TempDir())
+	invalid.TubeTV.CustomChannels = []TubeTVCustomChannel{
+		{ID: "bad", Title: "Bad", LogoPath: "../bad.jpg"},
+	}
+	err := invalid.Validate()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "logo_path")
+}
+
 func TestConfig_GetWebhookBaseURL(t *testing.T) {
 	tests := []struct {
 		name     string

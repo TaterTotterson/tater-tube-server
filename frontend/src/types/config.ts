@@ -542,6 +542,8 @@ export interface TubeTVCustomChannel {
 	title: string;
 	channel_number?: string;
 	commercial_category?: string;
+	logo_path?: string;
+	logo_title?: string;
 	sources: TubeTVCustomSource[];
 }
 
@@ -550,9 +552,21 @@ export interface TubeTVConfig {
 	auto_channels: boolean;
 	commercials_enabled: boolean;
 	midroll_commercials: boolean;
+	channel_logos_enabled: boolean;
 	commercial_categories: string[];
 	commercials_path: string;
 	custom_channels: TubeTVCustomChannel[];
+}
+
+export interface TubeTVLogoResult {
+	path: string;
+	title: string;
+	url: string;
+	size?: number;
+}
+
+export interface TubeTVLogoSearchResponse {
+	logos: TubeTVLogoResult[];
 }
 
 export interface TubeTVCommercialVideo {
@@ -624,6 +638,8 @@ export interface TubeTVGuideChannel {
 	number: string;
 	title: string;
 	streamUrl?: string;
+	logoPath?: string;
+	logoTitle?: string;
 	totalDuration: number;
 	schedule: TubeTVGuideScheduleItem[];
 }

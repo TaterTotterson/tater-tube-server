@@ -180,6 +180,7 @@ type TubeTVConfig struct {
 	AutoChannels         *bool                 `yaml:"auto_channels" mapstructure:"auto_channels" json:"auto_channels"`
 	CommercialsEnabled   *bool                 `yaml:"commercials_enabled" mapstructure:"commercials_enabled" json:"commercials_enabled"`
 	MidrollCommercials   *bool                 `yaml:"midroll_commercials" mapstructure:"midroll_commercials" json:"midroll_commercials"`
+	ChannelLogosEnabled  *bool                 `yaml:"channel_logos_enabled" mapstructure:"channel_logos_enabled" json:"channel_logos_enabled"`
 	CommercialCategories []string              `yaml:"commercial_categories" mapstructure:"commercial_categories" json:"commercial_categories"`
 	CommercialsPath      string                `yaml:"commercials_path" mapstructure:"commercials_path" json:"commercials_path"`
 	CustomChannels       []TubeTVCustomChannel `yaml:"custom_channels" mapstructure:"custom_channels" json:"custom_channels"`
@@ -191,6 +192,8 @@ type TubeTVCustomChannel struct {
 	Title              string               `yaml:"title" mapstructure:"title" json:"title"`
 	ChannelNumber      string               `yaml:"channel_number,omitempty" mapstructure:"channel_number" json:"channel_number,omitempty"`
 	CommercialCategory string               `yaml:"commercial_category,omitempty" mapstructure:"commercial_category" json:"commercial_category,omitempty"`
+	LogoPath           string               `yaml:"logo_path,omitempty" mapstructure:"logo_path" json:"logo_path,omitempty"`
+	LogoTitle          string               `yaml:"logo_title,omitempty" mapstructure:"logo_title" json:"logo_title,omitempty"`
 	Sources            []TubeTVCustomSource `yaml:"sources" mapstructure:"sources" json:"sources"`
 }
 
@@ -890,6 +893,10 @@ func (c *Config) Validate() error {
 		enabled := false
 		c.TubeTV.MidrollCommercials = &enabled
 	}
+	if c.TubeTV.ChannelLogosEnabled == nil {
+		enabled := true
+		c.TubeTV.ChannelLogosEnabled = &enabled
+	}
 	if strings.TrimSpace(c.TubeTV.CommercialsPath) == "" {
 		c.TubeTV.CommercialsPath = filepath.Join(c.Metadata.RootPath, "tube-tv-commercials")
 	}
@@ -938,6 +945,12 @@ func (c *Config) Validate() error {
 		}
 		channel.ChannelNumber = normalizedChannelNumber
 		channel.CommercialCategory = sanitizeLocalMediaID(channel.CommercialCategory)
+		rawLogoPath := strings.TrimSpace(channel.LogoPath)
+		channel.LogoPath = SanitizeTubeTVLogoPath(rawLogoPath)
+		if rawLogoPath != "" && channel.LogoPath == "" {
+			return fmt.Errorf("tube_tv custom channel %q logo_path must be a relative png path", channel.Title)
+		}
+		channel.LogoTitle = strings.TrimSpace(channel.LogoTitle)
 		cleanSources := make([]TubeTVCustomSource, 0, len(channel.Sources))
 		for _, source := range channel.Sources {
 			source.CategoryID = sanitizeTubeTVSourceCategoryID(source.CategoryID)
@@ -1289,6 +1302,28 @@ func normalizeTubeTVChannelNumber(value string) (string, error) {
 		return "", fmt.Errorf("must be a number from 02 to 99")
 	}
 	return fmt.Sprintf("%02d", number), nil
+}
+
+// SanitizeTubeTVLogoPath keeps selected channel logo paths constrained to the
+// remote logo catalog layout. The server downloads these paths from a fixed
+// upstream and stores them under metadata, so arbitrary URLs and local paths
+// are intentionally rejected.
+func SanitizeTubeTVLogoPath(value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	value = strings.TrimLeft(value, "/")
+	if value == "" {
+		return ""
+	}
+	clean := filepath.ToSlash(filepath.Clean("/" + value))
+	clean = strings.TrimPrefix(clean, "/")
+	if clean == "." || clean == "" || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
+		return ""
+	}
+	lower := strings.ToLower(clean)
+	if !strings.HasSuffix(lower, ".png") || strings.ContainsAny(clean, "\x00\r\n") {
+		return ""
+	}
+	return clean
 }
 
 // ValidateDirectories validates that all configured directories are writable
@@ -1865,6 +1900,7 @@ func DefaultConfig(configDir ...string) *Config {
 			AutoChannels:         &tubeTVAutoChannels,
 			CommercialsEnabled:   &tubeTVCommercials,
 			MidrollCommercials:   &tubeTVMidroll,
+			ChannelLogosEnabled:  &tubeTVEnabled,
 			CommercialCategories: []string{},
 			CommercialsPath:      filepath.Join(metadataPath, "tube-tv-commercials"),
 			CustomChannels:       []TubeTVCustomChannel{},
