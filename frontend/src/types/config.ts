@@ -545,6 +545,7 @@ export interface TubeTVCustomChannel {
 }
 
 export interface TubeTVConfig {
+	enabled: boolean;
 	auto_channels: boolean;
 	commercials_enabled: boolean;
 	midroll_commercials: boolean;
@@ -812,7 +813,7 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		canEdit: true,
 	},
 	tube_tv: {
-		title: "Tube TV Mode",
+		title: "Tube TV",
 		description: "Server-side The Tube channels, custom lineups, and commercial breaks.",
 		icon: "Tv",
 		canEdit: true,

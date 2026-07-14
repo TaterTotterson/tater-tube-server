@@ -191,7 +191,7 @@ export function TVGuidePage() {
 
 			{channels.length === 0 ? (
 				<div className="rounded-lg border border-base-300 bg-base-200/70 p-6 text-base-content/60">
-					No TV guide channels are available. Check Local media and The Tube TV Mode settings.
+					No TV guide channels are available. Check Local media and Tube TV settings.
 				</div>
 			) : (
 				<div className="grid gap-4 xl:grid-cols-2">

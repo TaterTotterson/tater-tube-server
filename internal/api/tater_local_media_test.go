@@ -388,6 +388,33 @@ func hasTaterLocalDiscoverTitle(rows []taterUsenetCategory, title string) bool {
 	return false
 }
 
+func TestTaterTubeTVEnabledRequiresToggleAndLocalMedia(t *testing.T) {
+	cfg := config.DefaultConfig(t.TempDir())
+	cfg.LocalMedia.Enabled = boolPtr(true)
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID:          "tv",
+		Name:        "TV",
+		LibraryType: "tv",
+		Paths:       []string{t.TempDir()},
+		Enabled:     boolPtr(true),
+	}}
+
+	if !taterTubeTVEnabled(cfg) {
+		t.Fatal("expected Tube TV to be enabled when toggle and local media are configured")
+	}
+
+	cfg.TubeTV.Enabled = boolPtr(false)
+	if taterTubeTVEnabled(cfg) {
+		t.Fatal("expected Tube TV to be hidden when disabled")
+	}
+
+	cfg.TubeTV.Enabled = boolPtr(true)
+	cfg.LocalMedia.Enabled = boolPtr(false)
+	if taterTubeTVEnabled(cfg) {
+		t.Fatal("expected Tube TV to be hidden without local media")
+	}
+}
+
 func TestTaterTVCustomSourceSingleMovieFileDoesNotExpandLibrary(t *testing.T) {
 	configDir := t.TempDir()
 	mediaRoot := filepath.Join(configDir, "movies")

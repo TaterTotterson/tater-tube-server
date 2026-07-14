@@ -173,8 +173,9 @@ type LocalMediaCategory struct {
 	Enabled     *bool    `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 }
 
-// TubeTVConfig stores server-side The Tube TV Mode settings.
+// TubeTVConfig stores server-side Tube TV settings.
 type TubeTVConfig struct {
+	Enabled              *bool                 `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	AutoChannels         *bool                 `yaml:"auto_channels" mapstructure:"auto_channels" json:"auto_channels"`
 	CommercialsEnabled   *bool                 `yaml:"commercials_enabled" mapstructure:"commercials_enabled" json:"commercials_enabled"`
 	MidrollCommercials   *bool                 `yaml:"midroll_commercials" mapstructure:"midroll_commercials" json:"midroll_commercials"`
@@ -870,6 +871,10 @@ func (c *Config) Validate() error {
 	if c.LocalMedia.Enabled == nil {
 		enabled := false
 		c.LocalMedia.Enabled = &enabled
+	}
+	if c.TubeTV.Enabled == nil {
+		enabled := true
+		c.TubeTV.Enabled = &enabled
 	}
 	if c.TubeTV.AutoChannels == nil {
 		enabled := true
@@ -1752,7 +1757,8 @@ func DefaultConfig(configDir ...string) *Config {
 	transcodingEnabled := false     // Direct play by default; FFmpeg transcode is opt-in
 	newznabEnabled := false         // Player-facing Stream catalog disabled by default
 	localMediaEnabled := false      // Server-local media catalog disabled by default
-	tubeTVAutoChannels := true      // The Tube TV Mode auto-generates channels by default
+	tubeTVEnabled := true           // Tube TV is available when local media is configured
+	tubeTVAutoChannels := true      // Tube TV auto-generates channels by default
 	tubeTVCommercials := true       // Commercial breaks enabled when commercials exist
 	tubeTVMidroll := false          // Mid-roll breaks opt-in by default
 	prowlarrEnabled := false        // Prowlarr integration disabled by default
@@ -1825,6 +1831,7 @@ func DefaultConfig(configDir ...string) *Config {
 			Categories: []LocalMediaCategory{},
 		},
 		TubeTV: TubeTVConfig{
+			Enabled:              &tubeTVEnabled,
 			AutoChannels:         &tubeTVAutoChannels,
 			CommercialsEnabled:   &tubeTVCommercials,
 			MidrollCommercials:   &tubeTVMidroll,

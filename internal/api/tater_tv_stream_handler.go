@@ -63,8 +63,8 @@ func (h *TaterTVStreamHandler) serveChannel(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "Unauthorized: valid player_token required", http.StatusUnauthorized)
 		return
 	}
-	if !taterLocalMediaEnabled(cfg) {
-		http.Error(w, "Local media is not configured", http.StatusServiceUnavailable)
+	if !taterTubeTVEnabled(cfg) {
+		http.Error(w, "Tube TV is not enabled", http.StatusServiceUnavailable)
 		return
 	}
 
