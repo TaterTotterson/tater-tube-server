@@ -240,7 +240,7 @@ func runTaterTVChannelSegments(ctx context.Context, ffmpegPath string, cfg confi
 		if tracker != nil && stream != nil {
 			tracker.SetMediaInfo(stream.ID, item.FullDuration, item.StartSeconds)
 		}
-		args := buildTaterTVChannelTranscodeArgs(cfg, profile, accel, item.Path, item.StartSeconds, item.DurationSeconds, logoFile)
+		args := buildTaterTVChannelTranscodeArgs(cfg, profile, accel, item.Path, item.StartSeconds, item.DurationSeconds, logoFile, channel.LogoPosition)
 		var stderr limitedBuffer
 		cmd := exec.CommandContext(ctx, ffmpegPath, args...)
 		cmd.Stdout = writer
@@ -508,7 +508,7 @@ func taterTVResolveSchedulePath(cfg *config.Config, row map[string]any) (string,
 	return path, nil
 }
 
-func buildTaterTVChannelTranscodeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, inputPath string, startSeconds, durationSeconds float64, logoFile string) []string {
+func buildTaterTVChannelTranscodeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, inputPath string, startSeconds, durationSeconds float64, logoFile, logoPosition string) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
@@ -531,7 +531,7 @@ func buildTaterTVChannelTranscodeArgs(cfg config.TranscodingConfig, profile tran
 	videoCodec, filters := transcodeVideoSettings(accel, cfg.HardwareDevice, profile)
 	if logoFile != "" {
 		args = append(args,
-			"-filter_complex", taterTVChannelLogoFilter(filters, profile),
+			"-filter_complex", taterTVChannelLogoFilter(filters, profile, logoPosition),
 			"-map", "[vout]",
 			"-map", "0:a:0?",
 			"-sn",
@@ -568,7 +568,7 @@ func buildTaterTVChannelTranscodeArgs(cfg config.TranscodingConfig, profile tran
 	return args
 }
 
-func taterTVChannelLogoFilter(baseFilters string, profile transcodeProfile) string {
+func taterTVChannelLogoFilter(baseFilters string, profile transcodeProfile, logoPosition string) string {
 	preFilters, postFilters := splitTaterTVOverlayFilters(baseFilters)
 	if strings.TrimSpace(preFilters) == "" {
 		preFilters = "null"
@@ -576,16 +576,27 @@ func taterTVChannelLogoFilter(baseFilters string, profile transcodeProfile) stri
 	logoWidth := clampInt(profile.MaxWidth/12, 96, 220)
 	marginX := clampInt(profile.MaxWidth/64, 12, 48)
 	marginY := clampInt(profile.MaxHeight/36, 10, 40)
+	xExpr := fmt.Sprintf("W-w-%d", marginX)
+	yExpr := fmt.Sprintf("H-h-%d", marginY)
+	switch config.NormalizeTubeTVLogoPosition(logoPosition) {
+	case "top_left":
+		xExpr = fmt.Sprintf("%d", marginX)
+		yExpr = fmt.Sprintf("%d", marginY)
+	case "top_right":
+		yExpr = fmt.Sprintf("%d", marginY)
+	case "bottom_left":
+		xExpr = fmt.Sprintf("%d", marginX)
+	}
 	logoFilters := fmt.Sprintf(
 		"scale=w=%d:h=-1:force_original_aspect_ratio=decrease,format=rgba,colorchannelmixer=aa=0.82",
 		logoWidth,
 	)
 	return fmt.Sprintf(
-		"[0:v]%s[base];[1:v]%s[logo];[base][logo]overlay=x=W-w-%d:y=H-h-%d:format=auto%s[vout]",
+		"[0:v]%s[base];[1:v]%s[logo];[base][logo]overlay=x=%s:y=%s:format=auto%s[vout]",
 		preFilters,
 		logoFilters,
-		marginX,
-		marginY,
+		xExpr,
+		yExpr,
 		postFilters,
 	)
 }

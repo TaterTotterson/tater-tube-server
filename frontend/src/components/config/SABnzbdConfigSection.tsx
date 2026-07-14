@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { useRegisterArrsDownloadClients, useTestArrsDownloadClients } from "../../hooks/useApi";
 import type { ConfigResponse, SABnzbdCategory, SABnzbdConfig } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
+import { ConfigMiniTabs } from "./ConfigMiniTabs";
 
 interface SABnzbdConfigSectionProps {
 	config: ConfigResponse;
@@ -20,6 +21,8 @@ interface SABnzbdConfigSectionProps {
 	isReadOnly?: boolean;
 	isUpdating?: boolean;
 }
+
+type SABnzbdTab = "server" | "categories" | "failover";
 
 interface NewCategoryForm {
 	name: string;
@@ -49,6 +52,7 @@ export function SABnzbdConfigSection({
 	const [showAddCategory, setShowAddCategory] = useState(false);
 	const [newCategory, setNewCategory] = useState<NewCategoryForm>(DEFAULT_NEW_CATEGORY);
 	const [validationErrors, setValidationErrors] = useState<string[]>([]);
+	const [activeTab, setActiveTab] = useState<SABnzbdTab>("server");
 	const [fallbackApiKey, setFallbackApiKey] = useState<string>("");
 	const [showApiKey, setShowApiKey] = useState(false);
 	const [regSuccess, setRegSuccess] = useState<string | null>(null);
@@ -170,344 +174,375 @@ export function SABnzbdConfigSection({
 		}
 	};
 
+	const miniTabs = [
+		{ id: "server" as const, label: "Server", icon: <Download className="h-4 w-4" /> },
+		{
+			id: "categories" as const,
+			label: "Categories",
+			icon: <Plus className="h-4 w-4" />,
+			count: formData.categories.length,
+		},
+		{ id: "failover" as const, label: "Failover", icon: <AlertTriangle className="h-4 w-4" /> },
+	];
+
 	return (
 		<div className="space-y-10">
+			<ConfigMiniTabs tabs={miniTabs} activeTab={activeTab} onChange={setActiveTab} />
 			<div className="space-y-8">
 				{/* Enable Toggle */}
-				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-					<div className="flex items-start justify-between gap-4">
-						<div className="min-w-0 flex-1">
-							<h4 className="break-words font-bold text-base-content text-sm">
-								Virtual API Server
-							</h4>
-							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-								Provides standard SABnzbd endpoints at <code>/sabnzbd</code> for full compatibility.
-							</p>
+				{activeTab === "server" && (
+					<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+						<div className="flex items-start justify-between gap-4">
+							<div className="min-w-0 flex-1">
+								<h4 className="break-words font-bold text-base-content text-sm">
+									Virtual API Server
+								</h4>
+								<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+									Provides standard SABnzbd endpoints at <code>/sabnzbd</code> for full
+									compatibility.
+								</p>
+							</div>
+							<input
+								type="checkbox"
+								className="toggle toggle-primary mt-1 shrink-0"
+								checked={formData.enabled}
+								disabled={isReadOnly}
+								onChange={(e) => updateFormData({ enabled: e.target.checked })}
+							/>
 						</div>
-						<input
-							type="checkbox"
-							className="toggle toggle-primary mt-1 shrink-0"
-							checked={formData.enabled}
-							disabled={isReadOnly}
-							onChange={(e) => updateFormData({ enabled: e.target.checked })}
-						/>
 					</div>
-				</div>
+				)}
 
 				{formData.enabled && (
 					<>
 						{/* Basic Paths */}
-						<div className="fade-in slide-in-from-top-2 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-							<div className="flex items-center gap-2">
-								<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-									Base Config
-								</h4>
-								<div className="h-px flex-1 bg-base-300/50" />
-							</div>
-
-							<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend font-semibold">
-										Virtual Root (Complete Dir)
-									</legend>
-									<input
-										type="text"
-										className="input input-bordered w-full bg-base-100 font-mono text-sm"
-										value={formData.complete_dir}
-										readOnly={isReadOnly}
-										placeholder="/"
-										onChange={(e) => updateFormData({ complete_dir: e.target.value })}
-									/>
-									<p className="label break-words text-base-content/70 text-xs">
-										Relative to your mount point.
-									</p>
-								</fieldset>
-
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend font-semibold">Public Callback URL</legend>
-									<input
-										type="url"
-										className="input input-bordered w-full bg-base-100 font-mono text-sm"
-										value={formData.download_client_base_url || defaultDownloadClientUrl}
-										onChange={(e) => updateFormData({ download_client_base_url: e.target.value })}
-										placeholder={defaultDownloadClientUrl}
-										disabled={isReadOnly}
-									/>
-									<p className="label break-words text-base-content/70 text-xs">
-										The URL ARR instances use to reach this API.
-									</p>
-								</fieldset>
-
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend font-semibold">
-										History Retention (minutes)
-									</legend>
-									<input
-										type="number"
-										className="input input-bordered w-full bg-base-100 font-mono text-sm"
-										value={formData.history_retention_minutes}
-										readOnly={isReadOnly}
-										onChange={(e) =>
-											updateFormData({
-												history_retention_minutes: Number.parseInt(e.target.value, 10) || 0,
-											})
-										}
-									/>
-									<p className="label break-words text-base-content/70 text-xs">
-										How far back the emulated history goes when polled by Arrs.
-									</p>
-								</fieldset>
-							</div>
-						</div>
-
-						{/* Categories */}
-						<div className="fade-in slide-in-from-top-4 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-							<div className="flex items-center justify-between gap-4">
-								<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-									Category Mapping
-								</h4>
-								{!isReadOnly && (
-									<button
-										type="button"
-										className="btn btn-sm btn-primary px-4 shadow-sm"
-										onClick={() => setShowAddCategory(true)}
-									>
-										<Plus className="h-3 w-3" /> Add
-									</button>
-								)}
-							</div>
-
-							<div className="space-y-3">
-								{formData.categories
-									.sort((a, b) => a.order - b.order)
-									.map((cat, idx) => {
-										const isDefault = isDefaultCategory(cat.name);
-										return (
-											<div
-												key={idx}
-												className={`group relative rounded-xl border p-4 transition-all ${isDefault ? "border-primary/20 bg-primary/5" : "border-base-300 bg-base-100/50 hover:bg-base-100"}`}
-											>
-												{isDefault && (
-													<span className="absolute top-2 right-3 font-black text-[8px] text-base-content/80 text-primary uppercase tracking-widest">
-														System Core
-													</span>
-												)}
-
-												<div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
-													<fieldset className="fieldset">
-														<legend className="fieldset-legend font-black text-base-content/60 text-xs uppercase">
-															Label
-														</legend>
-														<input
-															type="text"
-															className="input input-sm input-bordered bg-base-100 font-bold"
-															value={cat.name}
-															readOnly={isReadOnly || isDefault}
-															onChange={(e) => handleCategoryUpdate(idx, { name: e.target.value })}
-														/>
-													</fieldset>
-													<fieldset className="fieldset">
-														<legend className="fieldset-legend font-black text-base-content/60 text-xs uppercase">
-															Order
-														</legend>
-														<input
-															type="number"
-															className="input input-sm input-bordered bg-base-100 font-mono"
-															value={cat.order}
-															readOnly={isReadOnly}
-															onChange={(e) =>
-																handleCategoryUpdate(idx, {
-																	order: Number.parseInt(e.target.value, 10) || 0,
-																})
-															}
-														/>
-													</fieldset>
-													<fieldset className="fieldset">
-														<legend className="fieldset-legend font-black text-base-content/60 text-xs uppercase">
-															Priority
-														</legend>
-														<select
-															className="select select-sm select-bordered bg-base-100"
-															value={cat.priority}
-															disabled={isReadOnly}
-															onChange={(e) =>
-																handleCategoryUpdate(idx, {
-																	priority: Number.parseInt(e.target.value, 10),
-																})
-															}
-														>
-															<option value={-1}>Low</option>
-															<option value={0}>Normal</option>
-															<option value={1}>High</option>
-														</select>
-													</fieldset>
-													<fieldset className="fieldset">
-														<legend className="fieldset-legend font-black text-base-content/60 text-xs uppercase">
-															Dir Mapping
-														</legend>
-														<div className="flex items-center gap-2">
-															<input
-																type="text"
-																className="input input-sm input-bordered flex-1 bg-base-100 font-mono text-[11px]"
-																value={cat.dir}
-																readOnly={isReadOnly}
-																placeholder={isDefault ? "complete" : "optional"}
-																onChange={(e) => handleCategoryUpdate(idx, { dir: e.target.value })}
-															/>
-															{!isReadOnly && !isDefault && (
-																<button
-																	type="button"
-																	className="btn btn-square btn-ghost btn-sm text-error opacity-0 transition-opacity group-hover:opacity-100"
-																	onClick={() => handleRemoveCategory(idx)}
-																>
-																	<Trash2 className="h-3.5 w-3.5" />
-																</button>
-															)}
-														</div>
-													</fieldset>
-												</div>
-											</div>
-										);
-									})}
-							</div>
-
-							{showAddCategory && (
-								<div className="zoom-in-95 animate-in space-y-5 rounded-xl border-2 border-primary/30 border-dashed bg-primary/5 p-5">
-									<h5 className="font-bold text-xs">New Category Definition</h5>
-									<div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
-										<input
-											type="text"
-											className="input input-sm input-bordered"
-											placeholder="Label (e.g. movies)"
-											value={newCategory.name}
-											onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
-										/>
-										<input
-											type="number"
-											className="input input-sm input-bordered"
-											placeholder="Order"
-											value={newCategory.order}
-											onChange={(e) =>
-												setNewCategory({
-													...newCategory,
-													order: Number.parseInt(e.target.value, 10) || 1,
-												})
-											}
-										/>
-										<select
-											className="select select-sm select-bordered"
-											value={newCategory.priority}
-											onChange={(e) =>
-												setNewCategory({
-													...newCategory,
-													priority: Number.parseInt(e.target.value, 10),
-												})
-											}
-										>
-											<option value={-1}>Low</option>
-											<option value={0}>Normal</option>
-											<option value={1}>High</option>
-										</select>
-										<input
-											type="text"
-											className="input input-sm input-bordered"
-											placeholder="Subdir (optional)"
-											value={newCategory.dir}
-											onChange={(e) => setNewCategory({ ...newCategory, dir: e.target.value })}
-										/>
-									</div>
-									<div className="flex justify-end gap-2">
-										<button
-											type="button"
-											className="btn btn-ghost btn-sm"
-											onClick={() => {
-												setShowAddCategory(false);
-												setNewCategory(DEFAULT_NEW_CATEGORY);
-											}}
-										>
-											Cancel
-										</button>
-										<button
-											type="button"
-											className="btn btn-primary btn-sm px-4"
-											onClick={handleAddCategory}
-											disabled={!newCategory.name.trim()}
-										>
-											Save Definition
-										</button>
-									</div>
-								</div>
-							)}
-						</div>
-
-						{/* External Fallback */}
-						<div className="fade-in slide-in-from-top-6 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-							<div className="flex items-center gap-2">
-								<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-									Failover Engine
-								</h4>
-								<div className="h-px flex-1 bg-base-300/50" />
-							</div>
-
-							<div className="space-y-6">
-								<div className="rounded-xl border border-info/10 bg-info/5 p-4">
-									<div className="flex gap-3">
-										<Info className="mt-0.5 h-4 w-4 shrink-0 text-info" />
-										<p className="break-words text-[11px] leading-relaxed opacity-80">
-											Failover allows internal processing failures to be automatically sent to a
-											real external SABnzbd instance after max retries.
-										</p>
-									</div>
+						{activeTab === "server" && (
+							<div className="fade-in slide-in-from-top-2 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+								<div className="flex items-center gap-2">
+									<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
+										Base Config
+									</h4>
+									<div className="h-px flex-1 bg-base-300/50" />
 								</div>
 
 								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 									<fieldset className="fieldset">
-										<legend className="fieldset-legend font-semibold">External Host</legend>
+										<legend className="fieldset-legend font-semibold">
+											Virtual Root (Complete Dir)
+										</legend>
 										<input
 											type="text"
 											className="input input-bordered w-full bg-base-100 font-mono text-sm"
-											value={formData.fallback_host || ""}
+											value={formData.complete_dir}
 											readOnly={isReadOnly}
-											placeholder="http://192.168.1.10:8080"
-											onChange={(e) => updateFormData({ fallback_host: e.target.value })}
+											placeholder="/"
+											onChange={(e) => updateFormData({ complete_dir: e.target.value })}
 										/>
+										<p className="label break-words text-base-content/70 text-xs">
+											Relative to your mount point.
+										</p>
 									</fieldset>
 
 									<fieldset className="fieldset">
-										<legend className="fieldset-legend font-semibold">API Key</legend>
-										<div className="relative">
-											<input
-												type={showApiKey ? "text" : "password"}
-												className="input input-bordered w-full bg-base-100 pr-10 font-mono text-sm"
-												value={fallbackApiKey}
-												readOnly={isReadOnly}
-												placeholder={
-													formData.fallback_host && config.sabnzbd.fallback_api_key_set
-														? "••••••••••••••••"
-														: "Paste API key..."
-												}
-												onChange={(e) => {
-													setFallbackApiKey(e.target.value);
-													setHasChanges(true);
-												}}
-											/>
-											<button
-												type="button"
-												className="-translate-y-1/2 btn btn-ghost btn-sm absolute top-1/2 right-2"
-												onClick={() => setShowApiKey(!showApiKey)}
-											>
-												{showApiKey ? (
-													<EyeOff className="h-4 w-4 text-base-content/70" />
-												) : (
-													<Eye className="h-4 w-4 text-base-content/70" />
-												)}
-											</button>
-										</div>
+										<legend className="fieldset-legend font-semibold">Public Callback URL</legend>
+										<input
+											type="url"
+											className="input input-bordered w-full bg-base-100 font-mono text-sm"
+											value={formData.download_client_base_url || defaultDownloadClientUrl}
+											onChange={(e) => updateFormData({ download_client_base_url: e.target.value })}
+											placeholder={defaultDownloadClientUrl}
+											disabled={isReadOnly}
+										/>
+										<p className="label break-words text-base-content/70 text-xs">
+											The URL ARR instances use to reach this API.
+										</p>
+									</fieldset>
+
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend font-semibold">
+											History Retention (minutes)
+										</legend>
+										<input
+											type="number"
+											className="input input-bordered w-full bg-base-100 font-mono text-sm"
+											value={formData.history_retention_minutes}
+											readOnly={isReadOnly}
+											onChange={(e) =>
+												updateFormData({
+													history_retention_minutes: Number.parseInt(e.target.value, 10) || 0,
+												})
+											}
+										/>
+										<p className="label break-words text-base-content/70 text-xs">
+											How far back the emulated history goes when polled by Arrs.
+										</p>
 									</fieldset>
 								</div>
 							</div>
-						</div>
+						)}
+
+						{/* Categories */}
+						{activeTab === "categories" && (
+							<div className="fade-in slide-in-from-top-4 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+								<div className="flex items-center justify-between gap-4">
+									<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
+										Category Mapping
+									</h4>
+									{!isReadOnly && (
+										<button
+											type="button"
+											className="btn btn-sm btn-primary px-4 shadow-sm"
+											onClick={() => setShowAddCategory(true)}
+										>
+											<Plus className="h-3 w-3" /> Add
+										</button>
+									)}
+								</div>
+
+								<div className="space-y-3">
+									{formData.categories
+										.sort((a, b) => a.order - b.order)
+										.map((cat, idx) => {
+											const isDefault = isDefaultCategory(cat.name);
+											return (
+												<div
+													key={idx}
+													className={`group relative rounded-xl border p-4 transition-all ${isDefault ? "border-primary/20 bg-primary/5" : "border-base-300 bg-base-100/50 hover:bg-base-100"}`}
+												>
+													{isDefault && (
+														<span className="absolute top-2 right-3 font-black text-[8px] text-base-content/80 text-primary uppercase tracking-widest">
+															System Core
+														</span>
+													)}
+
+													<div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+														<fieldset className="fieldset">
+															<legend className="fieldset-legend font-black text-base-content/60 text-xs uppercase">
+																Label
+															</legend>
+															<input
+																type="text"
+																className="input input-sm input-bordered bg-base-100 font-bold"
+																value={cat.name}
+																readOnly={isReadOnly || isDefault}
+																onChange={(e) =>
+																	handleCategoryUpdate(idx, { name: e.target.value })
+																}
+															/>
+														</fieldset>
+														<fieldset className="fieldset">
+															<legend className="fieldset-legend font-black text-base-content/60 text-xs uppercase">
+																Order
+															</legend>
+															<input
+																type="number"
+																className="input input-sm input-bordered bg-base-100 font-mono"
+																value={cat.order}
+																readOnly={isReadOnly}
+																onChange={(e) =>
+																	handleCategoryUpdate(idx, {
+																		order: Number.parseInt(e.target.value, 10) || 0,
+																	})
+																}
+															/>
+														</fieldset>
+														<fieldset className="fieldset">
+															<legend className="fieldset-legend font-black text-base-content/60 text-xs uppercase">
+																Priority
+															</legend>
+															<select
+																className="select select-sm select-bordered bg-base-100"
+																value={cat.priority}
+																disabled={isReadOnly}
+																onChange={(e) =>
+																	handleCategoryUpdate(idx, {
+																		priority: Number.parseInt(e.target.value, 10),
+																	})
+																}
+															>
+																<option value={-1}>Low</option>
+																<option value={0}>Normal</option>
+																<option value={1}>High</option>
+															</select>
+														</fieldset>
+														<fieldset className="fieldset">
+															<legend className="fieldset-legend font-black text-base-content/60 text-xs uppercase">
+																Dir Mapping
+															</legend>
+															<div className="flex items-center gap-2">
+																<input
+																	type="text"
+																	className="input input-sm input-bordered flex-1 bg-base-100 font-mono text-[11px]"
+																	value={cat.dir}
+																	readOnly={isReadOnly}
+																	placeholder={isDefault ? "complete" : "optional"}
+																	onChange={(e) =>
+																		handleCategoryUpdate(idx, { dir: e.target.value })
+																	}
+																/>
+																{!isReadOnly && !isDefault && (
+																	<button
+																		type="button"
+																		className="btn btn-square btn-ghost btn-sm text-error opacity-0 transition-opacity group-hover:opacity-100"
+																		onClick={() => handleRemoveCategory(idx)}
+																	>
+																		<Trash2 className="h-3.5 w-3.5" />
+																	</button>
+																)}
+															</div>
+														</fieldset>
+													</div>
+												</div>
+											);
+										})}
+								</div>
+
+								{showAddCategory && (
+									<div className="zoom-in-95 animate-in space-y-5 rounded-xl border-2 border-primary/30 border-dashed bg-primary/5 p-5">
+										<h5 className="font-bold text-xs">New Category Definition</h5>
+										<div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+											<input
+												type="text"
+												className="input input-sm input-bordered"
+												placeholder="Label (e.g. movies)"
+												value={newCategory.name}
+												onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
+											/>
+											<input
+												type="number"
+												className="input input-sm input-bordered"
+												placeholder="Order"
+												value={newCategory.order}
+												onChange={(e) =>
+													setNewCategory({
+														...newCategory,
+														order: Number.parseInt(e.target.value, 10) || 1,
+													})
+												}
+											/>
+											<select
+												className="select select-sm select-bordered"
+												value={newCategory.priority}
+												onChange={(e) =>
+													setNewCategory({
+														...newCategory,
+														priority: Number.parseInt(e.target.value, 10),
+													})
+												}
+											>
+												<option value={-1}>Low</option>
+												<option value={0}>Normal</option>
+												<option value={1}>High</option>
+											</select>
+											<input
+												type="text"
+												className="input input-sm input-bordered"
+												placeholder="Subdir (optional)"
+												value={newCategory.dir}
+												onChange={(e) => setNewCategory({ ...newCategory, dir: e.target.value })}
+											/>
+										</div>
+										<div className="flex justify-end gap-2">
+											<button
+												type="button"
+												className="btn btn-ghost btn-sm"
+												onClick={() => {
+													setShowAddCategory(false);
+													setNewCategory(DEFAULT_NEW_CATEGORY);
+												}}
+											>
+												Cancel
+											</button>
+											<button
+												type="button"
+												className="btn btn-primary btn-sm px-4"
+												onClick={handleAddCategory}
+												disabled={!newCategory.name.trim()}
+											>
+												Save Definition
+											</button>
+										</div>
+									</div>
+								)}
+							</div>
+						)}
+
+						{/* External Fallback */}
+						{activeTab === "failover" && (
+							<div className="fade-in slide-in-from-top-6 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+								<div className="flex items-center gap-2">
+									<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
+										Failover Engine
+									</h4>
+									<div className="h-px flex-1 bg-base-300/50" />
+								</div>
+
+								<div className="space-y-6">
+									<div className="rounded-xl border border-info/10 bg-info/5 p-4">
+										<div className="flex gap-3">
+											<Info className="mt-0.5 h-4 w-4 shrink-0 text-info" />
+											<p className="break-words text-[11px] leading-relaxed opacity-80">
+												Failover allows internal processing failures to be automatically sent to a
+												real external SABnzbd instance after max retries.
+											</p>
+										</div>
+									</div>
+
+									<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+										<fieldset className="fieldset">
+											<legend className="fieldset-legend font-semibold">External Host</legend>
+											<input
+												type="text"
+												className="input input-bordered w-full bg-base-100 font-mono text-sm"
+												value={formData.fallback_host || ""}
+												readOnly={isReadOnly}
+												placeholder="http://192.168.1.10:8080"
+												onChange={(e) => updateFormData({ fallback_host: e.target.value })}
+											/>
+										</fieldset>
+
+										<fieldset className="fieldset">
+											<legend className="fieldset-legend font-semibold">API Key</legend>
+											<div className="relative">
+												<input
+													type={showApiKey ? "text" : "password"}
+													className="input input-bordered w-full bg-base-100 pr-10 font-mono text-sm"
+													value={fallbackApiKey}
+													readOnly={isReadOnly}
+													placeholder={
+														formData.fallback_host && config.sabnzbd.fallback_api_key_set
+															? "••••••••••••••••"
+															: "Paste API key..."
+													}
+													onChange={(e) => {
+														setFallbackApiKey(e.target.value);
+														setHasChanges(true);
+													}}
+												/>
+												<button
+													type="button"
+													className="-translate-y-1/2 btn btn-ghost btn-sm absolute top-1/2 right-2"
+													onClick={() => setShowApiKey(!showApiKey)}
+												>
+													{showApiKey ? (
+														<EyeOff className="h-4 w-4 text-base-content/70" />
+													) : (
+														<Eye className="h-4 w-4 text-base-content/70" />
+													)}
+												</button>
+											</div>
+										</fieldset>
+									</div>
+								</div>
+							</div>
+						)}
 					</>
+				)}
+
+				{activeTab !== "server" && !formData.enabled && (
+					<div className="rounded-2xl border-2 border-base-300 border-dashed bg-base-200/40 p-8 text-center text-base-content/60 text-sm">
+						Enable the virtual API server in Server before configuring this section.
+					</div>
 				)}
 			</div>
 

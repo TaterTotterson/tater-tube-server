@@ -195,9 +195,10 @@ func TestConfig_Validate_TubeTVLogoPaths(t *testing.T) {
 	cfg.TubeTV.ChannelLogosEnabled = nil
 	cfg.TubeTV.CustomChannels = []TubeTVCustomChannel{
 		{
-			ID:       "cartoons",
-			Title:    "Cartoons",
-			LogoPath: "/countries/united-states/cartoon-network-us.png",
+			ID:           "cartoons",
+			Title:        "Cartoons",
+			LogoPath:     "/countries/united-states/cartoon-network-us.png",
+			LogoPosition: "top-left",
 		},
 	}
 
@@ -205,6 +206,7 @@ func TestConfig_Validate_TubeTVLogoPaths(t *testing.T) {
 	assert.NotNil(t, cfg.TubeTV.ChannelLogosEnabled)
 	assert.True(t, *cfg.TubeTV.ChannelLogosEnabled)
 	assert.Equal(t, "countries/united-states/cartoon-network-us.png", cfg.TubeTV.CustomChannels[0].LogoPath)
+	assert.Equal(t, "top_left", cfg.TubeTV.CustomChannels[0].LogoPosition)
 
 	invalid := DefaultConfig(t.TempDir())
 	invalid.TubeTV.CustomChannels = []TubeTVCustomChannel{
@@ -213,6 +215,13 @@ func TestConfig_Validate_TubeTVLogoPaths(t *testing.T) {
 	err := invalid.Validate()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "logo_path")
+
+	unknownPosition := DefaultConfig(t.TempDir())
+	unknownPosition.TubeTV.CustomChannels = []TubeTVCustomChannel{
+		{ID: "default", Title: "Default", LogoPosition: "center"},
+	}
+	assert.NoError(t, unknownPosition.Validate())
+	assert.Equal(t, "bottom_right", unknownPosition.TubeTV.CustomChannels[0].LogoPosition)
 }
 
 func TestConfig_GetWebhookBaseURL(t *testing.T) {

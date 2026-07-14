@@ -18,6 +18,7 @@ import { useProviders } from "../../hooks/useProviders";
 import { formatExpirationDate } from "../../lib/utils";
 import type { ConfigResponse, ProviderConfig } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
+import { ConfigMiniTabs } from "./ConfigMiniTabs";
 import { ProviderModal } from "./ProviderModal";
 
 interface ProvidersConfigSectionProps {
@@ -25,6 +26,8 @@ interface ProvidersConfigSectionProps {
 	onUpdate?: (section: string, data: ProviderConfig[]) => Promise<void>;
 	isUpdating?: boolean;
 }
+
+type ProvidersTab = "providers" | "advanced";
 
 export function ProvidersConfigSection({
 	config,
@@ -46,6 +49,7 @@ export function ProvidersConfigSection({
 
 	const [formData, setFormData] = useState<ProviderConfig[]>(config.providers ?? []);
 	const [hasChanges, setHasChanges] = useState(false);
+	const [activeTab, setActiveTab] = useState<ProvidersTab>("providers");
 	// Single user-agent shared by every provider (stored per-provider, edited globally here).
 	const [globalUserAgent, setGlobalUserAgent] = useState(
 		(config.providers ?? []).map((p) => p.user_agent).find(Boolean) ?? "",
@@ -611,6 +615,15 @@ export function ProvidersConfigSection({
 
 	const primaryProviders = formData.filter((p) => !p.is_backup_provider);
 	const backupProviders = formData.filter((p) => p.is_backup_provider);
+	const miniTabs = [
+		{
+			id: "providers" as const,
+			label: "Providers",
+			icon: <Wifi className="h-4 w-4" />,
+			count: formData.length,
+		},
+		{ id: "advanced" as const, label: "Advanced", icon: <Gauge className="h-4 w-4" /> },
+	];
 
 	const renderSection = (
 		title: string,
@@ -658,88 +671,95 @@ export function ProvidersConfigSection({
 
 	return (
 		<div className="space-y-8">
-			<div ref={listRef} className="relative space-y-8">
-				{renderSection(
-					"Shared Pool",
-					"Used together for every download.",
-					primaryProviders,
-					"success",
-					"Add Primary",
-					() => handleCreate(false),
-					"No primary providers yet. Add one to start downloading.",
-				)}
+			<ConfigMiniTabs tabs={miniTabs} activeTab={activeTab} onChange={setActiveTab} />
 
-				{renderSection(
-					"Backup",
-					"Only used when the shared pool fails.",
-					backupProviders,
-					"warning",
-					"Add Backup",
-					() => handleCreate(true),
-					"No backup providers configured.",
-				)}
-			</div>
+			{activeTab === "providers" && (
+				<div ref={listRef} className="relative space-y-8">
+					{renderSection(
+						"Shared Pool",
+						"Used together for every download.",
+						primaryProviders,
+						"success",
+						"Add Primary",
+						() => handleCreate(false),
+						"No primary providers yet. Add one to start downloading.",
+					)}
 
-			{/* Global Provider User-Agent — one value applied to every provider above */}
-			<div className="space-y-3 border-base-200 border-t pt-6">
-				<div>
-					<h3 className="font-bold text-base-content text-lg tracking-tight">
-						Provider User-Agent
-					</h3>
-					<p className="text-base-content/50 text-xs">
-						Sent to every NNTP provider above. Leave empty to disable.
-					</p>
+					{renderSection(
+						"Backup",
+						"Only used when the shared pool fails.",
+						backupProviders,
+						"warning",
+						"Add Backup",
+						() => handleCreate(true),
+						"No backup providers configured.",
+					)}
 				</div>
-				<input
-					type="text"
-					className="input input-bordered w-full font-mono text-sm"
-					value={globalUserAgent}
-					onChange={(e) => handleGlobalUserAgentChange(e.target.value)}
-					placeholder="e.g. SABnzbd/4.5.5"
-				/>
-			</div>
+			)}
 
-			{/* NNTP Pipeline Optimization */}
-			<div className="space-y-3 border-base-200 border-t pt-6">
-				<div>
-					<h3 className="font-bold text-base-content text-lg tracking-tight">NNTP Pipeline</h3>
-					<p className="text-base-content/50 text-xs">
-						Auto-tune the pipeline depth (requests in flight per connection) by speed-testing each
-						enabled provider, or disable pipelining everywhere. Run when downloads are idle for the
-						most accurate result.
-					</p>
+			{activeTab === "advanced" && (
+				<div className="space-y-8">
+					{/* Global Provider User-Agent — one value applied to every provider above */}
+					<div className="space-y-3 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+						<div>
+							<h3 className="font-bold text-base-content text-lg tracking-tight">
+								Provider User-Agent
+							</h3>
+							<p className="text-base-content/50 text-xs">
+								Sent to every NNTP provider above. Leave empty to disable.
+							</p>
+						</div>
+						<input
+							type="text"
+							className="input input-bordered w-full font-mono text-sm"
+							value={globalUserAgent}
+							onChange={(e) => handleGlobalUserAgentChange(e.target.value)}
+							placeholder="e.g. SABnzbd/4.5.5"
+						/>
+					</div>
+
+					{/* NNTP Pipeline Optimization */}
+					<div className="space-y-3 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+						<div>
+							<h3 className="font-bold text-base-content text-lg tracking-tight">NNTP Pipeline</h3>
+							<p className="text-base-content/50 text-xs">
+								Auto-tune the pipeline depth by speed-testing each enabled provider, or disable
+								pipelining everywhere. Run when downloads are idle for the most accurate result.
+							</p>
+						</div>
+						<div className="flex flex-wrap items-center gap-3">
+							<button
+								type="button"
+								className="btn btn-primary gap-2"
+								onClick={handleAutoTunePipeline}
+								disabled={!!pipelineTuning || disablingPipeline || formData.length === 0}
+							>
+								{pipelineTuning ? (
+									<span className="loading loading-spinner loading-sm" />
+								) : (
+									<Gauge className="h-4 w-4" />
+								)}
+								{pipelineTuning
+									? `Testing ${pipelineTuning.current}/${pipelineTuning.total}${pipelineTuning.host ? ` · ${pipelineTuning.host}` : ""}…`
+									: "Auto-Tune Pipeline"}
+							</button>
+							<button
+								type="button"
+								className="btn btn-outline gap-2"
+								onClick={handleDisablePipelining}
+								disabled={!!pipelineTuning || disablingPipeline || formData.length === 0}
+							>
+								{disablingPipeline ? (
+									<span className="loading loading-spinner loading-sm" />
+								) : (
+									<PowerOff className="h-4 w-4" />
+								)}
+								Disable Pipelining
+							</button>
+						</div>
+					</div>
 				</div>
-				<div className="flex flex-wrap items-center gap-3">
-					<button
-						type="button"
-						className="btn btn-primary gap-2"
-						onClick={handleAutoTunePipeline}
-						disabled={!!pipelineTuning || disablingPipeline || formData.length === 0}
-					>
-						{pipelineTuning ? (
-							<span className="loading loading-spinner loading-sm" />
-						) : (
-							<Gauge className="h-4 w-4" />
-						)}
-						{pipelineTuning
-							? `Testing ${pipelineTuning.current}/${pipelineTuning.total}${pipelineTuning.host ? ` · ${pipelineTuning.host}` : ""}…`
-							: "Auto-Tune Pipeline"}
-					</button>
-					<button
-						type="button"
-						className="btn btn-outline gap-2"
-						onClick={handleDisablePipelining}
-						disabled={!!pipelineTuning || disablingPipeline || formData.length === 0}
-					>
-						{disablingPipeline ? (
-							<span className="loading loading-spinner loading-sm" />
-						) : (
-							<PowerOff className="h-4 w-4" />
-						)}
-						Disable Pipelining
-					</button>
-				</div>
-			</div>
+			)}
 
 			{/* Save & Validation */}
 			<div className="space-y-4 border-base-200 border-t pt-6">

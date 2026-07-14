@@ -335,7 +335,7 @@ func (s *taterTVHLSSession) transcodeItem(ctx context.Context, index int, item t
 	}
 	playlistPath := filepath.Join(itemDir, "index.m3u8")
 	segmentPattern := filepath.Join(itemDir, "seg-%05d.ts")
-	args := buildTaterTVChannelHLSArgs(s.transcodeCfg, s.profile, s.accel, item.Path, item.StartSeconds, item.DurationSeconds, logoFile, playlistPath, segmentPattern)
+	args := buildTaterTVChannelHLSArgs(s.transcodeCfg, s.profile, s.accel, item.Path, item.StartSeconds, item.DurationSeconds, logoFile, s.channel.LogoPosition, playlistPath, segmentPattern)
 	var stderr limitedBuffer
 	cmd := exec.CommandContext(ctx, s.ffmpegPath, args...)
 	cmd.Stderr = &stderr
@@ -540,7 +540,7 @@ func parseTaterTVHLSPlaylist(path string) ([]taterTVParsedHLSSegment, error) {
 	return out, scanner.Err()
 }
 
-func buildTaterTVChannelHLSArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, inputPath string, startSeconds, durationSeconds float64, logoFile, outputPlaylist, segmentPattern string) []string {
+func buildTaterTVChannelHLSArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, inputPath string, startSeconds, durationSeconds float64, logoFile, logoPosition, outputPlaylist, segmentPattern string) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
@@ -562,7 +562,7 @@ func buildTaterTVChannelHLSArgs(cfg config.TranscodingConfig, profile transcodeP
 	videoCodec, filters := transcodeVideoSettings(accel, cfg.HardwareDevice, profile)
 	if logoFile != "" {
 		args = append(args,
-			"-filter_complex", taterTVChannelLogoFilter(filters, profile),
+			"-filter_complex", taterTVChannelLogoFilter(filters, profile, logoPosition),
 			"-map", "[vout]",
 			"-map", "0:a:0?",
 			"-sn",

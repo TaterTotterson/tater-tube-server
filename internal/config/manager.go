@@ -194,6 +194,7 @@ type TubeTVCustomChannel struct {
 	CommercialCategory string               `yaml:"commercial_category,omitempty" mapstructure:"commercial_category" json:"commercial_category,omitempty"`
 	LogoPath           string               `yaml:"logo_path,omitempty" mapstructure:"logo_path" json:"logo_path,omitempty"`
 	LogoTitle          string               `yaml:"logo_title,omitempty" mapstructure:"logo_title" json:"logo_title,omitempty"`
+	LogoPosition       string               `yaml:"logo_position,omitempty" mapstructure:"logo_position" json:"logo_position,omitempty"`
 	Sources            []TubeTVCustomSource `yaml:"sources" mapstructure:"sources" json:"sources"`
 }
 
@@ -951,6 +952,7 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("tube_tv custom channel %q logo_path must be a relative png path", channel.Title)
 		}
 		channel.LogoTitle = strings.TrimSpace(channel.LogoTitle)
+		channel.LogoPosition = NormalizeTubeTVLogoPosition(channel.LogoPosition)
 		cleanSources := make([]TubeTVCustomSource, 0, len(channel.Sources))
 		for _, source := range channel.Sources {
 			source.CategoryID = sanitizeTubeTVSourceCategoryID(source.CategoryID)
@@ -1324,6 +1326,21 @@ func SanitizeTubeTVLogoPath(value string) string {
 		return ""
 	}
 	return clean
+}
+
+func NormalizeTubeTVLogoPosition(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "top_left", "top-left", "tl":
+		return "top_left"
+	case "top_right", "top-right", "tr":
+		return "top_right"
+	case "bottom_left", "bottom-left", "bl":
+		return "bottom_left"
+	case "bottom_right", "bottom-right", "br", "":
+		return "bottom_right"
+	default:
+		return "bottom_right"
+	}
 }
 
 // ValidateDirectories validates that all configured directories are writable
