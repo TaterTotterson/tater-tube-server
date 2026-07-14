@@ -161,6 +161,35 @@ func TestConfig_Validate_QueueCleanupRuleAction(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid action")
 }
 
+func TestConfig_Validate_TubeTVChannelNumbers(t *testing.T) {
+	cfg := DefaultConfig(t.TempDir())
+	cfg.TubeTV.CustomChannels = []TubeTVCustomChannel{
+		{ID: "one", Title: "One", ChannelNumber: "9"},
+		{ID: "two", Title: "Two", ChannelNumber: "10"},
+	}
+
+	assert.NoError(t, cfg.Validate())
+	assert.Equal(t, "09", cfg.TubeTV.CustomChannels[0].ChannelNumber)
+	assert.Equal(t, "10", cfg.TubeTV.CustomChannels[1].ChannelNumber)
+
+	duplicate := DefaultConfig(t.TempDir())
+	duplicate.TubeTV.CustomChannels = []TubeTVCustomChannel{
+		{ID: "one", Title: "One", ChannelNumber: "09"},
+		{ID: "two", Title: "Two", ChannelNumber: "9"},
+	}
+	err := duplicate.Validate()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicated")
+
+	invalid := DefaultConfig(t.TempDir())
+	invalid.TubeTV.CustomChannels = []TubeTVCustomChannel{
+		{ID: "one", Title: "One", ChannelNumber: "01"},
+	}
+	err = invalid.Validate()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "02 to 99")
+}
+
 func TestConfig_GetWebhookBaseURL(t *testing.T) {
 	tests := []struct {
 		name     string

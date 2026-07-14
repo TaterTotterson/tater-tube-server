@@ -28,10 +28,16 @@ type taterTVEpisodeGroup struct {
 type taterTVSource struct {
 	Title              string
 	SourceType         string
+	ChannelNumber      string
 	CommercialCategory string
 	Programs           []taterUsenetItem
 	Groups             []taterTVEpisodeGroup
 	Seen               map[string]bool
+}
+
+type taterTVNumberedSource struct {
+	Number string
+	Source taterTVSource
 }
 
 type taterTVCommercial struct {
@@ -382,15 +388,19 @@ func taterBuildTVLineupUntil(cfg *config.Config, baseURL, playerToken string, mi
 
 	commercials := taterTVCommercialCategories(cfg, baseURL, playerToken)
 	channels := []taterTVChannel{}
-	for index, source := range ordered {
-		number := fmt.Sprintf("%02d", len(channels)+2)
+	existingByNumber := make(map[string]taterTVChannel, len(existing))
+	for _, channel := range existing {
+		existingByNumber[channel.Number] = channel
+	}
+	for _, numbered := range taterTVNumberSources(ordered) {
+		number := numbered.Number
+		source := numbered.Source
 		var schedule []map[string]any
 		total := 0.0
-		if index < len(existing) &&
-			strings.EqualFold(existing[index].Number, number) &&
-			strings.EqualFold(existing[index].Title, source.Title) {
-			schedule = append(schedule, existing[index].Schedule...)
-			total = existing[index].TotalDuration
+		if existingChannel, ok := existingByNumber[number]; ok &&
+			strings.EqualFold(existingChannel.Title, source.Title) {
+			schedule = append(schedule, existingChannel.Schedule...)
+			total = existingChannel.TotalDuration
 		}
 		added, nextTotal := taterTVBuildScheduleUntil(cfg, source, commercials, rng, total, minDurationSeconds)
 		schedule = append(schedule, added...)
@@ -407,6 +417,54 @@ func taterBuildTVLineupUntil(cfg *config.Config, baseURL, playerToken string, mi
 		})
 	}
 	return channels, nil
+}
+
+func taterTVNumberSources(sources []taterTVSource) []taterTVNumberedSource {
+	reserved := make(map[int]taterTVSource)
+	unnumbered := make([]taterTVSource, 0, len(sources))
+	for _, source := range sources {
+		number, ok := parseTaterTVChannelNumber(source.ChannelNumber)
+		if ok {
+			if _, exists := reserved[number]; !exists {
+				reserved[number] = source
+				continue
+			}
+		}
+		unnumbered = append(unnumbered, source)
+	}
+
+	numbered := make([]taterTVNumberedSource, 0, len(sources))
+	unnumberedIndex := 0
+	for channelNumber := 2; channelNumber <= 99 && (unnumberedIndex < len(unnumbered) || len(reserved) > 0); channelNumber++ {
+		if source, ok := reserved[channelNumber]; ok {
+			numbered = append(numbered, taterTVNumberedSource{
+				Number: fmt.Sprintf("%02d", channelNumber),
+				Source: source,
+			})
+			delete(reserved, channelNumber)
+			continue
+		}
+		if unnumberedIndex < len(unnumbered) {
+			numbered = append(numbered, taterTVNumberedSource{
+				Number: fmt.Sprintf("%02d", channelNumber),
+				Source: unnumbered[unnumberedIndex],
+			})
+			unnumberedIndex++
+		}
+	}
+	return numbered
+}
+
+func parseTaterTVChannelNumber(value string) (int, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, false
+	}
+	number, err := strconv.Atoi(value)
+	if err != nil || number < 2 || number > 99 {
+		return 0, false
+	}
+	return number, true
 }
 
 func taterTVOrderedSources(cfg *config.Config, baseURL, playerToken string) ([]taterTVSource, error) {
@@ -473,6 +531,7 @@ func taterTVCustomSources(cfg *config.Config, baseURL, playerToken string) ([]ta
 		source := taterTVSource{
 			Title:              cleanTaterText(channel.Title),
 			SourceType:         "custom",
+			ChannelNumber:      channel.ChannelNumber,
 			CommercialCategory: channel.CommercialCategory,
 			Seen:               map[string]bool{},
 		}

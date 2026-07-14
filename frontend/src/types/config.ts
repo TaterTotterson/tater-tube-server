@@ -540,6 +540,7 @@ export interface TubeTVCustomSource {
 export interface TubeTVCustomChannel {
 	id: string;
 	title: string;
+	channel_number?: string;
 	commercial_category?: string;
 	sources: TubeTVCustomSource[];
 }

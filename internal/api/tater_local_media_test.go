@@ -1,6 +1,9 @@
 package api
 
 import (
+	"context"
+	"fmt"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -687,7 +690,40 @@ func TestTaterTVGuideBuildsAndExtendsSharedSchedule(t *testing.T) {
 	}
 }
 
-func TestTaterTVConcatPlanStartsAtLivePosition(t *testing.T) {
+func TestTaterTVNumberSourcesHonorsReservedCustomChannels(t *testing.T) {
+	numbered := taterTVNumberSources([]taterTVSource{{
+		Title:         "The Phooey",
+		SourceType:    "custom",
+		ChannelNumber: "09",
+	}})
+	if len(numbered) != 1 || numbered[0].Number != "09" || numbered[0].Source.Title != "The Phooey" {
+		t.Fatalf("expected lone custom channel to keep 09, got %#v", numbered)
+	}
+
+	sources := []taterTVSource{{Title: "Custom 09", SourceType: "custom", ChannelNumber: "09"}}
+	for i := 1; i <= 8; i++ {
+		sources = append(sources, taterTVSource{Title: fmt.Sprintf("Auto %d", i), SourceType: "auto"})
+	}
+	numbered = taterTVNumberSources(sources)
+	if len(numbered) != 9 {
+		t.Fatalf("expected 9 numbered sources, got %#v", numbered)
+	}
+	for i := 0; i < 7; i++ {
+		wantNumber := fmt.Sprintf("%02d", i+2)
+		wantTitle := fmt.Sprintf("Auto %d", i+1)
+		if numbered[i].Number != wantNumber || numbered[i].Source.Title != wantTitle {
+			t.Fatalf("slot %d = %#v, want %s/%s", i, numbered[i], wantNumber, wantTitle)
+		}
+	}
+	if numbered[7].Number != "09" || numbered[7].Source.Title != "Custom 09" {
+		t.Fatalf("expected reserved custom channel at 09, got %#v", numbered[7])
+	}
+	if numbered[8].Number != "10" || numbered[8].Source.Title != "Auto 8" {
+		t.Fatalf("expected auto channels to continue at 10, got %#v", numbered[8])
+	}
+}
+
+func TestTaterTVStreamItemsStartAtLivePosition(t *testing.T) {
 	configDir := t.TempDir()
 	mediaRoot := filepath.Join(configDir, "movies")
 	movieDir := filepath.Join(mediaRoot, "That Movie")
@@ -750,7 +786,7 @@ func TestTaterTVConcatPlanStartsAtLivePosition(t *testing.T) {
 	}
 
 	startedAt := time.Now().Add(-45 * time.Second)
-	items, err := taterTVResolveConcatItems(cfg, channel, startedAt, time.Now(), 90)
+	items, err := taterTVResolveStreamItems(cfg, channel, startedAt, time.Now(), 90)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -767,26 +803,63 @@ func TestTaterTVConcatPlanStartsAtLivePosition(t *testing.T) {
 		t.Fatalf("expected remaining movie duration near 75 seconds, got %f", items[0].DurationSeconds)
 	}
 
-	concatPath, cleanup, err := taterTVWriteConcatFile(items)
+	if items[1].Path != commercialPath {
+		t.Fatalf("unexpected commercial path %q", items[1].Path)
+	}
+	if items[1].StartSeconds != 0 || items[1].DurationSeconds != 30 {
+		t.Fatalf("expected full commercial segment, got %#v", items[1])
+	}
+}
+
+func TestTaterTVSegmentTranscodeArgsMarkDiscontinuity(t *testing.T) {
+	args := buildTaterTVChannelTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["crt_480p"], "none", "/media/movie.mkv", 12.5, 30)
+	joined := strings.Join(args, " ")
+
+	if strings.Contains(joined, "-f concat") {
+		t.Fatalf("segment transcode path must not use concat demuxer: %s", joined)
+	}
+	if !strings.Contains(joined, "-mpegts_flags +resend_headers+initial_discontinuity") {
+		t.Fatalf("expected MPEG-TS discontinuity headers in args: %s", joined)
+	}
+	if !strings.Contains(joined, "-ss 12.500") || !strings.Contains(joined, "-t 30.000") {
+		t.Fatalf("expected segment start/duration in args: %s", joined)
+	}
+}
+
+func TestRunTaterTVChannelSegmentsSkipsFailedSegment(t *testing.T) {
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg")
+	script := `#!/bin/sh
+case "$*" in
+  *bad-commercial.mp4*) echo "bad commercial" >&2; exit 2 ;;
+esac
+printf "segment-ok"
+`
+	if err := os.WriteFile(ffmpegPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	recorder := httptest.NewRecorder()
+	err := runTaterTVChannelSegments(
+		ctx,
+		ffmpegPath,
+		config.TranscodingConfig{},
+		transcodeProfiles["crt_480p"],
+		"none",
+		taterTVStreamWriter{w: recorder},
+		nil,
+		nil,
+		taterTVChannel{Number: "02", Title: "Test"},
+		[]taterTVStreamItem{
+			{Title: "Bad Ad", Kind: "commercial", Path: "bad-commercial.mp4", DurationSeconds: 30, FullDuration: 30},
+			{Title: "Next Video", Kind: "movie", Path: "next-video.mkv", DurationSeconds: 30, FullDuration: 30},
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cleanup()
-	data, err := os.ReadFile(concatPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	manifest := string(data)
-	if !strings.Contains(manifest, "ffconcat version 1.0") {
-		t.Fatalf("missing concat header: %s", manifest)
-	}
-	if !strings.Contains(manifest, "That Movie'\\''s Cut.mkv") {
-		t.Fatalf("expected quoted apostrophe in manifest: %s", manifest)
-	}
-	if !strings.Contains(manifest, "inpoint 45.") || !strings.Contains(manifest, "outpoint 120.") {
-		t.Fatalf("expected live in/out points in manifest: %s", manifest)
-	}
-	if !strings.Contains(manifest, commercialPath) {
-		t.Fatalf("expected commercial in manifest: %s", manifest)
+	if body := recorder.Body.String(); body != "segment-ok" {
+		t.Fatalf("expected successful segment output after failed commercial, got %q", body)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -188,6 +189,7 @@ type TubeTVConfig struct {
 type TubeTVCustomChannel struct {
 	ID                 string               `yaml:"id" mapstructure:"id" json:"id"`
 	Title              string               `yaml:"title" mapstructure:"title" json:"title"`
+	ChannelNumber      string               `yaml:"channel_number,omitempty" mapstructure:"channel_number" json:"channel_number,omitempty"`
 	CommercialCategory string               `yaml:"commercial_category,omitempty" mapstructure:"commercial_category" json:"commercial_category,omitempty"`
 	Sources            []TubeTVCustomSource `yaml:"sources" mapstructure:"sources" json:"sources"`
 }
@@ -907,6 +909,7 @@ func (c *Config) Validate() error {
 	}
 	c.TubeTV.CommercialCategories = cleanCommercialCategories
 	seenTubeTVChannels := make(map[string]bool, len(c.TubeTV.CustomChannels))
+	seenTubeTVChannelNumbers := make(map[string]bool, len(c.TubeTV.CustomChannels))
 	for i := range c.TubeTV.CustomChannels {
 		channel := &c.TubeTV.CustomChannels[i]
 		channel.Title = strings.TrimSpace(channel.Title)
@@ -923,6 +926,17 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("tube_tv custom channel id %q is duplicated", channel.ID)
 		}
 		seenTubeTVChannels[channel.ID] = true
+		normalizedChannelNumber, err := normalizeTubeTVChannelNumber(channel.ChannelNumber)
+		if err != nil {
+			return fmt.Errorf("tube_tv custom channel %q channel_number is invalid: %w", channel.Title, err)
+		}
+		if normalizedChannelNumber != "" {
+			if seenTubeTVChannelNumbers[normalizedChannelNumber] {
+				return fmt.Errorf("tube_tv custom channel number %q is duplicated", normalizedChannelNumber)
+			}
+			seenTubeTVChannelNumbers[normalizedChannelNumber] = true
+		}
+		channel.ChannelNumber = normalizedChannelNumber
 		channel.CommercialCategory = sanitizeLocalMediaID(channel.CommercialCategory)
 		cleanSources := make([]TubeTVCustomSource, 0, len(channel.Sources))
 		for _, source := range channel.Sources {
@@ -1259,6 +1273,22 @@ func sanitizeTubeTVSourceCategoryID(value string) string {
 		}
 	}
 	return sanitizeLocalMediaID(value)
+}
+
+func normalizeTubeTVChannelNumber(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	value = strings.TrimLeft(value, "0")
+	if value == "" {
+		value = "0"
+	}
+	number, err := strconv.Atoi(value)
+	if err != nil || number < 2 || number > 99 {
+		return "", fmt.Errorf("must be a number from 02 to 99")
+	}
+	return fmt.Sprintf("%02d", number), nil
 }
 
 // ValidateDirectories validates that all configured directories are writable
