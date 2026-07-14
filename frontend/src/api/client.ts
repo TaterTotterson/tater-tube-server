@@ -39,8 +39,9 @@ import type {
 	ProviderUpdateRequest,
 	TaterPairingCodeCreateResponse,
 	TaterPlayersConfig,
-	TubeTVCommercialLibrary,
 	TranscodingHardwareDetection,
+	TubeTVCommercialLibrary,
+	TubeTVLocalLibraryResponse,
 } from "../types/config";
 import type { UpdateChannel, UpdateStatusResponse } from "../types/update";
 
@@ -766,6 +767,21 @@ class APIClient {
 		return this.request<TubeTVCommercialLibrary>("/tube-tv/commercials");
 	}
 
+	async getTubeTVLocalLibrary(params?: {
+		categoryId?: string;
+		sourceIndex?: number;
+		path?: string;
+	}) {
+		const searchParams = new URLSearchParams();
+		if (params?.categoryId) searchParams.set("category_id", params.categoryId);
+		if (params?.sourceIndex !== undefined) searchParams.set("source", String(params.sourceIndex));
+		if (params?.path) searchParams.set("path", params.path);
+		const query = searchParams.toString();
+		return this.request<TubeTVLocalLibraryResponse>(
+			`/tube-tv/local-library${query ? `?${query}` : ""}`,
+		);
+	}
+
 	async createTubeTVCommercialCategory(name: string) {
 		return this.request<TubeTVCommercialLibrary>("/tube-tv/commercials/category", {
 			method: "POST",
@@ -776,7 +792,9 @@ class APIClient {
 	async uploadTubeTVCommercials(category: string, files: FileList | File[]) {
 		const formData = new FormData();
 		formData.set("category", category);
-		Array.from(files).forEach((file) => formData.append("files", file));
+		for (const file of Array.from(files)) {
+			formData.append("files", file);
+		}
 
 		return this.request<TubeTVCommercialLibrary>("/tube-tv/commercials/upload", {
 			method: "POST",

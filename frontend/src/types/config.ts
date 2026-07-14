@@ -577,6 +577,29 @@ export interface TubeTVCommercialLibrary {
 	categories: TubeTVCommercialCategory[];
 }
 
+export interface TubeTVLocalLibraryRow {
+	id?: string;
+	title: string;
+	detail?: string;
+	type?: string;
+	mediaType?: string;
+	categoryId?: string;
+	sourceIndex: number;
+	path?: string;
+	count?: number;
+	selectable: boolean;
+	browsable: boolean;
+}
+
+export interface TubeTVLocalLibraryResponse {
+	title: string;
+	categoryId?: string;
+	sourceIndex: number;
+	path?: string;
+	source?: TubeTVCustomSource;
+	rows: TubeTVLocalLibraryRow[];
+}
+
 export interface TaterPlayer {
 	id: string;
 	name: string;
