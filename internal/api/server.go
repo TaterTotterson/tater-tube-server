@@ -131,6 +131,7 @@ func NewServer(
 		configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 			if taterTVGuideConfigChanged(oldConfig, newConfig) {
 				taterTVResetGuide()
+				taterTVResetHLS()
 			}
 		})
 		ctx, cancel := context.WithCancel(context.Background())
@@ -262,6 +263,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Delete("/tater/players/:id", s.handleTaterRevokePlayer)
 	api.Get("/tube-tv/commercials", s.handleTubeTVCommercialLibrary)
 	api.Get("/tube-tv/local-library", s.handleTubeTVLocalLibrary)
+	api.Get("/tube-tv/logos/search", s.handleTubeTVLogoSearch)
 	api.Get("/tube-tv/guide", s.handleTubeTVGuide)
 	api.Post("/tube-tv/guide/rebuild", s.handleTubeTVGuideRebuild)
 	api.Post("/tube-tv/commercials/category", s.handleTubeTVCreateCommercialCategory)

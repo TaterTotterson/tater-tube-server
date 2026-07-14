@@ -36,6 +36,14 @@ func NewTaterTVStreamHandler(configGetter config.ConfigGetter, streamTracker *St
 
 func (h *TaterTVStreamHandler) GetHTTPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/playlist.m3u8") {
+			h.serveHLSPlaylist(w, r)
+			return
+		}
+		if strings.Contains(r.URL.Path, "/hls/") {
+			h.serveHLSSegment(w, r)
+			return
+		}
 		h.serveChannel(w, r)
 	})
 }
@@ -68,7 +76,7 @@ func (h *TaterTVStreamHandler) serveChannel(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	number := taterTVStreamChannelNumber(r.URL.Path)
+	number := taterTVChannelNumberFromPath(r.URL.Path)
 	if number == "" {
 		http.Error(w, "Channel number required", http.StatusBadRequest)
 		return
@@ -181,7 +189,19 @@ func (h *TaterTVStreamHandler) serveChannel(w http.ResponseWriter, r *http.Reque
 			"profile", profileID,
 			"hardware_acceleration", effectiveAccel,
 			"video_codec", videoCodec)
-		err = runTaterTVChannelSegments(streamReq.Context(), ffmpegPath, transcodeCfg, profile, accel, writer, h.streamTracker, stream, channel, items)
+		logoFile := ""
+		if taterTVChannelLogosEnabled(cfg) && channel.LogoPath != "" {
+			resolvedLogo, logoErr := taterTVResolveLogoFile(streamReq.Context(), cfg, channel.LogoPath)
+			if logoErr != nil {
+				slog.WarnContext(streamReq.Context(), "Tube TV channel logo unavailable",
+					"channel", channel.Number,
+					"logo_path", channel.LogoPath,
+					"error", logoErr)
+			} else {
+				logoFile = resolvedLogo
+			}
+		}
+		err = runTaterTVChannelSegments(streamReq.Context(), ffmpegPath, transcodeCfg, profile, accel, writer, h.streamTracker, stream, channel, items, logoFile)
 		if err != nil && streamReq.Context().Err() == nil {
 			consecutiveFailures++
 			slog.WarnContext(streamReq.Context(), "Tube TV channel run failed",
@@ -207,7 +227,7 @@ type taterTVStreamItem struct {
 	FullDuration    float64
 }
 
-func runTaterTVChannelSegments(ctx context.Context, ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, accel string, writer taterTVStreamWriter, tracker *StreamTracker, stream *nzbfilesystem.ActiveStream, channel taterTVChannel, items []taterTVStreamItem) error {
+func runTaterTVChannelSegments(ctx context.Context, ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, accel string, writer taterTVStreamWriter, tracker *StreamTracker, stream *nzbfilesystem.ActiveStream, channel taterTVChannel, items []taterTVStreamItem, logoFile string) error {
 	if len(items) == 0 {
 		return fmt.Errorf("no channel segments")
 	}
@@ -220,7 +240,7 @@ func runTaterTVChannelSegments(ctx context.Context, ffmpegPath string, cfg confi
 		if tracker != nil && stream != nil {
 			tracker.SetMediaInfo(stream.ID, item.FullDuration, item.StartSeconds)
 		}
-		args := buildTaterTVChannelTranscodeArgs(cfg, profile, accel, item.Path, item.StartSeconds, item.DurationSeconds)
+		args := buildTaterTVChannelTranscodeArgs(cfg, profile, accel, item.Path, item.StartSeconds, item.DurationSeconds, logoFile)
 		var stderr limitedBuffer
 		cmd := exec.CommandContext(ctx, ffmpegPath, args...)
 		cmd.Stdout = writer
@@ -281,6 +301,15 @@ func taterTVStreamChannelNumber(path string) string {
 	rest := strings.TrimPrefix(path, "/api/tater/tv/channel/")
 	parts := strings.Split(rest, "/")
 	if len(parts) < 2 || parts[1] != "stream" {
+		return ""
+	}
+	return taterTVChannelNumberFromPath(path)
+}
+
+func taterTVChannelNumberFromPath(path string) string {
+	rest := strings.TrimPrefix(path, "/api/tater/tv/channel/")
+	parts := strings.Split(rest, "/")
+	if len(parts) < 1 {
 		return ""
 	}
 	number, err := url.PathUnescape(parts[0])
@@ -479,7 +508,7 @@ func taterTVResolveSchedulePath(cfg *config.Config, row map[string]any) (string,
 	return path, nil
 }
 
-func buildTaterTVChannelTranscodeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, inputPath string, startSeconds, durationSeconds float64) []string {
+func buildTaterTVChannelTranscodeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, inputPath string, startSeconds, durationSeconds float64, logoFile string) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
@@ -491,17 +520,30 @@ func buildTaterTVChannelTranscodeArgs(cfg config.TranscodingConfig, profile tran
 		args = append(args, "-ss", strconv.FormatFloat(startSeconds, 'f', 3, 64))
 	}
 	args = append(args, "-i", inputPath)
+	logoFile = strings.TrimSpace(logoFile)
+	if logoFile != "" {
+		args = append(args, "-loop", "1", "-framerate", "30", "-i", logoFile)
+	}
 	if durationSeconds > 0 {
 		args = append(args, "-t", strconv.FormatFloat(durationSeconds, 'f', 3, 64))
 	}
-	args = append(args,
-		"-map", "0:v:0",
-		"-map", "0:a:0?",
-		"-sn",
-	)
 
 	videoCodec, filters := transcodeVideoSettings(accel, cfg.HardwareDevice, profile)
-	if filters != "" {
+	if logoFile != "" {
+		args = append(args,
+			"-filter_complex", taterTVChannelLogoFilter(filters, profile),
+			"-map", "[vout]",
+			"-map", "0:a:0?",
+			"-sn",
+		)
+	} else {
+		args = append(args,
+			"-map", "0:v:0",
+			"-map", "0:a:0?",
+			"-sn",
+		)
+	}
+	if filters != "" && logoFile == "" {
 		args = append(args, "-vf", filters)
 	}
 	args = append(args,
@@ -524,6 +566,48 @@ func buildTaterTVChannelTranscodeArgs(cfg config.TranscodingConfig, profile tran
 		"pipe:1",
 	)
 	return args
+}
+
+func taterTVChannelLogoFilter(baseFilters string, profile transcodeProfile) string {
+	preFilters, postFilters := splitTaterTVOverlayFilters(baseFilters)
+	if strings.TrimSpace(preFilters) == "" {
+		preFilters = "null"
+	}
+	logoWidth := clampInt(profile.MaxWidth/12, 96, 220)
+	marginX := clampInt(profile.MaxWidth/64, 12, 48)
+	marginY := clampInt(profile.MaxHeight/36, 10, 40)
+	logoFilters := fmt.Sprintf(
+		"scale=w=%d:h=-1:force_original_aspect_ratio=decrease,format=rgba,colorchannelmixer=aa=0.82",
+		logoWidth,
+	)
+	return fmt.Sprintf(
+		"[0:v]%s[base];[1:v]%s[logo];[base][logo]overlay=x=W-w-%d:y=H-h-%d:format=auto%s[vout]",
+		preFilters,
+		logoFilters,
+		marginX,
+		marginY,
+		postFilters,
+	)
+}
+
+func splitTaterTVOverlayFilters(filters string) (preFilters, postFilters string) {
+	filters = strings.TrimSpace(filters)
+	for _, suffix := range []string{",format=nv12,hwupload", ",format=nv12"} {
+		if strings.HasSuffix(filters, suffix) {
+			return strings.TrimSuffix(filters, suffix), suffix
+		}
+	}
+	return filters, ""
+}
+
+func clampInt(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
 }
 
 func rowString(row map[string]any, key string) string {

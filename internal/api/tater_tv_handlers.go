@@ -30,6 +30,8 @@ type taterTVSource struct {
 	SourceType         string
 	ChannelNumber      string
 	CommercialCategory string
+	LogoPath           string
+	LogoTitle          string
 	Programs           []taterUsenetItem
 	Groups             []taterTVEpisodeGroup
 	Seen               map[string]bool
@@ -63,6 +65,8 @@ type taterTVChannel struct {
 	Number        string           `json:"number"`
 	Title         string           `json:"title"`
 	StreamURL     string           `json:"streamUrl,omitempty"`
+	LogoPath      string           `json:"logoPath,omitempty"`
+	LogoTitle     string           `json:"logoTitle,omitempty"`
 	Schedule      []map[string]any `json:"schedule"`
 	TotalDuration float64          `json:"totalDuration"`
 }
@@ -412,6 +416,8 @@ func taterBuildTVLineupUntil(cfg *config.Config, baseURL, playerToken string, mi
 			Number:        number,
 			Title:         source.Title,
 			StreamURL:     taterTVChannelStreamURL(baseURL, number, playerToken),
+			LogoPath:      source.LogoPath,
+			LogoTitle:     source.LogoTitle,
 			Schedule:      schedule,
 			TotalDuration: total,
 		})
@@ -533,6 +539,8 @@ func taterTVCustomSources(cfg *config.Config, baseURL, playerToken string) ([]ta
 			SourceType:         "custom",
 			ChannelNumber:      channel.ChannelNumber,
 			CommercialCategory: channel.CommercialCategory,
+			LogoPath:           config.SanitizeTubeTVLogoPath(channel.LogoPath),
+			LogoTitle:          cleanTaterText(channel.LogoTitle),
 			Seen:               map[string]bool{},
 		}
 		if source.Title == "" {
@@ -1143,7 +1151,7 @@ func taterTVChannelStreamURL(baseURL, number, playerToken string) string {
 	if strings.TrimSpace(baseURL) == "" {
 		return ""
 	}
-	u, err := url.Parse(strings.TrimRight(baseURL, "/") + "/api/tater/tv/channel/" + url.PathEscape(number) + "/stream")
+	u, err := url.Parse(strings.TrimRight(baseURL, "/") + "/api/tater/tv/channel/" + url.PathEscape(number) + "/playlist.m3u8")
 	if err != nil {
 		return ""
 	}

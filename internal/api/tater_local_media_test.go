@@ -609,8 +609,8 @@ func TestTaterBuildTVLineupUsesServerLocalMediaAndCommercials(t *testing.T) {
 	if channels[0].Number != "02" || channels[0].Title != "Cartoons" {
 		t.Fatalf("unexpected channel metadata: %#v", channels[0])
 	}
-	if !strings.Contains(channels[0].StreamURL, "/api/tater/tv/channel/02/stream") {
-		t.Fatalf("expected channel stream URL, got %q", channels[0].StreamURL)
+	if !strings.Contains(channels[0].StreamURL, "/api/tater/tv/channel/02/playlist.m3u8") {
+		t.Fatalf("expected channel HLS playlist URL, got %q", channels[0].StreamURL)
 	}
 
 	hasEpisode := false
@@ -812,7 +812,7 @@ func TestTaterTVStreamItemsStartAtLivePosition(t *testing.T) {
 }
 
 func TestTaterTVSegmentTranscodeArgsMarkDiscontinuity(t *testing.T) {
-	args := buildTaterTVChannelTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["crt_480p"], "none", "/media/movie.mkv", 12.5, 30)
+	args := buildTaterTVChannelTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["crt_480p"], "none", "/media/movie.mkv", 12.5, 30, "")
 	joined := strings.Join(args, " ")
 
 	if strings.Contains(joined, "-f concat") {
@@ -823,6 +823,79 @@ func TestTaterTVSegmentTranscodeArgsMarkDiscontinuity(t *testing.T) {
 	}
 	if !strings.Contains(joined, "-ss 12.500") || !strings.Contains(joined, "-t 30.000") {
 		t.Fatalf("expected segment start/duration in args: %s", joined)
+	}
+}
+
+func TestTaterTVSegmentTranscodeArgsAddChannelLogoOverlay(t *testing.T) {
+	args := buildTaterTVChannelTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["crt_480p"], "none", "/media/movie.mkv", 0, 30, "/metadata/logos/cartoon.png")
+	joined := strings.Join(args, " ")
+
+	if !strings.Contains(joined, "-loop 1 -framerate 30 -i /metadata/logos/cartoon.png") {
+		t.Fatalf("expected channel logo input in args: %s", joined)
+	}
+	if !strings.Contains(joined, "-filter_complex") || !strings.Contains(joined, "overlay=x=W-w-") {
+		t.Fatalf("expected overlay filter in args: %s", joined)
+	}
+	if !strings.Contains(joined, "-map [vout] -map 0:a:0?") {
+		t.Fatalf("expected generated video output mapping in args: %s", joined)
+	}
+	if strings.Contains(joined, " -vf ") {
+		t.Fatalf("logo overlay path should use filter_complex instead of -vf: %s", joined)
+	}
+}
+
+func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
+	args := buildTaterTVChannelHLSArgs(
+		config.TranscodingConfig{},
+		transcodeProfiles["crt_480p"],
+		"none",
+		"/media/movie.mkv",
+		12.5,
+		30,
+		"/metadata/logos/cartoon.png",
+		"/tmp/hls/index.m3u8",
+		"/tmp/hls/seg-%05d.ts",
+	)
+	joined := strings.Join(args, " ")
+
+	for _, expected := range []string{
+		"-filter_complex",
+		"overlay=x=W-w-",
+		"-af aresample=async=1:first_pts=0",
+		"-f hls",
+		"-hls_time 4",
+		"-hls_flags independent_segments+temp_file",
+		"-hls_segment_filename /tmp/hls/seg-%05d.ts",
+		"/tmp/hls/index.m3u8",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("expected %q in HLS args: %s", expected, joined)
+		}
+	}
+}
+
+func TestTaterTVHLSPlaylistIncludesTokenAndDiscontinuity(t *testing.T) {
+	session := &taterTVHLSSession{
+		publicID:       "live",
+		number:         "02",
+		profileID:      "hdmi_1080p",
+		requestedAccel: "auto",
+		accessed:       time.Now(),
+		segments: []taterTVHLSSegment{
+			{Sequence: 0, Duration: 4, Path: "item-000/seg-00000.ts"},
+			{Sequence: 1, Duration: 4, Path: "item-001/seg-00000.ts", Discontinuity: true},
+		},
+	}
+	playlist := session.playlist("player token")
+
+	if !strings.Contains(playlist, "#EXT-X-DISCONTINUITY") {
+		t.Fatalf("expected discontinuity marker in playlist: %s", playlist)
+	}
+	if !strings.Contains(playlist, "player_token=player+token") {
+		t.Fatalf("expected per-request player token in segment URLs: %s", playlist)
+	}
+	if !strings.Contains(playlist, "/api/tater/tv/channel/02/hls/live/item-001/seg-00000.ts") {
+		t.Fatalf("expected HLS segment URL in playlist: %s", playlist)
 	}
 }
 
@@ -855,6 +928,7 @@ printf "segment-ok"
 			{Title: "Bad Ad", Kind: "commercial", Path: "bad-commercial.mp4", DurationSeconds: 30, FullDuration: 30},
 			{Title: "Next Video", Kind: "movie", Path: "next-video.mkv", DurationSeconds: 30, FullDuration: 30},
 		},
+		"",
 	)
 	if err != nil {
 		t.Fatal(err)
