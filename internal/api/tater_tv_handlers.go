@@ -60,6 +60,29 @@ type taterTVChannel struct {
 	TotalDuration float64          `json:"totalDuration"`
 }
 
+type tubeTVLocalLibraryRow struct {
+	ID          string `json:"id,omitempty"`
+	Title       string `json:"title"`
+	Detail      string `json:"detail,omitempty"`
+	Type        string `json:"type,omitempty"`
+	MediaType   string `json:"mediaType,omitempty"`
+	CategoryID  string `json:"categoryId,omitempty"`
+	SourceIndex int    `json:"sourceIndex"`
+	Path        string `json:"path,omitempty"`
+	Count       int    `json:"count,omitempty"`
+	Selectable  bool   `json:"selectable"`
+	Browsable   bool   `json:"browsable"`
+}
+
+type tubeTVLocalLibraryResponse struct {
+	Title       string                     `json:"title"`
+	CategoryID  string                     `json:"categoryId,omitempty"`
+	SourceIndex int                        `json:"sourceIndex"`
+	Path        string                     `json:"path,omitempty"`
+	Source      *config.TubeTVCustomSource `json:"source,omitempty"`
+	Rows        []tubeTVLocalLibraryRow    `json:"rows"`
+}
+
 type taterTVLineupCacheEntry struct {
 	Channels  []taterTVChannel
 	StartedAt time.Time
@@ -100,6 +123,78 @@ func (s *Server) handleTubeTVCommercialLibrary(c *fiber.Ctx) error {
 	return RespondSuccess(c, fiber.Map{
 		"root":       taterTVCommercialRoot(cfg),
 		"categories": taterTVCommercialCategories(cfg, "", ""),
+	})
+}
+
+func (s *Server) handleTubeTVLocalLibrary(c *fiber.Ctx) error {
+	cfg := s.configManager.GetConfig()
+	if cfg == nil {
+		return RespondInternalError(c, "Configuration not available", "CONFIG_NOT_FOUND")
+	}
+	if !taterLocalMediaEnabled(cfg) {
+		return RespondSuccess(c, tubeTVLocalLibraryResponse{
+			Title:       "Local Library",
+			SourceIndex: -1,
+			Rows:        []tubeTVLocalLibraryRow{},
+		})
+	}
+
+	categoryID := strings.TrimSpace(c.Query("category_id"))
+	sourceIndex := parseTaterInt(c.Query("source"), -1)
+	relPath := cleanLocalRelativePath(c.Query("path"))
+	if categoryID == "" {
+		return RespondSuccess(c, tubeTVLocalLibraryRoot(cfg))
+	}
+	if strings.HasPrefix(categoryID, "local-discover:") {
+		items, err := taterLocalDiscoverItems(cfg, "", "", categoryID)
+		if err != nil {
+			return RespondValidationError(c, "Failed to load Local discovery", err.Error())
+		}
+		title := tubeTVLocalDiscoverTitle(categoryID)
+		source := config.TubeTVCustomSource{
+			CategoryID:  categoryID,
+			SourceIndex: -1,
+			Title:       title,
+		}
+		return RespondSuccess(c, tubeTVLocalLibraryResponse{
+			Title:       title,
+			CategoryID:  categoryID,
+			SourceIndex: -1,
+			Source:      &source,
+			Rows:        tubeTVLocalLibraryItemRows(items),
+		})
+	}
+
+	localID := strings.TrimPrefix(categoryID, "local:")
+	cat, ok := taterLocalMediaCategory(cfg, localID)
+	if !ok {
+		return RespondValidationError(c, "Local media category not found", categoryID)
+	}
+	items, err := taterLocalMediaItems(cfg, "", "", localID, sourceIndex, relPath)
+	if err != nil {
+		return RespondValidationError(c, "Failed to load Local media", err.Error())
+	}
+	title := cleanTaterText(cat.Name)
+	if relPath != "" {
+		title = cleanLocalTitle(filepath.Base(relPath))
+	}
+	if title == "" {
+		title = "Local"
+	}
+	source := config.TubeTVCustomSource{
+		CategoryID:  localID,
+		SourceIndex: sourceIndex,
+		Path:        relPath,
+		Title:       title,
+		MediaType:   strings.ToLower(strings.TrimSpace(cat.LibraryType)),
+	}
+	return RespondSuccess(c, tubeTVLocalLibraryResponse{
+		Title:       title,
+		CategoryID:  localID,
+		SourceIndex: sourceIndex,
+		Path:        relPath,
+		Source:      &source,
+		Rows:        tubeTVLocalLibraryItemRows(items),
 	})
 }
 
@@ -319,8 +414,20 @@ func taterTVCustomSources(cfg *config.Config, baseURL, playerToken string) ([]ta
 }
 
 func taterTVAddRefToSource(cfg *config.Config, baseURL, playerToken string, source *taterTVSource, ref config.TubeTVCustomSource) error {
-	categoryID := strings.TrimPrefix(strings.TrimSpace(ref.CategoryID), "local:")
+	rawCategoryID := strings.TrimSpace(ref.CategoryID)
+	if strings.HasPrefix(rawCategoryID, "local-discover:") {
+		rows, err := taterLocalDiscoverItems(cfg, baseURL, playerToken, rawCategoryID)
+		if err != nil {
+			return err
+		}
+		return taterTVAddRowsToSource(cfg, baseURL, playerToken, source, rawCategoryID, rows, cleanTaterText(ref.Title))
+	}
+	categoryID := strings.TrimPrefix(rawCategoryID, "local:")
 	if categoryID == "" {
+		return nil
+	}
+	if item, ok := taterTVLocalFileFromRef(cfg, baseURL, playerToken, categoryID, ref); ok {
+		taterTVAddFile(source, item, cleanTaterText(ref.Title))
 		return nil
 	}
 	sourceIndex := ref.SourceIndex
@@ -329,6 +436,65 @@ func taterTVAddRefToSource(cfg *config.Config, baseURL, playerToken string, sour
 		return err
 	}
 	return taterTVAddRowsToSource(cfg, baseURL, playerToken, source, categoryID, rows, cleanTaterText(ref.Title))
+}
+
+func taterTVLocalFileFromRef(cfg *config.Config, baseURL, playerToken, categoryID string, ref config.TubeTVCustomSource) (taterUsenetItem, bool) {
+	relPath := cleanLocalRelativePath(ref.Path)
+	if relPath == "" || ref.SourceIndex < 0 {
+		return taterUsenetItem{}, false
+	}
+	cat, ok := taterLocalMediaCategory(cfg, categoryID)
+	if !ok {
+		return taterUsenetItem{}, false
+	}
+	paths := taterLocalMediaCategoryPaths(cat)
+	if ref.SourceIndex >= len(paths) {
+		return taterUsenetItem{}, false
+	}
+	path, err := safeLocalPath(paths[ref.SourceIndex], relPath)
+	if err != nil {
+		return taterUsenetItem{}, false
+	}
+	info, err := os.Stat(path)
+	if err != nil || info == nil || info.IsDir() || !isLocalStreamExtension(filepath.Ext(path)) {
+		return taterUsenetItem{}, false
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(ref.MediaType))
+	if mediaType == "" {
+		switch strings.ToLower(strings.TrimSpace(cat.LibraryType)) {
+		case "tv":
+			mediaType = "episode"
+		case "movies":
+			mediaType = "movie"
+		default:
+			mediaType = "video"
+		}
+	}
+	title := cleanTaterText(ref.Title)
+	if title == "" {
+		switch mediaType {
+		case "episode":
+			title = cleanEpisodeTitle(strings.TrimSuffix(filepath.Base(relPath), filepath.Ext(relPath)))
+		default:
+			title = cleanMovieTitleFromName(strings.TrimSuffix(filepath.Base(relPath), filepath.Ext(relPath)))
+		}
+	}
+	item := taterUsenetItem{
+		Title:       title,
+		Type:        "localFile",
+		MediaType:   mediaType,
+		CategoryID:  "local:" + categoryID,
+		SourceIndex: ref.SourceIndex,
+		Path:        relPath,
+		StreamURL:   taterLocalStreamURL(baseURL, categoryID, ref.SourceIndex, relPath, playerToken),
+		SeekMode:    taterLocalSeekMode(cfg, filepath.Ext(path)),
+		SizeBytes:   info.Size(),
+	}
+	if item.SizeBytes > 0 {
+		item.SizeText = formatTaterBytes(item.SizeBytes)
+	}
+	attachTaterLocalDuration(cfg, path, &item)
+	return item, true
 }
 
 func taterTVAddRowsToSource(cfg *config.Config, baseURL, playerToken string, source *taterTVSource, categoryID string, rows []taterUsenetItem, showTitle string) error {
@@ -711,6 +877,107 @@ func taterTVCommercialURL(baseURL, category, name, playerToken string) string {
 	q.Set("player_token", playerToken)
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+func tubeTVLocalLibraryRoot(cfg *config.Config) tubeTVLocalLibraryResponse {
+	rows := []tubeTVLocalLibraryRow{}
+	for _, row := range taterLocalDiscoverRows(cfg) {
+		rows = append(rows, tubeTVLocalLibraryRow{
+			ID:          row.ID,
+			Title:       row.Title,
+			Detail:      row.Detail,
+			Type:        "localDiscover",
+			MediaType:   tubeTVDiscoverMediaType(row.ID),
+			CategoryID:  row.ID,
+			SourceIndex: -1,
+			Count:       row.Count,
+			Selectable:  true,
+			Browsable:   true,
+		})
+	}
+	for _, cat := range cfg.LocalMedia.Categories {
+		if cat.Enabled != nil && !*cat.Enabled {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(cat.LibraryType)) == "music" {
+			continue
+		}
+		id := strings.TrimSpace(cat.ID)
+		title := cleanTaterText(cat.Name)
+		if id == "" || title == "" || len(taterLocalMediaCategoryPaths(cat)) == 0 {
+			continue
+		}
+		rows = append(rows, tubeTVLocalLibraryRow{
+			ID:          id,
+			Title:       title,
+			Detail:      strings.ToUpper(strings.TrimSpace(cat.LibraryType)),
+			Type:        "localCategory",
+			MediaType:   strings.ToLower(strings.TrimSpace(cat.LibraryType)),
+			CategoryID:  id,
+			SourceIndex: -1,
+			Count:       len(taterLocalMediaCategoryPaths(cat)),
+			Selectable:  true,
+			Browsable:   true,
+		})
+	}
+	return tubeTVLocalLibraryResponse{
+		Title:       "Local Library",
+		SourceIndex: -1,
+		Rows:        rows,
+	}
+}
+
+func tubeTVLocalDiscoverTitle(id string) string {
+	for _, def := range taterLocalDiscoverDefinitions() {
+		if def.ID == id {
+			return def.Title
+		}
+	}
+	return cleanTaterText(strings.TrimPrefix(id, "local-discover:"))
+}
+
+func tubeTVDiscoverMediaType(id string) string {
+	key := strings.TrimPrefix(id, "local-discover:")
+	switch {
+	case key == "movies" || strings.HasPrefix(key, "genre:") || strings.HasPrefix(key, "decade:"):
+		return "movie"
+	case key == "series":
+		return "show"
+	default:
+		return ""
+	}
+}
+
+func tubeTVLocalLibraryItemRows(items []taterUsenetItem) []tubeTVLocalLibraryRow {
+	rows := make([]tubeTVLocalLibraryRow, 0, len(items))
+	for _, item := range items {
+		itemType := strings.ToLower(strings.TrimSpace(item.Type))
+		mediaType := strings.ToLower(strings.TrimSpace(item.MediaType))
+		browsable := itemType == "localfolder"
+		selectable := itemType == "localfile" || itemType == "localfolder"
+		detail := strings.TrimSpace(item.SizeText)
+		if detail == "" {
+			detail = strings.TrimSpace(item.Category)
+		}
+		if item.Date != "" && detail != "" && !strings.Contains(detail, item.Date) {
+			detail = item.Date + " / " + detail
+		} else if item.Date != "" {
+			detail = item.Date
+		}
+		rows = append(rows, tubeTVLocalLibraryRow{
+			ID:          taterTVMediaKey(item),
+			Title:       item.Title,
+			Detail:      detail,
+			Type:        item.Type,
+			MediaType:   mediaType,
+			CategoryID:  item.CategoryID,
+			SourceIndex: item.SourceIndex,
+			Path:        item.Path,
+			Selectable:  selectable,
+			Browsable:   browsable,
+		})
+	}
+	return rows
 }
 
 func taterTVChannelStreamURL(baseURL, number, playerToken string) string {

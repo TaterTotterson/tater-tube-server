@@ -1,5 +1,19 @@
-import { Clapperboard, Folder, Plus, RefreshCw, Save, Trash2, Upload } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+	ArrowLeft,
+	Check,
+	Clapperboard,
+	Film,
+	Folder,
+	Layers,
+	Plus,
+	RefreshCw,
+	Save,
+	Search,
+	Trash2,
+	Tv,
+	Upload,
+} from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { apiClient } from "../../api/client";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
@@ -10,6 +24,8 @@ import type {
 	TubeTVConfig,
 	TubeTVCustomChannel,
 	TubeTVCustomSource,
+	TubeTVLocalLibraryResponse,
+	TubeTVLocalLibraryRow,
 } from "../../types/config";
 
 interface TubeTVConfigSectionProps {
@@ -28,6 +44,12 @@ const DEFAULT_TUBE_TV: TubeTVConfig = {
 	custom_channels: [],
 };
 
+interface LibraryRequest {
+	categoryId: string;
+	sourceIndex: number;
+	path: string;
+}
+
 function slug(value: string) {
 	return value
 		.toLowerCase()
@@ -35,6 +57,25 @@ function slug(value: string) {
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-+|-+$/g, "")
 		.slice(0, 64);
+}
+
+function normalizeSourceCategoryId(value: string) {
+	const trimmed = value.trim();
+	if (trimmed.startsWith("local-discover:")) {
+		return trimmed;
+	}
+	if (trimmed.startsWith("local:")) {
+		return slug(trimmed.slice(6));
+	}
+	return slug(trimmed);
+}
+
+function cleanDisplay(value: string) {
+	return value
+		.replace(/[-_]+/g, " ")
+		.replace(/\s+/g, " ")
+		.trim()
+		.replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function normalize(config: ConfigResponse): TubeTVConfig {
@@ -60,14 +101,37 @@ function normalize(config: ConfigResponse): TubeTVConfig {
 	};
 }
 
-function emptySource(categories: LocalMediaCategory[]): TubeTVCustomSource {
-	return {
-		category_id: categories[0]?.id || "",
-		source_index: -1,
-		path: "",
-		title: "",
-		media_type: "",
-	};
+function sourceLabel(source: TubeTVCustomSource, categories: LocalMediaCategory[]) {
+	const category = source.category_id.startsWith("local-discover:")
+		? cleanDisplay(
+				source.category_id
+					.replace("local-discover:", "")
+					.replace("genre:", "")
+					.replace("decade:", ""),
+			)
+		: categories.find((row) => row.id === source.category_id)?.name ||
+			cleanDisplay(source.category_id);
+	const pathParts = source.path ? source.path.split("/") : [];
+	const title =
+		source.title ||
+		(pathParts.length > 0 ? cleanDisplay(pathParts[pathParts.length - 1] || "") : "");
+	return title ? `${category} / ${title}` : category;
+}
+
+function libraryRowIcon(row: TubeTVLocalLibraryRow) {
+	const kind = `${row.mediaType || ""} ${row.type || ""}`.toLowerCase();
+	if (kind.includes("movie") || kind.includes("file")) return <Film className="h-5 w-5" />;
+	if (
+		kind.includes("tv") ||
+		kind.includes("show") ||
+		kind.includes("season") ||
+		kind.includes("episode")
+	) {
+		return <Tv className="h-5 w-5" />;
+	}
+	if (kind.includes("discover") || kind.includes("genre") || kind.includes("decade"))
+		return <Layers className="h-5 w-5" />;
+	return <Folder className="h-5 w-5" />;
 }
 
 export function TubeTVConfigSection({
@@ -84,6 +148,15 @@ export function TubeTVConfigSection({
 	const [uploadCategory, setUploadCategory] = useState("");
 	const [isLibraryLoading, setIsLibraryLoading] = useState(false);
 	const [isUploading, setIsUploading] = useState(false);
+	const [browserChannelIndex, setBrowserChannelIndex] = useState<number | null>(null);
+	const [browserRequest, setBrowserRequest] = useState<LibraryRequest>({
+		categoryId: "",
+		sourceIndex: -1,
+		path: "",
+	});
+	const [browserData, setBrowserData] = useState<TubeTVLocalLibraryResponse | null>(null);
+	const [browserSearch, setBrowserSearch] = useState("");
+	const [isBrowserLoading, setIsBrowserLoading] = useState(false);
 	const [hasChanges, setHasChanges] = useState(false);
 
 	const localCategories = (config.local_media?.categories ?? []).filter(
@@ -95,14 +168,12 @@ export function TubeTVConfigSection({
 		setHasChanges(false);
 	}, [config]);
 
-	const refreshLibrary = async () => {
+	const refreshLibrary = useCallback(async () => {
 		setIsLibraryLoading(true);
 		try {
 			const data = await apiClient.getTubeTVCommercials();
 			setLibrary(data);
-			if (!uploadCategory && data.categories.length > 0) {
-				setUploadCategory(data.categories[0].id);
-			}
+			setUploadCategory((current) => current || data.categories[0]?.id || "");
 		} catch (error) {
 			showToast({
 				type: "error",
@@ -112,12 +183,38 @@ export function TubeTVConfigSection({
 		} finally {
 			setIsLibraryLoading(false);
 		}
-	};
+	}, [showToast]);
 
 	useEffect(() => {
 		void refreshLibrary();
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
+	}, [refreshLibrary]);
+
+	useEffect(() => {
+		if (browserChannelIndex === null) {
+			return;
+		}
+		let isCurrent = true;
+		setIsBrowserLoading(true);
+		apiClient
+			.getTubeTVLocalLibrary(browserRequest)
+			.then((data) => {
+				if (isCurrent) setBrowserData(data);
+			})
+			.catch((error) => {
+				if (!isCurrent) return;
+				showToast({
+					type: "error",
+					title: "Library Failed",
+					message: error instanceof Error ? error.message : "Unable to load local library.",
+				});
+			})
+			.finally(() => {
+				if (isCurrent) setIsBrowserLoading(false);
+			});
+		return () => {
+			isCurrent = false;
+		};
+	}, [browserChannelIndex, browserRequest, showToast]);
 
 	const update = (next: TubeTVConfig) => {
 		setFormData(next);
@@ -136,18 +233,6 @@ export function TubeTVConfigSection({
 		update({ ...formData, custom_channels });
 	};
 
-	const updateSource = (
-		channelIndex: number,
-		sourceIndex: number,
-		patch: Partial<TubeTVCustomSource>,
-	) => {
-		const channel = formData.custom_channels[channelIndex];
-		const sources = channel.sources.map((source, i) =>
-			i === sourceIndex ? { ...source, ...patch } : source,
-		);
-		updateChannel(channelIndex, { sources });
-	};
-
 	const addChannel = () => {
 		const count = formData.custom_channels.length + 1;
 		update({
@@ -157,7 +242,7 @@ export function TubeTVConfigSection({
 					id: `custom-${count}`,
 					title: `Custom ${count}`,
 					commercial_category: "",
-					sources: [emptySource(localCategories)],
+					sources: [],
 				},
 			]),
 		});
@@ -170,15 +255,93 @@ export function TubeTVConfigSection({
 		});
 	};
 
-	const addSource = (channelIndex: number) => {
-		const channel = formData.custom_channels[channelIndex];
-		updateChannel(channelIndex, { sources: channel.sources.concat([emptySource(localCategories)]) });
-	};
-
 	const removeSource = (channelIndex: number, sourceIndex: number) => {
 		const channel = formData.custom_channels[channelIndex];
 		const sources = channel.sources.filter((_, i) => i !== sourceIndex);
 		updateChannel(channelIndex, { sources });
+	};
+
+	const openBrowser = (channelIndex: number) => {
+		setBrowserChannelIndex(channelIndex);
+		setBrowserSearch("");
+		setBrowserRequest({ categoryId: "", sourceIndex: -1, path: "" });
+	};
+
+	const closeBrowser = () => {
+		setBrowserChannelIndex(null);
+		setBrowserData(null);
+		setBrowserSearch("");
+	};
+
+	const browseRow = (row: TubeTVLocalLibraryRow) => {
+		const categoryId = row.type === "localDiscover" ? row.id || "" : row.categoryId || row.id || "";
+		if (!categoryId) return;
+		setBrowserSearch("");
+		setBrowserRequest({
+			categoryId,
+			sourceIndex: row.sourceIndex ?? -1,
+			path: row.path || "",
+		});
+	};
+
+	const goBrowserBack = () => {
+		if (!browserRequest.categoryId) return;
+		if (!browserRequest.path) {
+			setBrowserRequest({ categoryId: "", sourceIndex: -1, path: "" });
+			setBrowserSearch("");
+			return;
+		}
+		const parts = browserRequest.path.split("/").filter(Boolean);
+		setBrowserRequest({
+			...browserRequest,
+			path: parts.slice(0, -1).join("/"),
+		});
+		setBrowserSearch("");
+	};
+
+	const sourceFromRow = (row: TubeTVLocalLibraryRow): TubeTVCustomSource => {
+		const rawCategory =
+			row.type === "localDiscover" ? row.id || "" : row.categoryId || row.id || "";
+		return {
+			category_id: rawCategory.startsWith("local:") ? rawCategory.slice(6) : rawCategory,
+			source_index: row.sourceIndex ?? -1,
+			path: row.path || "",
+			title: row.title || "",
+			media_type: row.mediaType || "",
+		};
+	};
+
+	const addSourceToChannel = (channelIndex: number, source: TubeTVCustomSource) => {
+		const normalized: TubeTVCustomSource = {
+			...source,
+			category_id: normalizeSourceCategoryId(source.category_id),
+			path: (source.path || "").replace(/^\/+/, ""),
+			title: source.title || "",
+			media_type: (source.media_type || "").toLowerCase(),
+			source_index: Number.isFinite(Number(source.source_index)) ? Number(source.source_index) : -1,
+		};
+		if (!normalized.category_id) return;
+		const channel = formData.custom_channels[channelIndex];
+		const duplicate = channel.sources.some(
+			(row) =>
+				normalizeSourceCategoryId(row.category_id) === normalized.category_id &&
+				Number(row.source_index ?? -1) === normalized.source_index &&
+				(row.path || "") === normalized.path,
+		);
+		if (duplicate) {
+			showToast({
+				type: "info",
+				title: "Already Added",
+				message: `${sourceLabel(normalized, localCategories)} is already in this channel.`,
+			});
+			return;
+		}
+		updateChannel(channelIndex, { sources: channel.sources.concat([normalized]) });
+	};
+
+	const addCurrentBrowserView = (channelIndex: number) => {
+		if (!browserData?.source) return;
+		addSourceToChannel(channelIndex, browserData.source);
 	};
 
 	const toggleCommercialCategory = (categoryId: string) => {
@@ -201,7 +364,7 @@ export function TubeTVConfigSection({
 					commercial_category: slug(channel.commercial_category || ""),
 					sources: channel.sources
 						.map((source) => ({
-							category_id: slug(source.category_id),
+							category_id: normalizeSourceCategoryId(source.category_id),
 							source_index: Number.isFinite(Number(source.source_index))
 								? Number(source.source_index)
 								: -1,
@@ -266,6 +429,12 @@ export function TubeTVConfigSection({
 		setLibrary(data);
 	};
 
+	const browserRows = (browserData?.rows ?? []).filter((row) => {
+		const query = browserSearch.trim().toLowerCase();
+		if (!query) return true;
+		return `${row.title} ${row.detail || ""} ${row.mediaType || ""}`.toLowerCase().includes(query);
+	});
+
 	return (
 		<div className="min-w-0 space-y-8">
 			<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
@@ -278,8 +447,8 @@ export function TubeTVConfigSection({
 							</h4>
 						</div>
 						<p className="max-w-2xl text-base-content/60 text-sm leading-relaxed">
-							Build The Tube TV Mode on the server so every paired Tater Tube player receives
-							the same channels, commercials, and custom lineups.
+							Build The Tube TV Mode on the server so every paired Tater Tube player receives the
+							same channels, commercials, and custom lineups.
 						</p>
 					</div>
 					<button
@@ -288,7 +457,11 @@ export function TubeTVConfigSection({
 						disabled={!hasChanges || isUpdating || isReadOnly}
 						onClick={save}
 					>
-						{isUpdating ? <span className="loading loading-spinner loading-xs" /> : <Save className="h-4 w-4" />}
+						{isUpdating ? (
+							<span className="loading loading-spinner loading-xs" />
+						) : (
+							<Save className="h-4 w-4" />
+						)}
 						Save
 					</button>
 				</div>
@@ -403,8 +576,14 @@ export function TubeTVConfigSection({
 							))}
 						</select>
 					</label>
-					<label className={`btn btn-primary ${!uploadCategory || isUploading ? "btn-disabled" : ""}`}>
-						{isUploading ? <span className="loading loading-spinner loading-xs" /> : <Upload className="h-4 w-4" />}
+					<label
+						className={`btn btn-primary ${!uploadCategory || isUploading ? "btn-disabled" : ""}`}
+					>
+						{isUploading ? (
+							<span className="loading loading-spinner loading-xs" />
+						) : (
+							<Upload className="h-4 w-4" />
+						)}
 						Upload Videos
 						<input
 							type="file"
@@ -506,15 +685,11 @@ export function TubeTVConfigSection({
 										type="text"
 										className="input input-bordered mt-2"
 										value={channel.title}
-										onChange={(event) =>
-											updateChannel(channelIndex, { title: event.target.value })
-										}
+										onChange={(event) => updateChannel(channelIndex, { title: event.target.value })}
 									/>
 								</label>
 								<label className="form-control">
-									<span className="label-text font-bold text-base-content text-sm">
-										Channel ID
-									</span>
+									<span className="label-text font-bold text-base-content text-sm">Channel ID</span>
 									<input
 										type="text"
 										className="input input-bordered mt-2"
@@ -553,107 +728,182 @@ export function TubeTVConfigSection({
 								</button>
 							</div>
 
-							<div className="mt-4 space-y-3">
-								<div className="flex items-center justify-between">
-									<div className="font-bold text-base-content/50 text-xs uppercase tracking-widest">
-										Sources
+							<div className="mt-5 space-y-4">
+								<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+									<div>
+										<div className="font-bold text-base-content/50 text-xs uppercase tracking-widest">
+											Channel Sources
+										</div>
+										<p className="mt-1 text-base-content/60 text-xs">
+											Add whole libraries, movie groups, series, seasons, episodes, or single
+											movies.
+										</p>
 									</div>
 									<button
 										type="button"
-										className="btn btn-ghost btn-xs"
-										onClick={() => addSource(channelIndex)}
+										className="btn btn-outline btn-sm"
+										onClick={() => openBrowser(channelIndex)}
+										disabled={isReadOnly}
 									>
-										<Plus className="h-3 w-3" />
-										Add Source
+										<Search className="h-4 w-4" />
+										Browse Local Library
 									</button>
 								</div>
 
-								{channel.sources.map((source, sourceIndex) => (
-									<div
-										key={`tube-tv-source-${channelIndex}-${sourceIndex}`}
-										className="grid gap-3 rounded-lg border border-base-300 bg-base-200/70 p-3 lg:grid-cols-[12rem_6rem_1fr_1fr_9rem_auto] lg:items-end"
-									>
-										<label className="form-control">
-											<span className="label-text text-xs">Local Category</span>
-											<select
-												className="select select-bordered select-sm mt-1"
-												value={source.category_id}
-												onChange={(event) =>
-													updateSource(channelIndex, sourceIndex, {
-														category_id: event.target.value,
-													})
-												}
-											>
-												<option value="">Select</option>
-												{localCategories.map((category) => (
-													<option key={category.id} value={category.id}>
-														{category.name}
-													</option>
-												))}
-											</select>
-										</label>
-										<label className="form-control">
-											<span className="label-text text-xs">Folder #</span>
-											<input
-												type="number"
-												className="input input-bordered input-sm mt-1"
-												value={source.source_index}
-												onChange={(event) =>
-													updateSource(channelIndex, sourceIndex, {
-														source_index: Number(event.target.value),
-													})
-												}
-											/>
-										</label>
-										<label className="form-control">
-											<span className="label-text text-xs">Path</span>
-											<input
-												type="text"
-												className="input input-bordered input-sm mt-1"
-												value={source.path}
-												placeholder="Season 1"
-												onChange={(event) =>
-													updateSource(channelIndex, sourceIndex, { path: event.target.value })
-												}
-											/>
-										</label>
-										<label className="form-control">
-											<span className="label-text text-xs">Title Hint</span>
-											<input
-												type="text"
-												className="input input-bordered input-sm mt-1"
-												value={source.title || ""}
-												onChange={(event) =>
-													updateSource(channelIndex, sourceIndex, { title: event.target.value })
-												}
-											/>
-										</label>
-										<label className="form-control">
-											<span className="label-text text-xs">Type</span>
-											<select
-												className="select select-bordered select-sm mt-1"
-												value={source.media_type || ""}
-												onChange={(event) =>
-													updateSource(channelIndex, sourceIndex, {
-														media_type: event.target.value,
-													})
-												}
-											>
-												<option value="">Auto</option>
-												<option value="movie">Movie</option>
-												<option value="episode">Episode</option>
-												<option value="show">Series</option>
-											</select>
-										</label>
-										<button
-											type="button"
-											className="btn btn-error btn-outline btn-sm"
-											onClick={() => removeSource(channelIndex, sourceIndex)}
-										>
-											<Trash2 className="h-3 w-3" />
-										</button>
+								{channel.sources.length === 0 ? (
+									<div className="rounded-xl border border-base-300 border-dashed bg-base-200/50 p-4 text-base-content/60 text-sm">
+										No sources yet. Browse the local library to build this channel.
 									</div>
-								))}
+								) : (
+									<div className="grid gap-2 md:grid-cols-2">
+										{channel.sources.map((source, sourceIndex) => (
+											<div
+												key={`tube-tv-source-${channelIndex}-${sourceIndex}`}
+												className="flex min-w-0 items-center gap-3 rounded-lg border border-base-300 bg-base-200/70 p-3"
+											>
+												<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+													{source.media_type === "movie" ? (
+														<Film className="h-5 w-5" />
+													) : source.media_type === "episode" || source.media_type === "show" ? (
+														<Tv className="h-5 w-5" />
+													) : source.category_id.startsWith("local-discover:") ? (
+														<Layers className="h-5 w-5" />
+													) : (
+														<Folder className="h-5 w-5" />
+													)}
+												</div>
+												<div className="min-w-0 flex-1">
+													<div className="truncate font-bold text-sm">
+														{sourceLabel(source, localCategories)}
+													</div>
+													<div className="truncate text-base-content/50 text-xs">
+														{source.path || source.category_id}
+													</div>
+												</div>
+												<button
+													type="button"
+													className="btn btn-error btn-outline btn-xs"
+													onClick={() => removeSource(channelIndex, sourceIndex)}
+													disabled={isReadOnly}
+												>
+													<Trash2 className="h-3 w-3" />
+												</button>
+											</div>
+										))}
+									</div>
+								)}
+
+								{browserChannelIndex === channelIndex && (
+									<div className="rounded-xl border border-primary/30 bg-base-200/80 p-4">
+										<div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+											<div className="min-w-0">
+												<div className="font-bold text-primary text-xs uppercase tracking-widest">
+													Local Library Browser
+												</div>
+												<h5 className="mt-1 truncate font-black text-xl">
+													{browserData?.title || "Local Library"}
+												</h5>
+												<p className="mt-1 text-base-content/55 text-xs">
+													Select an item to add it, or browse folders to pick a narrower channel
+													source.
+												</p>
+											</div>
+											<div className="flex flex-wrap gap-2">
+												<button
+													type="button"
+													className="btn btn-ghost btn-sm"
+													onClick={goBrowserBack}
+													disabled={!browserRequest.categoryId}
+												>
+													<ArrowLeft className="h-4 w-4" />
+													Back
+												</button>
+												{browserData?.source && (
+													<button
+														type="button"
+														className="btn btn-primary btn-sm"
+														onClick={() => addCurrentBrowserView(channelIndex)}
+														disabled={isReadOnly}
+													>
+														<Check className="h-4 w-4" />
+														Add This View
+													</button>
+												)}
+												<button
+													type="button"
+													className="btn btn-ghost btn-sm"
+													onClick={closeBrowser}
+												>
+													Close
+												</button>
+											</div>
+										</div>
+
+										<label className="input input-bordered mt-4 flex items-center gap-2">
+											<Search className="h-4 w-4 text-base-content/45" />
+											<input
+												type="search"
+												className="grow"
+												value={browserSearch}
+												onChange={(event) => setBrowserSearch(event.target.value)}
+												placeholder="Filter this view"
+											/>
+										</label>
+
+										{isBrowserLoading ? (
+											<div className="mt-4 flex items-center gap-2 rounded-lg border border-base-300 bg-base-100/70 p-4 text-base-content/60 text-sm">
+												<span className="loading loading-spinner loading-sm" />
+												Loading library
+											</div>
+										) : browserRows.length === 0 ? (
+											<div className="mt-4 rounded-lg border border-base-300 bg-base-100/70 p-4 text-base-content/60 text-sm">
+												No matching local media found.
+											</div>
+										) : (
+											<div className="mt-4 grid gap-2 lg:grid-cols-2">
+												{browserRows.map((row) => (
+													<div
+														key={`${row.id || row.categoryId || row.title}-${row.sourceIndex}-${row.path || ""}`}
+														className="flex min-w-0 items-center gap-3 rounded-lg border border-base-300 bg-base-100/80 p-3"
+													>
+														<div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-base-300/70 text-base-content/70">
+															{libraryRowIcon(row)}
+														</div>
+														<div className="min-w-0 flex-1">
+															<div className="truncate font-bold text-sm">{row.title}</div>
+															<div className="truncate text-base-content/50 text-xs">
+																{row.detail || row.path || row.mediaType || "Local media"}
+															</div>
+														</div>
+														<div className="flex shrink-0 gap-2">
+															{row.browsable && (
+																<button
+																	type="button"
+																	className="btn btn-ghost btn-xs"
+																	onClick={() => browseRow(row)}
+																>
+																	Open
+																</button>
+															)}
+															{row.selectable && (
+																<button
+																	type="button"
+																	className="btn btn-primary btn-xs"
+																	onClick={() =>
+																		addSourceToChannel(channelIndex, sourceFromRow(row))
+																	}
+																	disabled={isReadOnly}
+																>
+																	Add
+																</button>
+															)}
+														</div>
+													</div>
+												))}
+											</div>
+										)}
+									</div>
+								)}
 							</div>
 						</div>
 					))}

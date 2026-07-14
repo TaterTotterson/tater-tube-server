@@ -246,6 +246,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Patch("/tater/players/:id", s.handleTaterUpdatePlayer)
 	api.Delete("/tater/players/:id", s.handleTaterRevokePlayer)
 	api.Get("/tube-tv/commercials", s.handleTubeTVCommercialLibrary)
+	api.Get("/tube-tv/local-library", s.handleTubeTVLocalLibrary)
 	api.Post("/tube-tv/commercials/category", s.handleTubeTVCreateCommercialCategory)
 	api.Post("/tube-tv/commercials/upload", s.handleTubeTVUploadCommercials)
 	api.Delete("/tube-tv/commercials/file", s.handleTubeTVDeleteCommercialFile)

@@ -921,7 +921,7 @@ func (c *Config) Validate() error {
 		channel.CommercialCategory = sanitizeLocalMediaID(channel.CommercialCategory)
 		cleanSources := make([]TubeTVCustomSource, 0, len(channel.Sources))
 		for _, source := range channel.Sources {
-			source.CategoryID = sanitizeLocalMediaID(strings.TrimPrefix(strings.TrimSpace(source.CategoryID), "local:"))
+			source.CategoryID = sanitizeTubeTVSourceCategoryID(source.CategoryID)
 			source.Path = filepath.ToSlash(filepath.Clean("/" + strings.TrimSpace(source.Path)))
 			source.Path = strings.TrimPrefix(source.Path, "/")
 			source.Title = strings.TrimSpace(source.Title)
@@ -1222,6 +1222,38 @@ func sanitizeLocalMediaID(value string) string {
 		result = strings.TrimRight(result[:64], "-")
 	}
 	return result
+}
+
+func sanitizeTubeTVSourceCategoryID(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "local:") {
+		value = strings.TrimPrefix(value, "local:")
+	}
+	if strings.HasPrefix(value, "local-discover:") {
+		key := strings.TrimPrefix(value, "local-discover:")
+		key = strings.ToLower(strings.TrimSpace(key))
+		if strings.HasPrefix(key, "genre:") {
+			genre := sanitizeLocalMediaID(strings.TrimPrefix(key, "genre:"))
+			if genre == "" {
+				return ""
+			}
+			return "local-discover:genre:" + genre
+		}
+		if strings.HasPrefix(key, "decade:") {
+			decade := sanitizeLocalMediaID(strings.TrimPrefix(key, "decade:"))
+			if decade == "" {
+				return ""
+			}
+			return "local-discover:decade:" + decade
+		}
+		switch key {
+		case "recent", "movies", "series":
+			return "local-discover:" + key
+		default:
+			return ""
+		}
+	}
+	return sanitizeLocalMediaID(value)
 }
 
 // ValidateDirectories validates that all configured directories are writable

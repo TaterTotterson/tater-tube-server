@@ -388,6 +388,54 @@ func hasTaterLocalDiscoverTitle(rows []taterUsenetCategory, title string) bool {
 	return false
 }
 
+func TestTaterTVCustomSourceSingleMovieFileDoesNotExpandLibrary(t *testing.T) {
+	configDir := t.TempDir()
+	mediaRoot := filepath.Join(configDir, "movies")
+	targetDir := filepath.Join(mediaRoot, "Target.Movie.2024")
+	otherDir := filepath.Join(mediaRoot, "Other.Movie.2025")
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(otherDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	targetRel := "Target.Movie.2024/Target.Movie.2024.mkv"
+	if err := os.WriteFile(filepath.Join(mediaRoot, filepath.FromSlash(targetRel)), []byte("target"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, "Other.Movie.2025.mkv"), []byte("other"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig(configDir)
+	cfg.LocalMedia.Enabled = boolPtr(true)
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID:          "movies",
+		Name:        "Movies",
+		LibraryType: "movies",
+		Paths:       []string{mediaRoot},
+		Enabled:     boolPtr(true),
+	}}
+
+	source := taterTVSource{Title: "Custom", Seen: map[string]bool{}}
+	err := taterTVAddRefToSource(cfg, "http://server", "token", &source, config.TubeTVCustomSource{
+		CategoryID:  "movies",
+		SourceIndex: 0,
+		Path:        targetRel,
+		Title:       "Target Movie",
+		MediaType:   "movie",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(source.Programs) != 1 {
+		t.Fatalf("expected one selected movie, got %#v", source.Programs)
+	}
+	if source.Programs[0].Path != targetRel || source.Programs[0].Title != "Target Movie" {
+		t.Fatalf("unexpected selected movie row: %#v", source.Programs[0])
+	}
+}
+
 func TestTaterNzbWatchAgainRecordsLatestAndTrims(t *testing.T) {
 	cfg := config.DefaultConfig(t.TempDir())
 	cfg.Newznab.WatchAgainLimit = 2
