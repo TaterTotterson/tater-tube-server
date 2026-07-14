@@ -547,6 +547,7 @@ func buildTaterTVChannelHLSArgs(cfg config.TranscodingConfig, profile transcodeP
 		"-nostdin",
 	}
 	args = append(args, transcodeHardwareInitArgs(cfg, accel)...)
+	args = append(args, "-re")
 	if startSeconds > 0 {
 		args = append(args, "-ss", strconv.FormatFloat(startSeconds, 'f', 3, 64))
 	}

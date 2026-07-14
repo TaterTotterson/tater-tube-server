@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"log/slog"
+	"math"
 	"mime"
 	"net/http"
 	"os"
@@ -525,20 +526,23 @@ func probeMediaDurationSeconds(parent context.Context, ffmpegPath, path string) 
 	if ffprobePath == "" {
 		return 0
 	}
-	ctx, cancel := context.WithTimeout(parent, 4*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, ffprobePath,
 		"-v", "error",
-		"-show_entries", "format=duration",
+		"-show_entries", "format=duration:stream=duration",
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		path,
 	).Output()
 	if err != nil || ctx.Err() != nil {
 		return 0
 	}
-	duration, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
-	if err != nil || duration <= 0 {
-		return 0
+	duration := 0.0
+	for _, field := range strings.Fields(string(out)) {
+		candidate, err := strconv.ParseFloat(strings.TrimSpace(field), 64)
+		if err == nil && candidate > duration && !math.IsNaN(candidate) && !math.IsInf(candidate, 0) {
+			duration = candidate
+		}
 	}
 	return duration
 }

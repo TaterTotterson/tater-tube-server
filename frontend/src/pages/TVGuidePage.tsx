@@ -6,6 +6,22 @@ import { LoadingSpinner } from "../components/ui/LoadingSpinner";
 import { useToast } from "../contexts/ToastContext";
 import type { TubeTVGuideChannel, TubeTVGuideScheduleItem } from "../types/config";
 
+const GUIDE_WINDOW_SECONDS = 3 * 60 * 60;
+const GUIDE_SLOT_SECONDS = 30 * 60;
+const GUIDE_SLOT_WIDTH = 176;
+const GUIDE_CHANNEL_WIDTH = 156;
+const GUIDE_SLOT_COUNT = GUIDE_WINDOW_SECONDS / GUIDE_SLOT_SECONDS;
+const GUIDE_TIMELINE_WIDTH = GUIDE_SLOT_COUNT * GUIDE_SLOT_WIDTH;
+
+type GuideBlock = {
+	row: TubeTVGuideScheduleItem;
+	index: number;
+	start: number;
+	duration: number;
+	rowProgress: number;
+	isCurrent: boolean;
+};
+
 function formatDuration(seconds?: number) {
 	if (!Number.isFinite(seconds) || !seconds || seconds <= 0) return "00:00";
 	const totalSeconds = Math.max(0, Math.round(seconds));
@@ -29,6 +45,13 @@ function formatClock(value?: string) {
 	}).format(date);
 }
 
+function formatTimeLabel(value: Date) {
+	return new Intl.DateTimeFormat(undefined, {
+		hour: "numeric",
+		minute: "2-digit",
+	}).format(value);
+}
+
 function guideElapsedSeconds(startedAt?: string) {
 	if (!startedAt) return 0;
 	const started = new Date(startedAt);
@@ -36,21 +59,28 @@ function guideElapsedSeconds(startedAt?: string) {
 	return Math.max(0, (Date.now() - started.getTime()) / 1000);
 }
 
-function currentScheduleItem(channel: TubeTVGuideChannel, elapsed: number) {
-	if (!channel.schedule?.length) return null;
-	for (let index = 0; index < channel.schedule.length; index++) {
-		const row = channel.schedule[index];
-		if (elapsed >= (row.start ?? 0) && elapsed < (row.end ?? 0)) {
-			return { row, index };
-		}
-	}
-	return null;
+function channelPositionSeconds(channel: TubeTVGuideChannel, elapsed: number) {
+	const total = Number(channel.totalDuration ?? 0);
+	if (!Number.isFinite(total) || total <= 0) return elapsed;
+	return Math.max(0, elapsed % total);
 }
 
-function upcomingRows(channel: TubeTVGuideChannel, currentIndex: number) {
-	if (!channel.schedule?.length) return [];
-	const start = currentIndex >= 0 ? currentIndex + 1 : 0;
-	return channel.schedule.slice(start, start + 6);
+function findScheduleIndex(channel: TubeTVGuideChannel, position: number) {
+	for (let index = 0; index < channel.schedule.length; index++) {
+		const row = channel.schedule[index];
+		const start = row.start ?? 0;
+		const end = row.end ?? start + (row.duration ?? 0);
+		if (position >= start && position < end) return index;
+	}
+	return channel.schedule.length > 0 ? 0 : -1;
+}
+
+function currentScheduleItem(channel: TubeTVGuideChannel, elapsed: number) {
+	if (!channel.schedule?.length) return null;
+	const position = channelPositionSeconds(channel, elapsed);
+	const index = findScheduleIndex(channel, position);
+	if (index < 0) return null;
+	return { row: channel.schedule[index], index };
 }
 
 function itemKindLabel(row?: TubeTVGuideScheduleItem) {
@@ -65,11 +95,68 @@ function scheduleTitle(row?: TubeTVGuideScheduleItem) {
 	return row?.title || row?.path?.split(/[\\/]/).filter(Boolean).at(-1) || "Untitled";
 }
 
+function scheduleDetail(row?: TubeTVGuideScheduleItem) {
+	const kind = itemKindLabel(row);
+	const duration = formatDuration(row?.duration);
+	return duration === "00:00" ? kind : `${kind} / ${duration}`;
+}
+
 function channelProgress(row: TubeTVGuideScheduleItem | undefined, elapsed: number) {
 	if (!row) return 0;
 	const start = row.start ?? 0;
 	const duration = Math.max(1, (row.end ?? 0) - start);
 	return Math.max(0, Math.min(100, ((elapsed - start) / duration) * 100));
+}
+
+function guideBlocks(channel: TubeTVGuideChannel, elapsed: number): GuideBlock[] {
+	if (!channel.schedule?.length) return [];
+	const totalDuration = Number(channel.totalDuration ?? 0);
+	if (!Number.isFinite(totalDuration) || totalDuration <= 0) return [];
+
+	const blocks: GuideBlock[] = [];
+	let position = channelPositionSeconds(channel, elapsed);
+	let cursor = 0;
+	let guard = 0;
+
+	while (cursor < GUIDE_WINDOW_SECONDS && guard < channel.schedule.length + 64) {
+		const index = findScheduleIndex(channel, position);
+		if (index < 0) break;
+		const row = channel.schedule[index];
+		const rowStart = row.start ?? 0;
+		const rowEnd = row.end ?? rowStart + (row.duration ?? 0);
+		const remaining = Math.max(1, rowEnd - position);
+		const duration = Math.min(remaining, GUIDE_WINDOW_SECONDS - cursor);
+		blocks.push({
+			row,
+			index,
+			start: cursor,
+			duration,
+			rowProgress: channelProgress(row, position),
+			isCurrent: cursor === 0,
+		});
+		cursor += duration;
+		position = (position + duration) % totalDuration;
+		guard++;
+	}
+
+	return blocks;
+}
+
+function blockClasses(row: TubeTVGuideScheduleItem, isCurrent: boolean) {
+	const kind = String(row.kind || row.mediaType || row.type || "media").toLowerCase();
+	const base =
+		"absolute top-2 bottom-2 min-w-24 overflow-hidden rounded-md border px-3 py-2 shadow-inner";
+	const current = isCurrent ? " ring-2 ring-primary/80" : "";
+	if (kind === "commercial") {
+		return `${base} border-primary/25 bg-primary/12 text-primary${current}`;
+	}
+	if (kind === "episode") {
+		return `${base} border-info/30 bg-info/10 text-info-content${current}`;
+	}
+	if (kind === "movie") {
+		return `${base} border-secondary/35 bg-secondary/12 text-secondary-content${current}`;
+	}
+	return `${base} border-base-300 bg-base-200/85 text-base-content${current}`;
 }
 
 function GuideStat({
@@ -145,6 +232,10 @@ export function TVGuidePage() {
 	const plannedSeconds = guide?.plannedUntil
 		? Math.max(0, (new Date(guide.plannedUntil).getTime() - Date.now()) / 1000)
 		: 0;
+	const slotLabels = Array.from({ length: GUIDE_SLOT_COUNT }, (_, index) => {
+		const date = new Date(Date.now() + index * GUIDE_SLOT_SECONDS * 1000);
+		return index === 0 ? "NOW" : formatTimeLabel(date);
+	});
 
 	return (
 		<div className="space-y-6">
@@ -194,79 +285,108 @@ export function TVGuidePage() {
 					No TV guide channels are available. Check Local media and Tube TV settings.
 				</div>
 			) : (
-				<div className="grid gap-4 xl:grid-cols-2">
-					{channels.map((channel) => {
-						const current = currentScheduleItem(channel, elapsed);
-						const currentRow = current?.row;
-						const progress = channelProgress(currentRow, elapsed);
-						const nextRows = upcomingRows(channel, current?.index ?? -1);
+				<div className="overflow-hidden rounded-lg border border-primary/30 bg-neutral text-neutral-content shadow-inner">
+					<div className="border-primary/20 border-b bg-base-300/70 px-4 py-3">
+						<div className="flex flex-wrap items-center justify-between gap-3">
+							<div className="font-vcr text-primary text-xl">TATER GUIDE</div>
+							<div className="font-mono text-neutral-content/65 text-xs uppercase">
+								{formatClock(guide?.startedAt)} / {formatDuration(GUIDE_WINDOW_SECONDS)}
+							</div>
+						</div>
+					</div>
 
-						return (
-							<section
-								key={channel.number}
-								className="min-w-0 rounded-lg border border-base-300 bg-base-200/70 p-5"
+					<div className="overflow-x-auto">
+						<div style={{ minWidth: GUIDE_CHANNEL_WIDTH + GUIDE_TIMELINE_WIDTH }}>
+							<div
+								className="grid border-primary/20 border-b bg-base-300/90"
+								style={{
+									gridTemplateColumns: `${GUIDE_CHANNEL_WIDTH}px ${GUIDE_TIMELINE_WIDTH}px`,
+								}}
 							>
-								<div className="flex min-w-0 items-start justify-between gap-3">
-									<div className="min-w-0">
-										<div className="font-vcr text-primary text-xl">CH {channel.number}</div>
-										<h2 className="mt-1 truncate font-bold text-lg">{channel.title}</h2>
-									</div>
-									<div className="badge badge-primary badge-outline">
-										{formatDuration(channel.totalDuration)}
-									</div>
+								<div className="border-primary/20 border-r px-4 py-3 font-mono text-neutral-content/55 text-xs uppercase">
+									Channel
 								</div>
+								<div
+									className="grid"
+									style={{ gridTemplateColumns: `repeat(${GUIDE_SLOT_COUNT}, ${GUIDE_SLOT_WIDTH}px)` }}
+								>
+									{slotLabels.map((label, index) => (
+										<div
+											key={`${label}-${index}`}
+											className="border-primary/20 border-r px-3 py-3 font-vcr text-primary text-sm"
+										>
+											{label}
+										</div>
+									))}
+								</div>
+							</div>
 
-								<div className="mt-4 rounded-lg bg-base-100/75 p-4">
-									<div className="flex items-center justify-between gap-3">
-										<div className="min-w-0">
-											<div className="text-base-content/45 text-xs uppercase tracking-widest">
-												Now Playing
+							{channels.map((channel) => {
+								const current = currentScheduleItem(channel, elapsed);
+								const blocks = guideBlocks(channel, elapsed);
+								return (
+									<div
+										key={channel.number}
+										className="grid border-primary/15 border-b last:border-b-0"
+										style={{
+											gridTemplateColumns: `${GUIDE_CHANNEL_WIDTH}px ${GUIDE_TIMELINE_WIDTH}px`,
+										}}
+									>
+										<div className="border-primary/20 border-r bg-base-300/60 px-4 py-3">
+											<div className="font-vcr text-primary text-2xl leading-none">
+												CH {channel.number}
 											</div>
-											<div className="mt-1 truncate font-bold">{scheduleTitle(currentRow)}</div>
+											<div className="mt-2 line-clamp-2 font-bold text-neutral-content text-sm">
+												{channel.title}
+											</div>
+											<div className="mt-2 truncate text-neutral-content/45 text-xs">
+												{itemKindLabel(current?.row)}
+											</div>
 										</div>
-										<div className="badge badge-secondary badge-outline">
-											{itemKindLabel(currentRow)}
-										</div>
-									</div>
-									<progress
-										className="progress progress-primary mt-3 h-2 w-full"
-										value={progress}
-										max="100"
-									/>
-									<div className="mt-2 flex justify-between text-base-content/50 text-xs">
-										<span>{formatDuration(Math.max(0, elapsed - (currentRow?.start ?? 0)))}</span>
-										<span>{formatDuration(currentRow?.duration)}</span>
-									</div>
-								</div>
 
-								<div className="mt-4 space-y-2">
-									<div className="text-base-content/45 text-xs uppercase tracking-widest">
-										Up Next
-									</div>
-									{nextRows.length === 0 ? (
-										<div className="rounded-md bg-base-100/50 px-3 py-2 text-base-content/50 text-sm">
-											Guide extension pending
-										</div>
-									) : (
-										nextRows.map((row) => (
-											<div
-												key={`${channel.number}-${row.start}-${row.title}`}
-												className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-base-100/50 px-3 py-2"
-											>
-												<div className="min-w-0">
-													<div className="truncate font-medium text-sm">{scheduleTitle(row)}</div>
-													<div className="text-base-content/45 text-xs">
-														{formatDuration(row.start)} / {formatDuration(row.duration)}
+										<div className="relative h-28 bg-base-100/80">
+											{Array.from({ length: GUIDE_SLOT_COUNT + 1 }, (_, index) => (
+												<div
+													key={`line-${channel.number}-${index}`}
+													className="absolute top-0 bottom-0 border-primary/10 border-l"
+													style={{ left: index * GUIDE_SLOT_WIDTH }}
+												/>
+											))}
+											<div className="absolute top-0 bottom-0 left-0 w-1 bg-primary shadow-[0_0_14px_rgba(255,122,0,0.8)]" />
+											{blocks.map((block) => {
+												const left = (block.start / GUIDE_SLOT_SECONDS) * GUIDE_SLOT_WIDTH;
+												const width = Math.max(
+													80,
+													(block.duration / GUIDE_SLOT_SECONDS) * GUIDE_SLOT_WIDTH,
+												);
+												return (
+													<div
+														key={`${channel.number}-${block.index}-${block.start}`}
+														className={blockClasses(block.row, block.isCurrent)}
+														style={{ left, width }}
+														title={`${scheduleTitle(block.row)} - ${scheduleDetail(block.row)}`}
+													>
+														<div className="truncate font-bold text-sm">{scheduleTitle(block.row)}</div>
+														<div className="mt-1 truncate font-mono text-[11px] opacity-70">
+															{scheduleDetail(block.row)}
+														</div>
+														{block.isCurrent && (
+															<div className="absolute right-2 bottom-2 left-2 h-1 overflow-hidden rounded-full bg-black/30">
+																<div
+																	className="h-full rounded-full bg-primary"
+																	style={{ width: `${block.rowProgress}%` }}
+																/>
+															</div>
+														)}
 													</div>
-												</div>
-												<span className="badge badge-ghost badge-sm">{itemKindLabel(row)}</span>
-											</div>
-										))
-									)}
-								</div>
-							</section>
-						);
-					})}
+												);
+											})}
+										</div>
+									</div>
+								);
+							})}
+						</div>
+					</div>
 				</div>
 			)}
 		</div>
