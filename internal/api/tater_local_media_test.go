@@ -628,6 +628,47 @@ func TestTaterBuildTVLineupUsesServerLocalMediaAndCommercials(t *testing.T) {
 	}
 }
 
+func TestTaterTVCommercialCategoriesProbeDurations(t *testing.T) {
+	configDir := t.TempDir()
+	binDir := filepath.Join(configDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegPath := filepath.Join(binDir, "ffmpeg")
+	ffprobePath := filepath.Join(binDir, "ffprobe")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ffprobePath, []byte("#!/bin/sh\nprintf '12.500\\n11.000\\n'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	commercialRoot := filepath.Join(configDir, "commercials")
+	commercialDir := filepath.Join(commercialRoot, "retro-ads")
+	if err := os.MkdirAll(commercialDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(commercialDir, "Short Spot.mp4"), []byte("ad"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig(configDir)
+	cfg.Transcoding.FFmpegPath = ffmpegPath
+	cfg.TubeTV.CommercialsPath = commercialRoot
+
+	categories := taterTVCommercialCategories(cfg, "http://server", "token")
+	if len(categories) != 1 || len(categories[0].Videos) != 1 {
+		t.Fatalf("expected one probed commercial, got %#v", categories)
+	}
+	video := categories[0].Videos[0]
+	if !video.DurationKnown {
+		t.Fatalf("expected commercial duration to be known: %#v", video)
+	}
+	if video.Duration != 12.5 || video.FullDuration != 12.5 {
+		t.Fatalf("expected probed commercial duration 12.5, got %#v", video)
+	}
+}
+
 func TestTaterTVGuideBuildsAndExtendsSharedSchedule(t *testing.T) {
 	taterTVResetGuide()
 	defer taterTVResetGuide()
@@ -687,6 +728,30 @@ func TestTaterTVGuideBuildsAndExtendsSharedSchedule(t *testing.T) {
 	}
 	if extended.Channels[0].TotalDuration <= firstDuration {
 		t.Fatalf("expected guide extension beyond %f, got %f", firstDuration, extended.Channels[0].TotalDuration)
+	}
+}
+
+func TestTaterTVCurrentSchedulePositionWrapsElapsedTime(t *testing.T) {
+	startedAt := time.Now().Add(-95 * time.Second)
+	channel := taterTVChannel{
+		Number:        "02",
+		Title:         "Looping",
+		TotalDuration: 90,
+		Schedule: []map[string]any{
+			{"title": "First", "duration": 60.0, "mediaOffset": 0.0, "start": 0.0, "end": 60.0},
+			{"title": "Second", "duration": 30.0, "mediaOffset": 0.0, "start": 60.0, "end": 90.0},
+		},
+	}
+
+	index, startOffset, remaining := taterTVCurrentSchedulePosition(channel, startedAt, startedAt.Add(95*time.Second))
+	if index != 0 {
+		t.Fatalf("expected wrapped schedule index 0, got %d", index)
+	}
+	if startOffset < 4.9 || startOffset > 5.1 {
+		t.Fatalf("expected wrapped offset near 5 seconds, got %f", startOffset)
+	}
+	if remaining < 54.9 || remaining > 55.1 {
+		t.Fatalf("expected wrapped remaining near 55 seconds, got %f", remaining)
 	}
 }
 
@@ -859,6 +924,7 @@ func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
 	joined := strings.Join(args, " ")
 
 	for _, expected := range []string{
+		"-re",
 		"-filter_complex",
 		"overlay=x=W-w-",
 		"-af aresample=async=1:first_pts=0",

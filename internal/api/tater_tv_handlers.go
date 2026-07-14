@@ -43,15 +43,16 @@ type taterTVNumberedSource struct {
 }
 
 type taterTVCommercial struct {
-	Title        string  `json:"title"`
-	CategoryID   string  `json:"categoryId"`
-	Category     string  `json:"category"`
-	Name         string  `json:"name"`
-	URL          string  `json:"url,omitempty"`
-	Kind         string  `json:"kind"`
-	Local        bool    `json:"local"`
-	Duration     float64 `json:"duration"`
-	FullDuration float64 `json:"fullDuration"`
+	Title         string  `json:"title"`
+	CategoryID    string  `json:"categoryId"`
+	Category      string  `json:"category"`
+	Name          string  `json:"name"`
+	URL           string  `json:"url,omitempty"`
+	Kind          string  `json:"kind"`
+	Local         bool    `json:"local"`
+	Duration      float64 `json:"duration"`
+	FullDuration  float64 `json:"fullDuration"`
+	DurationKnown bool    `json:"durationKnown"`
 }
 
 type taterTVCommercialCategory struct {
@@ -925,7 +926,7 @@ func taterTVAppendCommercialBreak(cfg *config.Config, schedule *[]map[string]any
 			"url":           commercial.URL,
 			"local":         true,
 			"duration":      commercial.Duration,
-			"durationKnown": false,
+			"durationKnown": commercial.DurationKnown,
 			"fullDuration":  commercial.FullDuration,
 			"mediaOffset":   0,
 			"forceAdvance":  false,
@@ -964,16 +965,19 @@ func taterTVCommercialCategories(cfg *config.Config, baseURL, playerToken string
 			if title == "" {
 				title = "Commercial"
 			}
+			path := filepath.Join(dir, file.Name())
+			duration, durationKnown := taterTVCommercialDuration(cfg, path)
 			videos = append(videos, taterTVCommercial{
-				Title:        title,
-				CategoryID:   id,
-				Category:     cleanTaterText(entry.Name()),
-				Name:         file.Name(),
-				URL:          taterTVCommercialURL(baseURL, id, file.Name(), playerToken),
-				Kind:         "commercial",
-				Local:        false,
-				Duration:     30,
-				FullDuration: 30,
+				Title:         title,
+				CategoryID:    id,
+				Category:      cleanTaterText(entry.Name()),
+				Name:          file.Name(),
+				URL:           taterTVCommercialURL(baseURL, id, file.Name(), playerToken),
+				Kind:          "commercial",
+				Local:         false,
+				Duration:      duration,
+				FullDuration:  duration,
+				DurationKnown: durationKnown,
 			})
 		}
 		sort.SliceStable(videos, func(i, j int) bool {
@@ -990,6 +994,14 @@ func taterTVCommercialCategories(cfg *config.Config, baseURL, playerToken string
 		return strings.ToLower(categories[i].Title) < strings.ToLower(categories[j].Title)
 	})
 	return categories
+}
+
+func taterTVCommercialDuration(cfg *config.Config, path string) (float64, bool) {
+	duration := taterLocalDurationSeconds(cfg, path)
+	if duration > 0 && !math.IsNaN(duration) && !math.IsInf(duration, 0) {
+		return math.Max(1, duration), true
+	}
+	return 30, false
 }
 
 func taterTVCommercialPool(cfg *config.Config, categories []taterTVCommercialCategory, channelCategory string) []taterTVCommercial {
