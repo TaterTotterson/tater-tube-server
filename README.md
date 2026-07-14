@@ -69,6 +69,12 @@ services:
 The only required volume is `/config`. It stores server settings, player pairing
 tokens, stream metadata, and the segment cache.
 
+Unraid template icon URL:
+
+```text
+https://raw.githubusercontent.com/TaterTotterson/tater-tube-server/main/frontend/public/unraid-icon.png
+```
+
 ## Local Media Mapping
 
 To use Local Media, mount host media folders into the container, then add the
