@@ -32,6 +32,7 @@ type taterTVSource struct {
 	CommercialCategory string
 	LogoPath           string
 	LogoTitle          string
+	LogoPosition       string
 	Programs           []taterUsenetItem
 	Groups             []taterTVEpisodeGroup
 	Seen               map[string]bool
@@ -68,6 +69,7 @@ type taterTVChannel struct {
 	StreamURL     string           `json:"streamUrl,omitempty"`
 	LogoPath      string           `json:"logoPath,omitempty"`
 	LogoTitle     string           `json:"logoTitle,omitempty"`
+	LogoPosition  string           `json:"logoPosition,omitempty"`
 	Schedule      []map[string]any `json:"schedule"`
 	TotalDuration float64          `json:"totalDuration"`
 }
@@ -419,6 +421,7 @@ func taterBuildTVLineupUntil(cfg *config.Config, baseURL, playerToken string, mi
 			StreamURL:     taterTVChannelStreamURL(baseURL, number, playerToken),
 			LogoPath:      source.LogoPath,
 			LogoTitle:     source.LogoTitle,
+			LogoPosition:  config.NormalizeTubeTVLogoPosition(source.LogoPosition),
 			Schedule:      schedule,
 			TotalDuration: total,
 		})
@@ -542,6 +545,7 @@ func taterTVCustomSources(cfg *config.Config, baseURL, playerToken string) ([]ta
 			CommercialCategory: channel.CommercialCategory,
 			LogoPath:           config.SanitizeTubeTVLogoPath(channel.LogoPath),
 			LogoTitle:          cleanTaterText(channel.LogoTitle),
+			LogoPosition:       config.NormalizeTubeTVLogoPosition(channel.LogoPosition),
 			Seen:               map[string]bool{},
 		}
 		if source.Title == "" {

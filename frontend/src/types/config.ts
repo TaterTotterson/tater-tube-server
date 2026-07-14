@@ -544,6 +544,7 @@ export interface TubeTVCustomChannel {
 	commercial_category?: string;
 	logo_path?: string;
 	logo_title?: string;
+	logo_position?: "top_left" | "top_right" | "bottom_right" | "bottom_left" | string;
 	sources: TubeTVCustomSource[];
 }
 
@@ -640,6 +641,7 @@ export interface TubeTVGuideChannel {
 	streamUrl?: string;
 	logoPath?: string;
 	logoTitle?: string;
+	logoPosition?: string;
 	totalDuration: number;
 	schedule: TubeTVGuideScheduleItem[];
 }

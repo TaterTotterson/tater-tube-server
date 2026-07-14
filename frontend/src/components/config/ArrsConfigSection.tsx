@@ -11,6 +11,7 @@ import type {
 } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { ArrsInstanceCard } from "./ArrsInstanceCard";
+import { ConfigMiniTabs } from "./ConfigMiniTabs";
 
 interface ArrsConfigSectionProps {
 	config: ConfigResponse;
@@ -18,6 +19,8 @@ interface ArrsConfigSectionProps {
 	isReadOnly?: boolean;
 	isUpdating?: boolean;
 }
+
+type ArrsTab = "core" | "maintenance" | "instances";
 
 interface NewInstanceForm {
 	name: string;
@@ -59,6 +62,7 @@ export function ArrsConfigSection({
 	const [newInstance, setNewInstance] = useState<NewInstanceForm>(DEFAULT_NEW_INSTANCE);
 	const [validationErrors, setValidationErrors] = useState<string[]>([]);
 	const [showApiKeys, setShowApiKeys] = useState<Record<string, boolean>>({});
+	const [activeTab, setActiveTab] = useState<ArrsTab>("core");
 	const [webhookSuccess, setWebhookSuccess] = useState<string | null>(null);
 	const [webhookError, setWebhookError] = useState<string | null>(null);
 	const [saveError, setSaveError] = useState<string | null>(null);
@@ -253,30 +257,49 @@ export function ArrsConfigSection({
 		);
 	};
 
+	const instanceCount = ARR_TYPES.reduce((total, { type }) => {
+		const instancesKey = `${type}_instances` as keyof ArrsConfig;
+		return total + (((formData[instancesKey] || []) as ArrsInstanceConfig[]).length || 0);
+	}, 0);
+
+	const miniTabs = [
+		{ id: "core" as const, label: "Core", icon: <Webhook className="h-4 w-4" /> },
+		{ id: "maintenance" as const, label: "Maintenance", icon: <Trash2 className="h-4 w-4" /> },
+		{
+			id: "instances" as const,
+			label: "Instances",
+			icon: <Plus className="h-4 w-4" />,
+			count: instanceCount,
+		},
+	];
+
 	return (
 		<div className="space-y-10">
+			<ConfigMiniTabs tabs={miniTabs} activeTab={activeTab} onChange={setActiveTab} />
 			<div className="space-y-8">
 				{/* Enable/Disable Arrs */}
-				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-					<div className="flex items-start justify-between gap-4">
-						<div className="min-w-0 flex-1">
-							<h4 className="break-words font-bold text-base-content text-sm">Service Engine</h4>
-							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-								Allows Tater Tube Server to talk to Radarr/Sonarr for repairs and updates.
-							</p>
+				{activeTab === "core" && (
+					<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+						<div className="flex items-start justify-between gap-4">
+							<div className="min-w-0 flex-1">
+								<h4 className="break-words font-bold text-base-content text-sm">Service Engine</h4>
+								<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+									Allows Tater Tube Server to talk to Radarr/Sonarr for repairs and updates.
+								</p>
+							</div>
+							<input
+								type="checkbox"
+								className="toggle toggle-primary mt-1 shrink-0"
+								checked={formData.enabled}
+								onChange={(e) => handleFormChange("enabled", e.target.checked)}
+								disabled={isReadOnly}
+							/>
 						</div>
-						<input
-							type="checkbox"
-							className="toggle toggle-primary mt-1 shrink-0"
-							checked={formData.enabled}
-							onChange={(e) => handleFormChange("enabled", e.target.checked)}
-							disabled={isReadOnly}
-						/>
 					</div>
-				</div>
+				)}
 
 				{/* Webhooks Auto-Registration */}
-				{formData.enabled && (
+				{activeTab === "core" && formData.enabled && (
 					<div className="fade-in slide-in-from-top-2 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 						<div className="flex items-center gap-2">
 							<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -289,14 +312,16 @@ export function ArrsConfigSection({
 							<div>
 								<h5 className="font-bold text-sm">Tater Tube Server Webhooks</h5>
 								<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
-									Automatically configure hooks in ARR applications to notify Tater Tube Server of upgrades
-									and renames.
+									Automatically configure hooks in ARR applications to notify Tater Tube Server of
+									upgrades and renames.
 								</p>
 							</div>
 
 							<div className="flex flex-col gap-4 sm:flex-row sm:items-end">
 								<fieldset className="fieldset flex-1">
-									<legend className="fieldset-legend font-semibold">Tater Tube Server Callback URL</legend>
+									<legend className="fieldset-legend font-semibold">
+										Tater Tube Server Callback URL
+									</legend>
 									<input
 										type="url"
 										className="input input-bordered w-full bg-base-100 font-mono text-sm"
@@ -338,7 +363,7 @@ export function ArrsConfigSection({
 				)}
 
 				{/* Queue Cleanup Settings */}
-				{formData.enabled && (
+				{activeTab === "maintenance" && formData.enabled && (
 					<div className="fade-in slide-in-from-top-4 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 						<div className="flex items-center gap-2">
 							<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -527,7 +552,7 @@ export function ArrsConfigSection({
 				)}
 
 				{/* Instances Lists */}
-				{formData.enabled && (
+				{activeTab === "instances" && formData.enabled && (
 					<div className="fade-in slide-in-from-top-6 animate-in space-y-10">
 						{ARR_TYPES.map(({ type, label, color, defaultCategory }) => {
 							const instancesKey = `${type}_instances` as keyof ArrsConfig;
@@ -566,6 +591,12 @@ export function ArrsConfigSection({
 								</div>
 							);
 						})}
+					</div>
+				)}
+
+				{activeTab !== "core" && !formData.enabled && (
+					<div className="rounded-2xl border-2 border-base-300 border-dashed bg-base-200/40 p-8 text-center text-base-content/60 text-sm">
+						Enable the service engine in Core before configuring this section.
 					</div>
 				)}
 			</div>

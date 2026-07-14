@@ -877,7 +877,7 @@ func TestTaterTVStreamItemsStartAtLivePosition(t *testing.T) {
 }
 
 func TestTaterTVSegmentTranscodeArgsMarkDiscontinuity(t *testing.T) {
-	args := buildTaterTVChannelTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["crt_480p"], "none", "/media/movie.mkv", 12.5, 30, "")
+	args := buildTaterTVChannelTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["crt_480p"], "none", "/media/movie.mkv", 12.5, 30, "", "")
 	joined := strings.Join(args, " ")
 
 	if strings.Contains(joined, "-f concat") {
@@ -892,7 +892,7 @@ func TestTaterTVSegmentTranscodeArgsMarkDiscontinuity(t *testing.T) {
 }
 
 func TestTaterTVSegmentTranscodeArgsAddChannelLogoOverlay(t *testing.T) {
-	args := buildTaterTVChannelTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["crt_480p"], "none", "/media/movie.mkv", 0, 30, "/metadata/logos/cartoon.png")
+	args := buildTaterTVChannelTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["crt_480p"], "none", "/media/movie.mkv", 0, 30, "/metadata/logos/cartoon.png", "bottom_right")
 	joined := strings.Join(args, " ")
 
 	if !strings.Contains(joined, "-loop 1 -framerate 30 -i /metadata/logos/cartoon.png") {
@@ -918,6 +918,7 @@ func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
 		12.5,
 		30,
 		"/metadata/logos/cartoon.png",
+		"bottom_right",
 		"/tmp/hls/index.m3u8",
 		"/tmp/hls/seg-%05d.ts",
 	)
@@ -936,6 +937,28 @@ func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("expected %q in HLS args: %s", expected, joined)
+		}
+	}
+}
+
+func TestTaterTVChannelLogoOverlayPositions(t *testing.T) {
+	profile := transcodeProfiles["crt_480p"]
+	tests := []struct {
+		position string
+		x        string
+		y        string
+	}{
+		{position: "top_left", x: "x=12", y: "y=13"},
+		{position: "top_right", x: "x=W-w-12", y: "y=13"},
+		{position: "bottom_left", x: "x=12", y: "y=H-h-13"},
+		{position: "bottom_right", x: "x=W-w-12", y: "y=H-h-13"},
+		{position: "", x: "x=W-w-12", y: "y=H-h-13"},
+	}
+
+	for _, tt := range tests {
+		filter := taterTVChannelLogoFilter("", profile, tt.position)
+		if !strings.Contains(filter, "overlay="+tt.x+":"+tt.y+":") {
+			t.Fatalf("position %q produced unexpected overlay filter: %s", tt.position, filter)
 		}
 	}
 }

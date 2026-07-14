@@ -18,6 +18,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiClient } from "../../api/client";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
+import { ConfigMiniTabs } from "./ConfigMiniTabs";
 import type {
 	ConfigResponse,
 	LocalMediaCategory,
@@ -37,6 +38,8 @@ interface TubeTVConfigSectionProps {
 	isUpdating?: boolean;
 }
 
+type TubeTVTab = "general" | "commercials" | "channels";
+
 const DEFAULT_TUBE_TV: TubeTVConfig = {
 	enabled: true,
 	auto_channels: true,
@@ -49,6 +52,13 @@ const DEFAULT_TUBE_TV: TubeTVConfig = {
 };
 
 const TUBE_TV_LOGO_RAW_BASE = "https://raw.githubusercontent.com/tv-logo/tv-logos/main/";
+
+const LOGO_POSITION_OPTIONS = [
+	{ value: "top_left", label: "Top left" },
+	{ value: "top_right", label: "Top right" },
+	{ value: "bottom_right", label: "Bottom right" },
+	{ value: "bottom_left", label: "Bottom left" },
+] as const;
 
 interface LibraryRequest {
 	categoryId: string;
@@ -108,6 +118,10 @@ function logoPreviewURL(path?: string) {
 	);
 }
 
+function normalizeLogoPosition(value?: string) {
+	return LOGO_POSITION_OPTIONS.some((option) => option.value === value) ? value : "bottom_right";
+}
+
 function normalize(config: ConfigResponse): TubeTVConfig {
 	const source = config.tube_tv ?? DEFAULT_TUBE_TV;
 	return {
@@ -125,6 +139,7 @@ function normalize(config: ConfigResponse): TubeTVConfig {
 			commercial_category: channel.commercial_category || "",
 			logo_path: channel.logo_path || "",
 			logo_title: channel.logo_title || "",
+			logo_position: normalizeLogoPosition(channel.logo_position),
 			sources: (channel.sources ?? []).map((row) => ({
 				category_id: row.category_id || "",
 				source_index: row.source_index ?? -1,
@@ -196,6 +211,7 @@ export function TubeTVConfigSection({
 	const [logoResults, setLogoResults] = useState<Record<number, TubeTVLogoResult[]>>({});
 	const [logoLoading, setLogoLoading] = useState<Record<number, boolean>>({});
 	const [hasChanges, setHasChanges] = useState(false);
+	const [activeTab, setActiveTab] = useState<TubeTVTab>("general");
 
 	const localCategories = (config.local_media?.categories ?? []).filter(
 		(category) => category.enabled !== false && category.library_type !== "music",
@@ -286,6 +302,7 @@ export function TubeTVConfigSection({
 					commercial_category: "",
 					logo_path: "",
 					logo_title: "",
+					logo_position: "bottom_right",
 					sources: [],
 				},
 			]),
@@ -435,6 +452,7 @@ export function TubeTVConfigSection({
 					commercial_category: slug(channel.commercial_category || ""),
 					logo_path: (channel.logo_path || "").trim().replace(/^\/+/, ""),
 					logo_title: (channel.logo_title || "").trim(),
+					logo_position: normalizeLogoPosition(channel.logo_position),
 					sources: channel.sources
 						.map((source) => ({
 							category_id: normalizeSourceCategoryId(source.category_id),
@@ -508,6 +526,22 @@ export function TubeTVConfigSection({
 		return `${row.title} ${row.detail || ""} ${row.mediaType || ""}`.toLowerCase().includes(query);
 	});
 
+	const miniTabs = [
+		{ id: "general" as const, label: "General", icon: <Clapperboard className="h-4 w-4" /> },
+		{
+			id: "commercials" as const,
+			label: "Commercials",
+			icon: <Upload className="h-4 w-4" />,
+			count: library?.categories.length ?? 0,
+		},
+		{
+			id: "channels" as const,
+			label: "Custom Channels",
+			icon: <Folder className="h-4 w-4" />,
+			count: formData.custom_channels.length,
+		},
+	];
+
 	return (
 		<div className="min-w-0 space-y-8">
 			<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
@@ -538,612 +572,655 @@ export function TubeTVConfigSection({
 						Save
 					</button>
 				</div>
-
-				<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-					<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
-						<span className="font-bold text-sm">Enabled</span>
-						<input
-							type="checkbox"
-							className="toggle toggle-primary"
-							checked={formData.enabled}
-							disabled={isReadOnly}
-							onChange={(event) => update({ ...formData, enabled: event.target.checked })}
-						/>
-					</label>
-					<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
-						<span className="font-bold text-sm">Auto Channels</span>
-						<input
-							type="checkbox"
-							className="toggle toggle-primary"
-							checked={formData.auto_channels}
-							disabled={isReadOnly}
-							onChange={(event) => update({ ...formData, auto_channels: event.target.checked })}
-						/>
-					</label>
-					<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
-						<span className="font-bold text-sm">Commercial Breaks</span>
-						<input
-							type="checkbox"
-							className="toggle toggle-primary"
-							checked={formData.commercials_enabled}
-							disabled={isReadOnly}
-							onChange={(event) =>
-								update({ ...formData, commercials_enabled: event.target.checked })
-							}
-						/>
-					</label>
-					<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
-						<span className="font-bold text-sm">Mid-rolls</span>
-						<input
-							type="checkbox"
-							className="toggle toggle-primary"
-							checked={formData.midroll_commercials}
-							disabled={isReadOnly}
-							onChange={(event) =>
-								update({ ...formData, midroll_commercials: event.target.checked })
-							}
-						/>
-					</label>
-					<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
-						<span className="font-bold text-sm">Channel Logos</span>
-						<input
-							type="checkbox"
-							className="toggle toggle-primary"
-							checked={formData.channel_logos_enabled}
-							disabled={isReadOnly}
-							onChange={(event) =>
-								update({ ...formData, channel_logos_enabled: event.target.checked })
-							}
-						/>
-					</label>
-				</div>
-
-				<label className="form-control mt-5">
-					<span className="label-text font-bold text-base-content text-sm">
-						Commercial Storage Path
-					</span>
-					<input
-						type="text"
-						className="input input-bordered mt-2 w-full"
-						value={formData.commercials_path}
-						disabled={isReadOnly}
-						onChange={(event) => update({ ...formData, commercials_path: event.target.value })}
-						placeholder="/config/metadata/tube-tv-commercials"
-					/>
-				</label>
+				<ConfigMiniTabs tabs={miniTabs} activeTab={activeTab} onChange={setActiveTab} />
 			</div>
 
-			<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-				<div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-					<div>
-						<div className="mb-3 flex items-center gap-2">
-							<Upload className="h-4 w-4 text-base-content/60" />
-							<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-								Commercial Library
-							</h4>
-						</div>
-						<p className="text-base-content/60 text-sm">
-							Upload local commercial videos and pick which categories Tube TV can use.
-						</p>
+			{activeTab === "general" && (
+				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+						<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
+							<span className="font-bold text-sm">Enabled</span>
+							<input
+								type="checkbox"
+								className="toggle toggle-primary"
+								checked={formData.enabled}
+								disabled={isReadOnly}
+								onChange={(event) => update({ ...formData, enabled: event.target.checked })}
+							/>
+						</label>
+						<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
+							<span className="font-bold text-sm">Auto Channels</span>
+							<input
+								type="checkbox"
+								className="toggle toggle-primary"
+								checked={formData.auto_channels}
+								disabled={isReadOnly}
+								onChange={(event) => update({ ...formData, auto_channels: event.target.checked })}
+							/>
+						</label>
+						<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
+							<span className="font-bold text-sm">Commercial Breaks</span>
+							<input
+								type="checkbox"
+								className="toggle toggle-primary"
+								checked={formData.commercials_enabled}
+								disabled={isReadOnly}
+								onChange={(event) =>
+									update({ ...formData, commercials_enabled: event.target.checked })
+								}
+							/>
+						</label>
+						<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
+							<span className="font-bold text-sm">Mid-rolls</span>
+							<input
+								type="checkbox"
+								className="toggle toggle-primary"
+								checked={formData.midroll_commercials}
+								disabled={isReadOnly}
+								onChange={(event) =>
+									update({ ...formData, midroll_commercials: event.target.checked })
+								}
+							/>
+						</label>
+						<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
+							<span className="font-bold text-sm">Channel Logos</span>
+							<input
+								type="checkbox"
+								className="toggle toggle-primary"
+								checked={formData.channel_logos_enabled}
+								disabled={isReadOnly}
+								onChange={(event) =>
+									update({ ...formData, channel_logos_enabled: event.target.checked })
+								}
+							/>
+						</label>
 					</div>
-					<button
-						type="button"
-						className="btn btn-outline btn-sm"
-						onClick={refreshLibrary}
-						disabled={isLibraryLoading}
-					>
-						{isLibraryLoading ? (
-							<span className="loading loading-spinner loading-xs" />
-						) : (
-							<RefreshCw className="h-4 w-4" />
-						)}
-						Refresh
-					</button>
-				</div>
 
-				<div className="grid gap-3 md:grid-cols-[1fr_auto]">
-					<input
-						type="text"
-						className="input input-bordered"
-						value={newCategory}
-						onChange={(event) => setNewCategory(event.target.value)}
-						placeholder="Cartoon Network Commercials"
-					/>
-					<button type="button" className="btn btn-outline" onClick={createCategory}>
-						<Plus className="h-4 w-4" />
-						Add Category
-					</button>
-				</div>
-
-				<div className="mt-4 grid gap-3 md:grid-cols-[16rem_1fr] md:items-end">
-					<label className="form-control">
-						<span className="label-text font-bold text-base-content text-sm">Upload To</span>
-						<select
-							className="select select-bordered mt-2"
-							value={uploadCategory}
-							onChange={(event) => setUploadCategory(event.target.value)}
-						>
-							<option value="">Select category</option>
-							{(library?.categories ?? []).map((category) => (
-								<option key={category.id} value={category.id}>
-									{category.title}
-								</option>
-							))}
-						</select>
-					</label>
-					<label
-						className={`btn btn-primary ${!uploadCategory || isUploading ? "btn-disabled" : ""}`}
-					>
-						{isUploading ? (
-							<span className="loading loading-spinner loading-xs" />
-						) : (
-							<Upload className="h-4 w-4" />
-						)}
-						Upload Videos
+					<label className="form-control mt-5">
+						<span className="label-text font-bold text-base-content text-sm">
+							Commercial Storage Path
+						</span>
 						<input
-							type="file"
-							className="hidden"
-							accept="video/*"
-							multiple
-							disabled={!uploadCategory || isUploading}
-							onChange={(event) => void uploadFiles(event.target.files)}
+							type="text"
+							className="input input-bordered mt-2 w-full"
+							value={formData.commercials_path}
+							disabled={isReadOnly}
+							onChange={(event) => update({ ...formData, commercials_path: event.target.value })}
+							placeholder="/config/metadata/tube-tv-commercials"
 						/>
 					</label>
 				</div>
+			)}
 
-				<div className="mt-5 space-y-3">
-					{(library?.categories ?? []).length === 0 && (
-						<div className="rounded-xl border border-base-300 bg-base-100/70 p-4 text-base-content/60 text-sm">
-							No commercial categories yet.
-						</div>
-					)}
-					{(library?.categories ?? []).map((category) => (
-						<div key={category.id} className="rounded-xl border border-base-300 bg-base-100/70 p-4">
-							<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-								<label className="flex items-center gap-3">
-									<input
-										type="checkbox"
-										className="checkbox checkbox-primary"
-										checked={formData.commercial_categories.includes(category.id)}
-										onChange={() => toggleCommercialCategory(category.id)}
-									/>
-									<span className="font-bold">{category.title}</span>
-									<span className="badge badge-ghost">{category.count} videos</span>
-								</label>
-								<button
-									type="button"
-									className="btn btn-error btn-outline btn-xs"
-									onClick={() => void deleteCategory(category.id, category.title)}
-								>
-									<Trash2 className="h-3 w-3" />
-									Delete
-								</button>
+			{activeTab === "commercials" && (
+				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+						<div>
+							<div className="mb-3 flex items-center gap-2">
+								<Upload className="h-4 w-4 text-base-content/60" />
+								<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
+									Commercial Library
+								</h4>
 							</div>
-							{category.videos.length > 0 && (
-								<div className="mt-3 grid gap-2 sm:grid-cols-2">
-									{category.videos.slice(0, 6).map((video) => (
-										<div
-											key={`${category.id}-${video.name}`}
-											className="truncate rounded-lg bg-base-200 px-3 py-2 text-base-content/60 text-xs"
-										>
-											{video.title}
-										</div>
-									))}
-									{category.videos.length > 6 && (
-										<div className="rounded-lg bg-base-200 px-3 py-2 text-base-content/50 text-xs">
-											+{category.videos.length - 6} more
-										</div>
-									)}
-								</div>
+							<p className="text-base-content/60 text-sm">
+								Upload local commercial videos and pick which categories Tube TV can use.
+							</p>
+						</div>
+						<button
+							type="button"
+							className="btn btn-outline btn-sm"
+							onClick={refreshLibrary}
+							disabled={isLibraryLoading}
+						>
+							{isLibraryLoading ? (
+								<span className="loading loading-spinner loading-xs" />
+							) : (
+								<RefreshCw className="h-4 w-4" />
 							)}
-						</div>
-					))}
-				</div>
-			</div>
-
-			<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-				<div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-					<div>
-						<div className="mb-3 flex items-center gap-2">
-							<Folder className="h-4 w-4 text-base-content/60" />
-							<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-								Custom Channels
-							</h4>
-						</div>
-						<p className="text-base-content/60 text-sm">
-							Custom channels can reserve a VCR-style channel number. Auto channels fill the open
-							slots.
-						</p>
+							Refresh
+						</button>
 					</div>
-					<button type="button" className="btn btn-outline btn-sm" onClick={addChannel}>
-						<Plus className="h-4 w-4" />
-						Add Channel
-					</button>
-				</div>
 
-				<div className="space-y-4">
-					{formData.custom_channels.length === 0 && (
-						<div className="rounded-xl border border-base-300 bg-base-100/70 p-4 text-base-content/60 text-sm">
-							No custom channels configured.
-						</div>
-					)}
-					{formData.custom_channels.map((channel, channelIndex) => (
-						<div
-							key={`tube-tv-channel-${channelIndex}`}
-							className="rounded-xl border border-base-300 bg-base-100/70 p-4"
+					<div className="grid gap-3 md:grid-cols-[1fr_auto]">
+						<input
+							type="text"
+							className="input input-bordered"
+							value={newCategory}
+							onChange={(event) => setNewCategory(event.target.value)}
+							placeholder="Cartoon Network Commercials"
+						/>
+						<button type="button" className="btn btn-outline" onClick={createCategory}>
+							<Plus className="h-4 w-4" />
+							Add Category
+						</button>
+					</div>
+
+					<div className="mt-4 grid gap-3 md:grid-cols-[16rem_1fr] md:items-end">
+						<label className="form-control">
+							<span className="label-text font-bold text-base-content text-sm">Upload To</span>
+							<select
+								className="select select-bordered mt-2"
+								value={uploadCategory}
+								onChange={(event) => setUploadCategory(event.target.value)}
+							>
+								<option value="">Select category</option>
+								{(library?.categories ?? []).map((category) => (
+									<option key={category.id} value={category.id}>
+										{category.title}
+									</option>
+								))}
+							</select>
+						</label>
+						<label
+							className={`btn btn-primary ${!uploadCategory || isUploading ? "btn-disabled" : ""}`}
 						>
-							<div className="grid gap-3 md:grid-cols-[7rem_1fr_1fr_14rem_auto] md:items-end">
-								<label className="form-control">
-									<span className="label-text font-bold text-base-content text-sm">Channel</span>
-									<input
-										type="text"
-										inputMode="numeric"
-										maxLength={2}
-										className="input input-bordered mt-2"
-										value={channel.channel_number || ""}
-										placeholder="Auto"
-										onChange={(event) =>
-											updateChannel(channelIndex, {
-												channel_number: cleanChannelNumberInput(event.target.value),
-											})
-										}
-										onBlur={() =>
-											updateChannel(channelIndex, {
-												channel_number: formatChannelNumber(channel.channel_number || ""),
-											})
-										}
-									/>
-								</label>
-								<label className="form-control">
-									<span className="label-text font-bold text-base-content text-sm">
-										Channel Name
-									</span>
-									<input
-										type="text"
-										className="input input-bordered mt-2"
-										value={channel.title}
-										onChange={(event) => updateChannel(channelIndex, { title: event.target.value })}
-									/>
-								</label>
-								<label className="form-control">
-									<span className="label-text font-bold text-base-content text-sm">Channel ID</span>
-									<input
-										type="text"
-										className="input input-bordered mt-2"
-										value={channel.id}
-										onChange={(event) => updateChannel(channelIndex, { id: event.target.value })}
-									/>
-								</label>
-								<label className="form-control">
-									<span className="label-text font-bold text-base-content text-sm">
-										Commercials
-									</span>
-									<select
-										className="select select-bordered mt-2"
-										value={channel.commercial_category || ""}
-										onChange={(event) =>
-											updateChannel(channelIndex, {
-												commercial_category: event.target.value,
-											})
-										}
-									>
-										<option value="">Use selected categories</option>
-										{(library?.categories ?? []).map((category) => (
-											<option key={category.id} value={category.id}>
-												{category.title}
-											</option>
-										))}
-									</select>
-								</label>
-								<button
-									type="button"
-									className="btn btn-error btn-outline"
-									onClick={() => removeChannel(channelIndex)}
-								>
-									<Trash2 className="h-4 w-4" />
-									Remove
-								</button>
+							{isUploading ? (
+								<span className="loading loading-spinner loading-xs" />
+							) : (
+								<Upload className="h-4 w-4" />
+							)}
+							Upload Videos
+							<input
+								type="file"
+								className="hidden"
+								accept="video/*"
+								multiple
+								disabled={!uploadCategory || isUploading}
+								onChange={(event) => void uploadFiles(event.target.files)}
+							/>
+						</label>
+					</div>
+
+					<div className="mt-5 space-y-3">
+						{(library?.categories ?? []).length === 0 && (
+							<div className="rounded-xl border border-base-300 bg-base-100/70 p-4 text-base-content/60 text-sm">
+								No commercial categories yet.
 							</div>
-
-							<div className="mt-4 rounded-xl border border-base-300 bg-base-200/60 p-4">
-								<div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-									<div>
-										<div className="flex items-center gap-2 font-bold text-base-content/50 text-xs uppercase tracking-widest">
-											<Image className="h-4 w-4" />
-											Channel Logo
-										</div>
-										<p className="mt-1 text-base-content/60 text-xs">
-											Optional bottom-right watermark for this Tube TV channel.
-										</p>
-									</div>
-									{channel.logo_path && (
-										<button
-											type="button"
-											className="btn btn-ghost btn-xs"
-											disabled={isReadOnly}
-											onClick={() => updateChannel(channelIndex, { logo_path: "", logo_title: "" })}
-										>
-											Clear
-										</button>
-									)}
-								</div>
-
-								<div className="grid gap-3 md:grid-cols-[7rem_1fr_auto] md:items-center">
-									<div className="flex h-20 w-28 items-center justify-center rounded-lg border border-base-300 bg-black/80 p-2">
-										{channel.logo_path ? (
-											<img
-												src={logoPreviewURL(channel.logo_path)}
-												alt={channel.logo_title || "Channel logo"}
-												className="max-h-full max-w-full object-contain"
-												loading="lazy"
-											/>
-										) : (
-											<Image className="h-7 w-7 text-base-content/35" />
-										)}
-									</div>
-									<label className="input input-bordered flex items-center gap-2">
-										<Search className="h-4 w-4 text-base-content/45" />
+						)}
+						{(library?.categories ?? []).map((category) => (
+							<div
+								key={category.id}
+								className="rounded-xl border border-base-300 bg-base-100/70 p-4"
+							>
+								<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+									<label className="flex items-center gap-3">
 										<input
-											type="search"
-											className="grow"
-											value={logoSearch[channelIndex] ?? ""}
-											onChange={(event) =>
-												setLogoSearch((current) => ({
-													...current,
-													[channelIndex]: event.target.value,
-												}))
-											}
-											onKeyDown={(event) => {
-												if (event.key === "Enter") {
-													event.preventDefault();
-													void searchLogos(channelIndex);
-												}
-											}}
-											placeholder={channel.logo_title || channel.title || "Search network logo"}
-											disabled={isReadOnly}
+											type="checkbox"
+											className="checkbox checkbox-primary"
+											checked={formData.commercial_categories.includes(category.id)}
+											onChange={() => toggleCommercialCategory(category.id)}
 										/>
+										<span className="font-bold">{category.title}</span>
+										<span className="badge badge-ghost">{category.count} videos</span>
 									</label>
 									<button
 										type="button"
-										className="btn btn-outline"
-										disabled={isReadOnly || logoLoading[channelIndex]}
-										onClick={() => void searchLogos(channelIndex)}
+										className="btn btn-error btn-outline btn-xs"
+										onClick={() => void deleteCategory(category.id, category.title)}
 									>
-										{logoLoading[channelIndex] ? (
-											<span className="loading loading-spinner loading-xs" />
-										) : (
-											<Search className="h-4 w-4" />
-										)}
-										Search
+										<Trash2 className="h-3 w-3" />
+										Delete
 									</button>
 								</div>
-
-								{channel.logo_path && (
-									<div className="mt-3 truncate text-base-content/55 text-xs">
-										Selected: {channel.logo_title || channel.logo_path}
-									</div>
-								)}
-
-								{(logoResults[channelIndex] ?? []).length > 0 && (
-									<div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-										{logoResults[channelIndex].map((logo) => (
-											<button
-												type="button"
-												key={logo.path}
-												className={`flex min-w-0 items-center gap-3 rounded-lg border p-2 text-left transition ${
-													channel.logo_path === logo.path
-														? "border-primary bg-primary/10"
-														: "border-base-300 bg-base-100/75 hover:border-primary/60"
-												}`}
-												disabled={isReadOnly}
-												onClick={() =>
-													updateChannel(channelIndex, {
-														logo_path: logo.path,
-														logo_title: logo.title,
-													})
-												}
+								{category.videos.length > 0 && (
+									<div className="mt-3 grid gap-2 sm:grid-cols-2">
+										{category.videos.slice(0, 6).map((video) => (
+											<div
+												key={`${category.id}-${video.name}`}
+												className="truncate rounded-lg bg-base-200 px-3 py-2 text-base-content/60 text-xs"
 											>
-												<span className="flex h-10 w-16 shrink-0 items-center justify-center rounded bg-black/80 p-1">
-													<img
-														src={logo.url}
-														alt=""
-														className="max-h-full max-w-full object-contain"
-														loading="lazy"
-													/>
-												</span>
-												<span className="min-w-0">
-													<span className="block truncate font-bold text-xs">{logo.title}</span>
-													<span className="block truncate text-base-content/45 text-[0.65rem]">
-														{logo.path}
-													</span>
-												</span>
-											</button>
+												{video.title}
+											</div>
 										))}
+										{category.videos.length > 6 && (
+											<div className="rounded-lg bg-base-200 px-3 py-2 text-base-content/50 text-xs">
+												+{category.videos.length - 6} more
+											</div>
+										)}
 									</div>
 								)}
 							</div>
+						))}
+					</div>
+				</div>
+			)}
 
-							<div className="mt-5 space-y-4">
-								<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-									<div>
-										<div className="font-bold text-base-content/50 text-xs uppercase tracking-widest">
-											Channel Sources
-										</div>
-										<p className="mt-1 text-base-content/60 text-xs">
-											Add whole libraries, movie groups, series, seasons, episodes, or single
-											movies.
-										</p>
-									</div>
+			{activeTab === "channels" && (
+				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+						<div>
+							<div className="mb-3 flex items-center gap-2">
+								<Folder className="h-4 w-4 text-base-content/60" />
+								<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
+									Custom Channels
+								</h4>
+							</div>
+							<p className="text-base-content/60 text-sm">
+								Custom channels can reserve a VCR-style channel number. Auto channels fill the open
+								slots.
+							</p>
+						</div>
+						<button type="button" className="btn btn-outline btn-sm" onClick={addChannel}>
+							<Plus className="h-4 w-4" />
+							Add Channel
+						</button>
+					</div>
+
+					<div className="space-y-4">
+						{formData.custom_channels.length === 0 && (
+							<div className="rounded-xl border border-base-300 bg-base-100/70 p-4 text-base-content/60 text-sm">
+								No custom channels configured.
+							</div>
+						)}
+						{formData.custom_channels.map((channel, channelIndex) => (
+							<div
+								key={`tube-tv-channel-${channelIndex}`}
+								className="rounded-xl border border-base-300 bg-base-100/70 p-4"
+							>
+								<div className="grid gap-3 md:grid-cols-[7rem_1fr_1fr_14rem_auto] md:items-end">
+									<label className="form-control">
+										<span className="label-text font-bold text-base-content text-sm">Channel</span>
+										<input
+											type="text"
+											inputMode="numeric"
+											maxLength={2}
+											className="input input-bordered mt-2"
+											value={channel.channel_number || ""}
+											placeholder="Auto"
+											onChange={(event) =>
+												updateChannel(channelIndex, {
+													channel_number: cleanChannelNumberInput(event.target.value),
+												})
+											}
+											onBlur={() =>
+												updateChannel(channelIndex, {
+													channel_number: formatChannelNumber(channel.channel_number || ""),
+												})
+											}
+										/>
+									</label>
+									<label className="form-control">
+										<span className="label-text font-bold text-base-content text-sm">
+											Channel Name
+										</span>
+										<input
+											type="text"
+											className="input input-bordered mt-2"
+											value={channel.title}
+											onChange={(event) =>
+												updateChannel(channelIndex, { title: event.target.value })
+											}
+										/>
+									</label>
+									<label className="form-control">
+										<span className="label-text font-bold text-base-content text-sm">
+											Channel ID
+										</span>
+										<input
+											type="text"
+											className="input input-bordered mt-2"
+											value={channel.id}
+											onChange={(event) => updateChannel(channelIndex, { id: event.target.value })}
+										/>
+									</label>
+									<label className="form-control">
+										<span className="label-text font-bold text-base-content text-sm">
+											Commercials
+										</span>
+										<select
+											className="select select-bordered mt-2"
+											value={channel.commercial_category || ""}
+											onChange={(event) =>
+												updateChannel(channelIndex, {
+													commercial_category: event.target.value,
+												})
+											}
+										>
+											<option value="">Use selected categories</option>
+											{(library?.categories ?? []).map((category) => (
+												<option key={category.id} value={category.id}>
+													{category.title}
+												</option>
+											))}
+										</select>
+									</label>
 									<button
 										type="button"
-										className="btn btn-outline btn-sm"
-										onClick={() => openBrowser(channelIndex)}
-										disabled={isReadOnly}
+										className="btn btn-error btn-outline"
+										onClick={() => removeChannel(channelIndex)}
 									>
-										<Search className="h-4 w-4" />
-										Browse Local Library
+										<Trash2 className="h-4 w-4" />
+										Remove
 									</button>
 								</div>
 
-								{channel.sources.length === 0 ? (
-									<div className="rounded-xl border border-base-300 border-dashed bg-base-200/50 p-4 text-base-content/60 text-sm">
-										No sources yet. Browse the local library to build this channel.
-									</div>
-								) : (
-									<div className="grid gap-2 md:grid-cols-2">
-										{channel.sources.map((source, sourceIndex) => (
-											<div
-												key={`tube-tv-source-${channelIndex}-${sourceIndex}`}
-												className="flex min-w-0 items-center gap-3 rounded-lg border border-base-300 bg-base-200/70 p-3"
-											>
-												<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
-													{source.media_type === "movie" ? (
-														<Film className="h-5 w-5" />
-													) : source.media_type === "episode" || source.media_type === "show" ? (
-														<Tv className="h-5 w-5" />
-													) : source.category_id.startsWith("local-discover:") ? (
-														<Layers className="h-5 w-5" />
-													) : (
-														<Folder className="h-5 w-5" />
-													)}
-												</div>
-												<div className="min-w-0 flex-1">
-													<div className="truncate font-bold text-sm">
-														{sourceLabel(source, localCategories)}
-													</div>
-													<div className="truncate text-base-content/50 text-xs">
-														{source.path || source.category_id}
-													</div>
-												</div>
-												<button
-													type="button"
-													className="btn btn-error btn-outline btn-xs"
-													onClick={() => removeSource(channelIndex, sourceIndex)}
-													disabled={isReadOnly}
-												>
-													<Trash2 className="h-3 w-3" />
-												</button>
+								<div className="mt-4 rounded-xl border border-base-300 bg-base-200/60 p-4">
+									<div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+										<div>
+											<div className="flex items-center gap-2 font-bold text-base-content/50 text-xs uppercase tracking-widest">
+												<Image className="h-4 w-4" />
+												Channel Logo
 											</div>
-										))}
-									</div>
-								)}
-
-								{browserChannelIndex === channelIndex && (
-									<div className="rounded-xl border border-primary/30 bg-base-200/80 p-4">
-										<div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-											<div className="min-w-0">
-												<div className="font-bold text-primary text-xs uppercase tracking-widest">
-													Local Library Browser
-												</div>
-												<h5 className="mt-1 truncate font-black text-xl">
-													{browserData?.title || "Local Library"}
-												</h5>
-												<p className="mt-1 text-base-content/55 text-xs">
-													Select an item to add it, or browse folders to pick a narrower channel
-													source.
-												</p>
-											</div>
-											<div className="flex flex-wrap gap-2">
-												<button
-													type="button"
-													className="btn btn-ghost btn-sm"
-													onClick={goBrowserBack}
-													disabled={!browserRequest.categoryId}
-												>
-													<ArrowLeft className="h-4 w-4" />
-													Back
-												</button>
-												{browserData?.source && (
-													<button
-														type="button"
-														className="btn btn-primary btn-sm"
-														onClick={() => addCurrentBrowserView(channelIndex)}
-														disabled={isReadOnly}
-													>
-														<Check className="h-4 w-4" />
-														Add This View
-													</button>
-												)}
-												<button
-													type="button"
-													className="btn btn-ghost btn-sm"
-													onClick={closeBrowser}
-												>
-													Close
-												</button>
-											</div>
+											<p className="mt-1 text-base-content/60 text-xs">
+												Optional watermark for this Tube TV channel.
+											</p>
 										</div>
+										{channel.logo_path && (
+											<button
+												type="button"
+												className="btn btn-ghost btn-xs"
+												disabled={isReadOnly}
+												onClick={() =>
+													updateChannel(channelIndex, {
+														logo_path: "",
+														logo_title: "",
+														logo_position: "bottom_right",
+													})
+												}
+											>
+												Clear
+											</button>
+										)}
+									</div>
 
-										<label className="input input-bordered mt-4 flex items-center gap-2">
+									<div className="grid gap-3 md:grid-cols-[7rem_1fr_auto] md:items-center">
+										<div className="flex h-20 w-28 items-center justify-center rounded-lg border border-base-300 bg-black/80 p-2">
+											{channel.logo_path ? (
+												<img
+													src={logoPreviewURL(channel.logo_path)}
+													alt={channel.logo_title || "Channel logo"}
+													className="max-h-full max-w-full object-contain"
+													loading="lazy"
+												/>
+											) : (
+												<Image className="h-7 w-7 text-base-content/35" />
+											)}
+										</div>
+										<label className="input input-bordered flex items-center gap-2">
 											<Search className="h-4 w-4 text-base-content/45" />
 											<input
 												type="search"
 												className="grow"
-												value={browserSearch}
-												onChange={(event) => setBrowserSearch(event.target.value)}
-												placeholder="Filter this view"
+												value={logoSearch[channelIndex] ?? ""}
+												onChange={(event) =>
+													setLogoSearch((current) => ({
+														...current,
+														[channelIndex]: event.target.value,
+													}))
+												}
+												onKeyDown={(event) => {
+													if (event.key === "Enter") {
+														event.preventDefault();
+														void searchLogos(channelIndex);
+													}
+												}}
+												placeholder={channel.logo_title || channel.title || "Search network logo"}
+												disabled={isReadOnly}
 											/>
 										</label>
+										<button
+											type="button"
+											className="btn btn-outline"
+											disabled={isReadOnly || logoLoading[channelIndex]}
+											onClick={() => void searchLogos(channelIndex)}
+										>
+											{logoLoading[channelIndex] ? (
+												<span className="loading loading-spinner loading-xs" />
+											) : (
+												<Search className="h-4 w-4" />
+											)}
+											Search
+										</button>
+									</div>
 
-										{isBrowserLoading ? (
-											<div className="mt-4 flex items-center gap-2 rounded-lg border border-base-300 bg-base-100/70 p-4 text-base-content/60 text-sm">
-												<span className="loading loading-spinner loading-sm" />
-												Loading library
+									<label className="form-control mt-3 max-w-xs">
+										<span className="label-text font-bold text-base-content/50 text-xs uppercase tracking-widest">
+											Logo Corner
+										</span>
+										<select
+											className="select select-bordered mt-2"
+											value={normalizeLogoPosition(channel.logo_position)}
+											disabled={isReadOnly}
+											onChange={(event) =>
+												updateChannel(channelIndex, { logo_position: event.target.value })
+											}
+										>
+											{LOGO_POSITION_OPTIONS.map((option) => (
+												<option key={option.value} value={option.value}>
+													{option.label}
+												</option>
+											))}
+										</select>
+									</label>
+
+									{channel.logo_path && (
+										<div className="mt-3 truncate text-base-content/55 text-xs">
+											Selected: {channel.logo_title || channel.logo_path}
+										</div>
+									)}
+
+									{(logoResults[channelIndex] ?? []).length > 0 && (
+										<div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+											{logoResults[channelIndex].map((logo) => (
+												<button
+													type="button"
+													key={logo.path}
+													className={`flex min-w-0 items-center gap-3 rounded-lg border p-2 text-left transition ${
+														channel.logo_path === logo.path
+															? "border-primary bg-primary/10"
+															: "border-base-300 bg-base-100/75 hover:border-primary/60"
+													}`}
+													disabled={isReadOnly}
+													onClick={() =>
+														updateChannel(channelIndex, {
+															logo_path: logo.path,
+															logo_title: logo.title,
+															logo_position: normalizeLogoPosition(channel.logo_position),
+														})
+													}
+												>
+													<span className="flex h-10 w-16 shrink-0 items-center justify-center rounded bg-black/80 p-1">
+														<img
+															src={logo.url}
+															alt=""
+															className="max-h-full max-w-full object-contain"
+															loading="lazy"
+														/>
+													</span>
+													<span className="min-w-0">
+														<span className="block truncate font-bold text-xs">{logo.title}</span>
+														<span className="block truncate text-base-content/45 text-[0.65rem]">
+															{logo.path}
+														</span>
+													</span>
+												</button>
+											))}
+										</div>
+									)}
+								</div>
+
+								<div className="mt-5 space-y-4">
+									<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+										<div>
+											<div className="font-bold text-base-content/50 text-xs uppercase tracking-widest">
+												Channel Sources
 											</div>
-										) : browserRows.length === 0 ? (
-											<div className="mt-4 rounded-lg border border-base-300 bg-base-100/70 p-4 text-base-content/60 text-sm">
-												No matching local media found.
-											</div>
-										) : (
-											<div className="mt-4 grid gap-2 lg:grid-cols-2">
-												{browserRows.map((row) => (
-													<div
-														key={`${row.id || row.categoryId || row.title}-${row.sourceIndex}-${row.path || ""}`}
-														className="flex min-w-0 items-center gap-3 rounded-lg border border-base-300 bg-base-100/80 p-3"
-													>
-														<div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-base-300/70 text-base-content/70">
-															{libraryRowIcon(row)}
+											<p className="mt-1 text-base-content/60 text-xs">
+												Add whole libraries, movie groups, series, seasons, episodes, or single
+												movies.
+											</p>
+										</div>
+										<button
+											type="button"
+											className="btn btn-outline btn-sm"
+											onClick={() => openBrowser(channelIndex)}
+											disabled={isReadOnly}
+										>
+											<Search className="h-4 w-4" />
+											Browse Local Library
+										</button>
+									</div>
+
+									{channel.sources.length === 0 ? (
+										<div className="rounded-xl border border-base-300 border-dashed bg-base-200/50 p-4 text-base-content/60 text-sm">
+											No sources yet. Browse the local library to build this channel.
+										</div>
+									) : (
+										<div className="grid gap-2 md:grid-cols-2">
+											{channel.sources.map((source, sourceIndex) => (
+												<div
+													key={`tube-tv-source-${channelIndex}-${sourceIndex}`}
+													className="flex min-w-0 items-center gap-3 rounded-lg border border-base-300 bg-base-200/70 p-3"
+												>
+													<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+														{source.media_type === "movie" ? (
+															<Film className="h-5 w-5" />
+														) : source.media_type === "episode" || source.media_type === "show" ? (
+															<Tv className="h-5 w-5" />
+														) : source.category_id.startsWith("local-discover:") ? (
+															<Layers className="h-5 w-5" />
+														) : (
+															<Folder className="h-5 w-5" />
+														)}
+													</div>
+													<div className="min-w-0 flex-1">
+														<div className="truncate font-bold text-sm">
+															{sourceLabel(source, localCategories)}
 														</div>
-														<div className="min-w-0 flex-1">
-															<div className="truncate font-bold text-sm">{row.title}</div>
-															<div className="truncate text-base-content/50 text-xs">
-																{row.detail || row.path || row.mediaType || "Local media"}
-															</div>
-														</div>
-														<div className="flex shrink-0 gap-2">
-															{row.browsable && (
-																<button
-																	type="button"
-																	className="btn btn-ghost btn-xs"
-																	onClick={() => browseRow(row)}
-																>
-																	Open
-																</button>
-															)}
-															{row.selectable && (
-																<button
-																	type="button"
-																	className="btn btn-primary btn-xs"
-																	onClick={() =>
-																		addSourceToChannel(channelIndex, sourceFromRow(row))
-																	}
-																	disabled={isReadOnly}
-																>
-																	Add
-																</button>
-															)}
+														<div className="truncate text-base-content/50 text-xs">
+															{source.path || source.category_id}
 														</div>
 													</div>
-												))}
+													<button
+														type="button"
+														className="btn btn-error btn-outline btn-xs"
+														onClick={() => removeSource(channelIndex, sourceIndex)}
+														disabled={isReadOnly}
+													>
+														<Trash2 className="h-3 w-3" />
+													</button>
+												</div>
+											))}
+										</div>
+									)}
+
+									{browserChannelIndex === channelIndex && (
+										<div className="rounded-xl border border-primary/30 bg-base-200/80 p-4">
+											<div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+												<div className="min-w-0">
+													<div className="font-bold text-primary text-xs uppercase tracking-widest">
+														Local Library Browser
+													</div>
+													<h5 className="mt-1 truncate font-black text-xl">
+														{browserData?.title || "Local Library"}
+													</h5>
+													<p className="mt-1 text-base-content/55 text-xs">
+														Select an item to add it, or browse folders to pick a narrower channel
+														source.
+													</p>
+												</div>
+												<div className="flex flex-wrap gap-2">
+													<button
+														type="button"
+														className="btn btn-ghost btn-sm"
+														onClick={goBrowserBack}
+														disabled={!browserRequest.categoryId}
+													>
+														<ArrowLeft className="h-4 w-4" />
+														Back
+													</button>
+													{browserData?.source && (
+														<button
+															type="button"
+															className="btn btn-primary btn-sm"
+															onClick={() => addCurrentBrowserView(channelIndex)}
+															disabled={isReadOnly}
+														>
+															<Check className="h-4 w-4" />
+															Add This View
+														</button>
+													)}
+													<button
+														type="button"
+														className="btn btn-ghost btn-sm"
+														onClick={closeBrowser}
+													>
+														Close
+													</button>
+												</div>
 											</div>
-										)}
-									</div>
-								)}
+
+											<label className="input input-bordered mt-4 flex items-center gap-2">
+												<Search className="h-4 w-4 text-base-content/45" />
+												<input
+													type="search"
+													className="grow"
+													value={browserSearch}
+													onChange={(event) => setBrowserSearch(event.target.value)}
+													placeholder="Filter this view"
+												/>
+											</label>
+
+											{isBrowserLoading ? (
+												<div className="mt-4 flex items-center gap-2 rounded-lg border border-base-300 bg-base-100/70 p-4 text-base-content/60 text-sm">
+													<span className="loading loading-spinner loading-sm" />
+													Loading library
+												</div>
+											) : browserRows.length === 0 ? (
+												<div className="mt-4 rounded-lg border border-base-300 bg-base-100/70 p-4 text-base-content/60 text-sm">
+													No matching local media found.
+												</div>
+											) : (
+												<div className="mt-4 grid gap-2 lg:grid-cols-2">
+													{browserRows.map((row) => (
+														<div
+															key={`${row.id || row.categoryId || row.title}-${row.sourceIndex}-${row.path || ""}`}
+															className="flex min-w-0 items-center gap-3 rounded-lg border border-base-300 bg-base-100/80 p-3"
+														>
+															<div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-base-300/70 text-base-content/70">
+																{libraryRowIcon(row)}
+															</div>
+															<div className="min-w-0 flex-1">
+																<div className="truncate font-bold text-sm">{row.title}</div>
+																<div className="truncate text-base-content/50 text-xs">
+																	{row.detail || row.path || row.mediaType || "Local media"}
+																</div>
+															</div>
+															<div className="flex shrink-0 gap-2">
+																{row.browsable && (
+																	<button
+																		type="button"
+																		className="btn btn-ghost btn-xs"
+																		onClick={() => browseRow(row)}
+																	>
+																		Open
+																	</button>
+																)}
+																{row.selectable && (
+																	<button
+																		type="button"
+																		className="btn btn-primary btn-xs"
+																		onClick={() =>
+																			addSourceToChannel(channelIndex, sourceFromRow(row))
+																		}
+																		disabled={isReadOnly}
+																	>
+																		Add
+																	</button>
+																)}
+															</div>
+														</div>
+													))}
+												</div>
+											)}
+										</div>
+									)}
+								</div>
 							</div>
-						</div>
-					))}
+						))}
+					</div>
 				</div>
-			</div>
+			)}
 		</div>
 	);
 }
