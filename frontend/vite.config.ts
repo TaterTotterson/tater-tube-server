@@ -29,7 +29,15 @@ export default defineConfig({
 		tailwindcss(),
 		VitePWA({
 			registerType: "prompt",
-			includeAssets: ["favicon.ico", "logo.png", "apple-touch-icon-180x180.png"],
+			includeAssets: [
+				"favicon.ico",
+				"favicon-16x16.png",
+				"favicon-32x32.png",
+				"logo.png",
+				"apple-touch-icon-180x180.png",
+				"tater-tube-server-icon.png",
+				"unraid-icon.png",
+			],
 			manifest: {
 				name: "Tater Tube Server",
 				short_name: "Tater Server",
