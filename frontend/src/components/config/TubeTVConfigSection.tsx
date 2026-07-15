@@ -924,17 +924,34 @@ export function TubeTVConfigSection({
 									</div>
 
 									<div className="grid gap-3 md:grid-cols-[7rem_1fr_auto] md:items-center">
-										<div className="flex h-20 w-28 items-center justify-center rounded-lg border border-base-300 bg-black/80 p-2">
-											{channel.logo_path ? (
-												<img
-													src={logoPreviewURL(channel.logo_path)}
-													alt={channel.logo_title || "Channel logo"}
-													className="max-h-full max-w-full object-contain"
-													loading="lazy"
-												/>
-											) : (
-												<Image className="h-7 w-7 text-base-content/35" />
-											)}
+										<div className="flex w-28 flex-col gap-2">
+											<div className="flex h-20 items-center justify-center rounded-lg border border-base-300 bg-black/80 p-2">
+												{channel.logo_path ? (
+													<img
+														src={logoPreviewURL(channel.logo_path)}
+														alt={channel.logo_title || "Channel logo"}
+														className="max-h-full max-w-full object-contain"
+														loading="lazy"
+													/>
+												) : (
+													<Image className="h-7 w-7 text-base-content/35" />
+												)}
+											</div>
+											<select
+												aria-label="Channel logo corner"
+												className="select select-bordered select-xs w-full"
+												value={normalizeLogoPosition(channel.logo_position)}
+												disabled={isReadOnly}
+												onChange={(event) =>
+													updateChannel(channelIndex, { logo_position: event.target.value })
+												}
+											>
+												{LOGO_POSITION_OPTIONS.map((option) => (
+													<option key={option.value} value={option.value}>
+														{option.label}
+													</option>
+												))}
+											</select>
 										</div>
 										<label className="input input-bordered flex items-center gap-2">
 											<Search className="h-4 w-4 text-base-content/45" />
@@ -972,26 +989,6 @@ export function TubeTVConfigSection({
 											Search
 										</button>
 									</div>
-
-									<label className="form-control mt-3 max-w-xs">
-										<span className="label-text font-bold text-base-content/50 text-xs uppercase tracking-widest">
-											Logo Corner
-										</span>
-										<select
-											className="select select-bordered mt-2"
-											value={normalizeLogoPosition(channel.logo_position)}
-											disabled={isReadOnly}
-											onChange={(event) =>
-												updateChannel(channelIndex, { logo_position: event.target.value })
-											}
-										>
-											{LOGO_POSITION_OPTIONS.map((option) => (
-												<option key={option.value} value={option.value}>
-													{option.label}
-												</option>
-											))}
-										</select>
-									</label>
 
 									{channel.logo_path && (
 										<div className="mt-3 truncate text-base-content/55 text-xs">

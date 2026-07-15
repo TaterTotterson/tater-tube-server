@@ -108,6 +108,10 @@ function channelProgress(row: TubeTVGuideScheduleItem | undefined, elapsed: numb
 	return Math.max(0, Math.min(100, ((elapsed - start) / duration) * 100));
 }
 
+function blockWidthPixels(duration: number) {
+	return Math.max(1, (duration / GUIDE_SLOT_SECONDS) * GUIDE_SLOT_WIDTH);
+}
+
 function guideBlocks(channel: TubeTVGuideChannel, elapsed: number): GuideBlock[] {
 	if (!channel.schedule?.length) return [];
 	const totalDuration = Number(channel.totalDuration ?? 0);
@@ -142,21 +146,22 @@ function guideBlocks(channel: TubeTVGuideChannel, elapsed: number): GuideBlock[]
 	return blocks;
 }
 
-function blockClasses(row: TubeTVGuideScheduleItem, isCurrent: boolean) {
+function blockClasses(row: TubeTVGuideScheduleItem, isCurrent: boolean, isCompact: boolean) {
 	const kind = String(row.kind || row.mediaType || row.type || "media").toLowerCase();
 	const base =
-		"absolute top-2 bottom-2 min-w-24 overflow-hidden rounded-md border px-3 py-2 shadow-inner";
+		"absolute top-2 bottom-2 overflow-hidden rounded-md border shadow-inner";
+	const padding = isCompact ? " px-0 py-0" : " px-3 py-2";
 	const current = isCurrent ? " ring-2 ring-primary/80" : "";
 	if (kind === "commercial") {
-		return `${base} border-primary/25 bg-primary/12 text-primary${current}`;
+		return `${base}${padding} border-primary/25 bg-primary/12 text-primary${current}`;
 	}
 	if (kind === "episode") {
-		return `${base} border-info/30 bg-info/10 text-info-content${current}`;
+		return `${base}${padding} border-info/30 bg-info/10 text-info-content${current}`;
 	}
 	if (kind === "movie") {
-		return `${base} border-secondary/35 bg-secondary/12 text-secondary-content${current}`;
+		return `${base}${padding} border-secondary/35 bg-secondary/12 text-secondary-content${current}`;
 	}
-	return `${base} border-base-300 bg-base-200/85 text-base-content${current}`;
+	return `${base}${padding} border-base-300 bg-base-200/85 text-base-content${current}`;
 }
 
 function GuideStat({
@@ -355,22 +360,25 @@ export function TVGuidePage() {
 											<div className="absolute top-0 bottom-0 left-0 w-1 bg-primary shadow-[0_0_14px_rgba(255,122,0,0.8)]" />
 											{blocks.map((block) => {
 												const left = (block.start / GUIDE_SLOT_SECONDS) * GUIDE_SLOT_WIDTH;
-												const width = Math.max(
-													80,
-													(block.duration / GUIDE_SLOT_SECONDS) * GUIDE_SLOT_WIDTH,
-												);
+												const width = blockWidthPixels(block.duration);
+												const isCompact = width < 56;
+												const showProgress = block.isCurrent && width >= 28;
 												return (
 													<div
 														key={`${channel.number}-${block.index}-${block.start}`}
-														className={blockClasses(block.row, block.isCurrent)}
+														className={blockClasses(block.row, block.isCurrent, isCompact)}
 														style={{ left, width }}
 														title={`${scheduleTitle(block.row)} - ${scheduleDetail(block.row)}`}
 													>
-														<div className="truncate font-bold text-sm">{scheduleTitle(block.row)}</div>
-														<div className="mt-1 truncate font-mono text-[11px] opacity-70">
-															{scheduleDetail(block.row)}
-														</div>
-														{block.isCurrent && (
+														{!isCompact && (
+															<>
+																<div className="truncate font-bold text-sm">{scheduleTitle(block.row)}</div>
+																<div className="mt-1 truncate font-mono text-[11px] opacity-70">
+																	{scheduleDetail(block.row)}
+																</div>
+															</>
+														)}
+														{showProgress && (
 															<div className="absolute right-2 bottom-2 left-2 h-1 overflow-hidden rounded-full bg-black/30">
 																<div
 																	className="h-full rounded-full bg-primary"

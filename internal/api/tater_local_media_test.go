@@ -941,6 +941,66 @@ func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
 	}
 }
 
+func TestTaterTVConcatListUsesLiveInpointAndOutpoint(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channel.ffconcat")
+	err := writeTaterTVConcatList(path, []taterTVStreamItem{
+		{Path: "/media/Show's Episode.mkv", StartSeconds: 45.25, DurationSeconds: 74.75},
+		{Path: "/commercials/Spot.mp4", DurationSeconds: 30},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, expected := range []string{
+		"ffconcat version 1.0",
+		"file '/media/Show'\\''s Episode.mkv'",
+		"inpoint 45.250",
+		"outpoint 120.000",
+		"duration 74.750",
+		"file '/commercials/Spot.mp4'",
+		"outpoint 30.000",
+		"duration 30.000",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("expected %q in concat list:\n%s", expected, text)
+		}
+	}
+}
+
+func TestTaterTVContinuousHLSArgsUseConcatInput(t *testing.T) {
+	args := buildTaterTVContinuousHLSArgs(
+		config.TranscodingConfig{},
+		transcodeProfiles["crt_480p"],
+		"none",
+		"/tmp/channel.ffconcat",
+		"/metadata/logos/cartoon.png",
+		"bottom_right",
+		"/tmp/hls/index.m3u8",
+		"/tmp/hls/seg-%05d.ts",
+	)
+	joined := strings.Join(args, " ")
+
+	for _, expected := range []string{
+		"-re -f concat -safe 0 -i /tmp/channel.ffconcat",
+		"-filter_complex",
+		"overlay=x=W-w-",
+		"-af aresample=async=1:first_pts=0",
+		"-f hls",
+		"-hls_time 4",
+		"-hls_flags independent_segments+temp_file",
+		"-hls_segment_filename /tmp/hls/seg-%05d.ts",
+		"/tmp/hls/index.m3u8",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("expected %q in continuous HLS args: %s", expected, joined)
+		}
+	}
+}
+
 func TestTaterTVChannelLogoOverlayPositions(t *testing.T) {
 	profile := transcodeProfiles["crt_480p"]
 	tests := []struct {
