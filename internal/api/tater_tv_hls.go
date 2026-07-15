@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -23,12 +24,15 @@ import (
 )
 
 const (
-	taterTVHLSSegmentSeconds = 4
-	taterTVHLSRunWindow      = 12 * time.Hour
-	taterTVHLSPlaylistLimit  = 12
-	taterTVHLSFirstWait      = 20 * time.Second
-	taterTVHLSIdleTimeout    = 5 * time.Minute
+	taterTVHLSSegmentSeconds    = 2
+	taterTVHLSLiveStartSegments = 2
+	taterTVHLSRunWindow         = 12 * time.Hour
+	taterTVHLSPlaylistLimit     = 12
+	taterTVHLSFirstWait         = 10 * time.Second
+	taterTVHLSIdleTimeout       = 15 * time.Second
 )
+
+var errTaterTVHLSIdle = errors.New("Tube TV HLS session idle")
 
 type taterTVHLSManager struct {
 	mu       sync.Mutex
@@ -457,6 +461,13 @@ func (s *taterTVHLSSession) transcodeProgramSegments(ctx context.Context, items 
 		if afterSegments > beforeSegments {
 			played++
 		}
+		if errors.Is(err, errTaterTVHLSIdle) {
+			slog.InfoContext(ctx, "Stopping idle Tube TV HLS session",
+				"channel", s.number,
+				"index", index,
+				"segments", afterSegments)
+			return nil
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -503,7 +514,7 @@ func (s *taterTVHLSSession) monitorHLSItem(ctx context.Context, cmd *exec.Cmd, d
 					_ = cmd.Process.Kill()
 				}
 				<-done
-				return nil
+				return errTaterTVHLSIdle
 			}
 		case <-ctx.Done():
 			return ctx.Err()
@@ -590,8 +601,9 @@ func (s *taterTVHLSSession) playlist(playerToken string) string {
 	builder.WriteString("#EXT-X-INDEPENDENT-SEGMENTS\n")
 	builder.WriteString("#EXT-X-TARGETDURATION:" + strconv.Itoa(target) + "\n")
 	builder.WriteString("#EXT-X-MEDIA-SEQUENCE:" + strconv.FormatInt(sequence, 10) + "\n")
-	if len(segments) > 2 {
-		builder.WriteString("#EXT-X-START:TIME-OFFSET=-8.000,PRECISE=YES\n")
+	if len(segments) > taterTVHLSLiveStartSegments {
+		startOffset := -float64(taterTVHLSSegmentSeconds * taterTVHLSLiveStartSegments)
+		builder.WriteString("#EXT-X-START:TIME-OFFSET=" + strconv.FormatFloat(startOffset, 'f', 3, 64) + ",PRECISE=YES\n")
 	}
 	for _, segment := range segments {
 		if segment.Discontinuity {
@@ -693,7 +705,10 @@ func buildTaterTVChannelHLSArgsWithCodec(cfg config.TranscodingConfig, profile t
 		"-nostdin",
 	}
 	args = append(args, transcodeHardwareInitArgs(cfg, accel)...)
-	args = append(args, "-re")
+	args = append(args,
+		"-readrate", "1",
+		"-readrate_initial_burst", strconv.Itoa(taterTVHLSSegmentSeconds),
+	)
 	if startSeconds > 0 {
 		args = append(args, "-ss", strconv.FormatFloat(startSeconds, 'f', 3, 64))
 	}
