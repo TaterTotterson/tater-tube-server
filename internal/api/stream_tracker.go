@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"math"
+	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -398,6 +399,46 @@ func (t *StreamTracker) UpdateBufferedOffset(id string, offset int64) {
 	}
 }
 
+// RecordPlayback stores a lightweight playback event that did not necessarily
+// map to a long-lived tracked stream, such as a Tube TV HLS segment request.
+func (t *StreamTracker) RecordPlayback(record nzbfilesystem.ActiveStream) {
+	if t == nil {
+		return
+	}
+	now := time.Now()
+	if record.ID == "" {
+		record.ID = uuid.New().String()
+	}
+	if record.StartedAt.IsZero() {
+		record.StartedAt = now
+	}
+	if record.LastActivity.IsZero() {
+		record.LastActivity = now
+	}
+	if record.Status == "" {
+		record.Status = "Streaming"
+	}
+	if record.PlaybackPosition <= 0 {
+		updatePlaybackPosition(&record, record.LastActivity)
+	}
+
+	key := playbackRecordKey(record)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	for i := range t.history {
+		if playbackRecordKey(t.history[i]) == key {
+			mergePlaybackRecord(&t.history[i], record)
+			return
+		}
+	}
+
+	if len(t.history) >= 50 {
+		t.history = t.history[1:]
+	}
+	t.history = append(t.history, record)
+}
+
 // Remove removes a stream by ID and adds it to history
 func (t *StreamTracker) Remove(id string) {
 	if val, ok := t.streams.Load(id); ok {
@@ -435,6 +476,90 @@ func (t *StreamTracker) Remove(id string) {
 		t.streams.Delete(id)
 		t.activeCount.Add(-1)
 		t.notifyChange()
+	}
+}
+
+func playbackRecordKey(stream nzbfilesystem.ActiveStream) string {
+	playerKey := strings.ToLower(strings.TrimSpace(stream.PlayerID))
+	if playerKey == "" {
+		playerKey = strings.Join([]string{
+			strings.ToLower(strings.TrimSpace(stream.UserName)),
+			strings.ToLower(strings.TrimSpace(playbackClientHost(stream.ClientIP))),
+		}, "|")
+	}
+	parts := []string{
+		strings.ToLower(strings.TrimSpace(stream.Source)),
+		playerKey,
+		strings.ToLower(strings.TrimSpace(stream.FilePath)),
+	}
+	return strings.Join(parts, "|")
+}
+
+func playbackClientHost(value string) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(value))
+	if err == nil && host != "" {
+		return host
+	}
+	return value
+}
+
+func mergePlaybackRecord(existing *nzbfilesystem.ActiveStream, next nzbfilesystem.ActiveStream) {
+	if existing == nil {
+		return
+	}
+	if existing.StartedAt.IsZero() || (!next.StartedAt.IsZero() && next.StartedAt.Before(existing.StartedAt)) {
+		existing.StartedAt = next.StartedAt
+	}
+	if !next.LastActivity.IsZero() {
+		existing.LastActivity = next.LastActivity
+	}
+	if next.Status != "" {
+		existing.Status = next.Status
+	}
+	if next.BytesSent > 0 {
+		existing.BytesSent += next.BytesSent
+	}
+	if next.BytesDownloaded > 0 {
+		existing.BytesDownloaded += next.BytesDownloaded
+	}
+	if next.TotalSize > 0 {
+		existing.TotalSize = next.TotalSize
+	}
+	if next.CurrentOffset > 0 {
+		existing.CurrentOffset = next.CurrentOffset
+	}
+	if next.BufferedOffset > 0 {
+		existing.BufferedOffset = next.BufferedOffset
+	}
+	if next.PlaybackPosition > 0 {
+		existing.PlaybackPosition = next.PlaybackPosition
+	}
+	if next.PlaybackStart > 0 {
+		existing.PlaybackStart = next.PlaybackStart
+	}
+	if next.MediaDuration > 0 {
+		existing.MediaDuration = next.MediaDuration
+	}
+	if next.UserName != "" {
+		existing.UserName = next.UserName
+	}
+	if next.PlayerID != "" {
+		existing.PlayerID = next.PlayerID
+	}
+	if next.ClientIP != "" {
+		existing.ClientIP = next.ClientIP
+	}
+	if next.UserAgent != "" {
+		existing.UserAgent = next.UserAgent
+	}
+	if next.Transcoded {
+		existing.Transcoded = true
+		existing.TranscodeProfile = next.TranscodeProfile
+		existing.TranscodeName = next.TranscodeName
+		existing.HardwareAccel = next.HardwareAccel
+		existing.HardwareDevice = next.HardwareDevice
+		existing.VideoCodec = next.VideoCodec
+		existing.HardwareActive = next.HardwareActive
 	}
 }
 

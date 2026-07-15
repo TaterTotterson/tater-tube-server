@@ -19,12 +19,13 @@ import (
 	"time"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzbfilesystem"
 )
 
 const (
 	taterTVHLSSegmentSeconds = 4
 	taterTVHLSRunWindow      = 12 * time.Hour
-	taterTVHLSPlaylistLimit  = 90
+	taterTVHLSPlaylistLimit  = 12
 	taterTVHLSFirstWait      = 20 * time.Second
 	taterTVHLSIdleTimeout    = 5 * time.Minute
 )
@@ -45,6 +46,9 @@ type taterTVHLSSession struct {
 	transcodeCfg     config.TranscodingConfig
 	profile          transcodeProfile
 	accel            string
+	effectiveAccel   string
+	hardwareDevice   string
+	videoCodec       string
 	channel          taterTVChannel
 	guideStartedAt   time.Time
 	sessionStartedAt time.Time
@@ -105,7 +109,7 @@ func (h *TaterTVStreamHandler) serveHLSPlaylist(w http.ResponseWriter, r *http.R
 }
 
 func (h *TaterTVStreamHandler) serveHLSSegment(w http.ResponseWriter, r *http.Request) {
-	cfg, _, ok := h.authorizeTaterTVRequest(w, r)
+	cfg, _, player, ok := h.authorizeTaterTVRequest(w, r)
 	if !ok {
 		return
 	}
@@ -128,18 +132,20 @@ func (h *TaterTVStreamHandler) serveHLSSegment(w http.ResponseWriter, r *http.Re
 		http.Error(w, "Invalid segment path", http.StatusBadRequest)
 		return
 	}
-	if stat, err := os.Stat(path); err != nil || stat.IsDir() {
+	stat, err := os.Stat(path)
+	if err != nil || stat.IsDir() {
 		http.Error(w, "Segment not found", http.StatusNotFound)
 		return
 	}
 	session.touch()
+	h.recordHLSPlayback(r, session, player, stat.Size())
 	w.Header().Set("Content-Type", "video/mp2t")
 	w.Header().Set("Cache-Control", "no-store")
 	http.ServeFile(w, r, path)
 }
 
 func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.Request) (*taterTVHLSSession, string, bool) {
-	cfg, playerToken, ok := h.authorizeTaterTVRequest(w, r)
+	cfg, playerToken, player, ok := h.authorizeTaterTVRequest(w, r)
 	if !ok {
 		return nil, "", false
 	}
@@ -188,6 +194,7 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 			globalTaterTVHLS.removeIfSame(key, session)
 		} else {
 			session.touch()
+			h.recordHLSPlayback(r, session, player, 0)
 			return session, playerToken, true
 		}
 	}
@@ -195,11 +202,15 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 	session = globalTaterTVHLS.get(key)
 	if session != nil {
 		session.touch()
+		h.recordHLSPlayback(r, session, player, 0)
 		return session, playerToken, true
 	}
 
 	sessionRoot := filepath.Join(taterTVHLSRoot(cfg), taterTVSafeName(key, "channel"))
 	ctx, cancel := context.WithCancel(context.Background())
+	videoCodec, _ := transcodeVideoSettings(accel, transcodeCfg.HardwareDevice, profile)
+	effectiveAccel := effectiveTranscodeHardwareAccel(videoCodec)
+	hardwareDevice := effectiveTranscodeHardwareDevice(effectiveAccel, transcodeCfg.HardwareDevice)
 	session = &taterTVHLSSession{
 		key:              key,
 		publicID:         publicID,
@@ -211,6 +222,9 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 		transcodeCfg:     transcodeCfg,
 		profile:          profile,
 		accel:            accel,
+		effectiveAccel:   effectiveAccel,
+		hardwareDevice:   hardwareDevice,
+		videoCodec:       videoCodec,
 		channel:          channel,
 		guideStartedAt:   guide.StartedAt,
 		sessionStartedAt: time.Now(),
@@ -223,18 +237,19 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 	if created {
 		go session.run(ctx)
 	}
+	h.recordHLSPlayback(r, session, player, 0)
 	return session, playerToken, true
 }
 
-func (h *TaterTVStreamHandler) authorizeTaterTVRequest(w http.ResponseWriter, r *http.Request) (*config.Config, string, bool) {
+func (h *TaterTVStreamHandler) authorizeTaterTVRequest(w http.ResponseWriter, r *http.Request) (*config.Config, string, *config.PlayerConfig, bool) {
 	if h.configGetter == nil {
 		http.Error(w, "Configuration unavailable", http.StatusServiceUnavailable)
-		return nil, "", false
+		return nil, "", nil, false
 	}
 	cfg := h.configGetter()
 	if cfg == nil {
 		http.Error(w, "Configuration unavailable", http.StatusServiceUnavailable)
-		return nil, "", false
+		return nil, "", nil, false
 	}
 	token := strings.TrimSpace(r.URL.Query().Get("player_token"))
 	if token == "" {
@@ -243,12 +258,55 @@ func (h *TaterTVStreamHandler) authorizeTaterTVRequest(w http.ResponseWriter, r 
 	if token == "" {
 		token = strings.TrimSpace(r.Header.Get("X-Tater-Player-Token"))
 	}
-	if _, ok := findTaterPlayerByToken(cfg, token); !ok {
+	player, ok := findTaterPlayerByToken(cfg, token)
+	if !ok {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="Tater TV Channel"`)
 		http.Error(w, "Unauthorized: valid player_token required", http.StatusUnauthorized)
-		return nil, "", false
+		return nil, "", nil, false
 	}
-	return cfg, token, true
+	return cfg, token, player, true
+}
+
+func (h *TaterTVStreamHandler) recordHLSPlayback(r *http.Request, session *taterTVHLSSession, player *config.PlayerConfig, bytesSent int64) {
+	if h.streamTracker == nil || session == nil || player == nil {
+		return
+	}
+	now := time.Now()
+	startedAt := session.sessionStartedAt
+	if startedAt.IsZero() {
+		startedAt = now
+	}
+	position := 0.0
+	if session.channel.TotalDuration > 0 && !session.guideStartedAt.IsZero() {
+		elapsed := now.Sub(session.guideStartedAt).Seconds()
+		if elapsed > 0 {
+			position = math.Mod(elapsed, session.channel.TotalDuration)
+		}
+	}
+	if position < 0 || math.IsNaN(position) || math.IsInf(position, 0) {
+		position = 0
+	}
+	h.streamTracker.RecordPlayback(nzbfilesystem.ActiveStream{
+		FilePath:         "Tube TV CH " + session.channel.Number + " - " + session.channel.Title,
+		StartedAt:        startedAt,
+		LastActivity:     now,
+		Source:           "Tube TV",
+		PlayerID:         player.ID,
+		UserName:         taterPlayerDisplayName(player),
+		ClientIP:         r.RemoteAddr,
+		UserAgent:        r.UserAgent(),
+		BytesSent:        bytesSent,
+		Status:           "Streaming",
+		PlaybackPosition: position,
+		MediaDuration:    session.channel.TotalDuration,
+		Transcoded:       true,
+		TranscodeProfile: session.profileID,
+		TranscodeName:    session.profile.Name,
+		HardwareAccel:    session.effectiveAccel,
+		HardwareDevice:   session.hardwareDevice,
+		VideoCodec:       session.videoCodec,
+		HardwareActive:   session.effectiveAccel != "" && session.effectiveAccel != "none",
+	})
 }
 
 func (h *TaterTVStreamHandler) requestedHLSAccel(cfg *config.Config, r *http.Request) string {
@@ -329,56 +387,106 @@ func (s *taterTVHLSSession) run(ctx context.Context) {
 		}
 	}
 
-	if err := s.transcodeContinuous(ctx, items, logoFile); err != nil {
+	if err := s.transcodeProgramSegments(ctx, items, logoFile); err != nil {
 		s.setError(err)
-		slog.WarnContext(ctx, "Tube TV continuous HLS failed",
+		slog.WarnContext(ctx, "Tube TV HLS segmenter failed",
 			"channel", s.number,
 			"items", len(items),
 			"error", err)
 	}
 }
 
-func (s *taterTVHLSSession) transcodeContinuous(ctx context.Context, items []taterTVStreamItem, logoFile string) error {
-	streamDirRel := "live"
-	streamDir := filepath.Join(s.root, streamDirRel)
-	if err := os.MkdirAll(streamDir, 0755); err != nil {
-		return err
-	}
-	concatPath := filepath.Join(s.root, "channel.ffconcat")
-	if err := writeTaterTVConcatList(concatPath, items); err != nil {
-		return err
-	}
-	playlistPath := filepath.Join(streamDir, "index.m3u8")
-	segmentPattern := filepath.Join(streamDir, "seg-%05d.ts")
-	args := buildTaterTVContinuousHLSArgs(s.transcodeCfg, s.profile, s.accel, concatPath, logoFile, s.channel.LogoPosition, playlistPath, segmentPattern)
-	var stderr limitedBuffer
-	cmd := exec.CommandContext(ctx, s.ffmpegPath, args...)
-	cmd.Stderr = &stderr
+func (s *taterTVHLSSession) transcodeProgramSegments(ctx context.Context, items []taterTVStreamItem, logoFile string) error {
+	played := 0
+	failed := 0
+	for index, item := range items {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		itemDirRel := fmt.Sprintf("item-%05d", index)
+		itemDir := filepath.Join(s.root, itemDirRel)
+		if err := os.MkdirAll(itemDir, 0755); err != nil {
+			return err
+		}
+		playlistPath := filepath.Join(itemDir, "index.m3u8")
+		segmentPattern := filepath.Join(itemDir, "seg-%05d.ts")
+		args := buildTaterTVChannelHLSArgs(s.transcodeCfg, s.profile, s.accel, item.Path, item.StartSeconds, item.DurationSeconds, logoFile, s.channel.LogoPosition, playlistPath, segmentPattern)
+		var stderr limitedBuffer
+		cmd := exec.CommandContext(ctx, s.ffmpegPath, args...)
+		cmd.Stderr = &stderr
 
-	slog.InfoContext(ctx, "Starting Tube TV continuous HLS transcode",
-		"channel", s.number,
-		"items", len(items),
-		"profile", s.profileID,
-		"hardware_acceleration", s.accel)
+		beforeSegments := s.segmentCount()
+		slog.InfoContext(ctx, "Starting Tube TV HLS item transcode",
+			"channel", s.number,
+			"index", index,
+			"items", len(items),
+			"title", item.Title,
+			"kind", item.Kind,
+			"path", item.Path,
+			"start_seconds", item.StartSeconds,
+			"duration_seconds", item.DurationSeconds,
+			"profile", s.profileID,
+			"hardware_acceleration", s.accel)
 
-	if err := cmd.Start(); err != nil {
-		return err
+		if err := cmd.Start(); err != nil {
+			failed++
+			slog.WarnContext(ctx, "Tube TV HLS item failed to start",
+				"channel", s.number,
+				"index", index,
+				"title", item.Title,
+				"kind", item.Kind,
+				"error", err)
+			continue
+		}
+
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		err := s.monitorHLSItem(ctx, cmd, done, itemDirRel, playlistPath, item)
+		afterSegments := s.segmentCount()
+		if afterSegments > beforeSegments {
+			played++
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			failed++
+			slog.WarnContext(ctx, "Tube TV HLS item failed; skipping",
+				"channel", s.number,
+				"index", index,
+				"title", item.Title,
+				"kind", item.Kind,
+				"segments_before", beforeSegments,
+				"segments_after", afterSegments,
+				"error", err,
+				"stderr", stderr.String())
+			continue
+		}
+		if afterSegments <= beforeSegments {
+			failed++
+			slog.WarnContext(ctx, "Tube TV HLS item produced no segments; skipping",
+				"channel", s.number,
+				"index", index,
+				"title", item.Title,
+				"kind", item.Kind)
+		}
 	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	if played == 0 {
+		return fmt.Errorf("no Tube TV HLS items produced segments; failures=%d", failed)
+	}
+	return nil
+}
 
+func (s *taterTVHLSSession) monitorHLSItem(ctx context.Context, cmd *exec.Cmd, done <-chan error, itemDirRel, playlistPath string, item taterTVStreamItem) error {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
 		case err := <-done:
-			s.appendContinuousSegments(streamDirRel, playlistPath)
-			if err != nil {
-				return fmt.Errorf("%w: %s", err, stderr.String())
-			}
-			return nil
+			s.appendItemSegments(itemDirRel, playlistPath, item)
+			return err
 		case <-ticker.C:
-			s.appendContinuousSegments(streamDirRel, playlistPath)
+			s.appendItemSegments(itemDirRel, playlistPath, item)
 			if time.Since(s.lastAccessed()) > taterTVHLSIdleTimeout {
 				if cmd.Process != nil {
 					_ = cmd.Process.Kill()
@@ -390,37 +498,6 @@ func (s *taterTVHLSSession) transcodeContinuous(ctx context.Context, items []tat
 			return ctx.Err()
 		}
 	}
-}
-
-func writeTaterTVConcatList(path string, items []taterTVStreamItem) error {
-	var builder strings.Builder
-	builder.WriteString("ffconcat version 1.0\n")
-	for _, item := range items {
-		if strings.TrimSpace(item.Path) == "" {
-			continue
-		}
-		builder.WriteString("file ")
-		builder.WriteString(ffconcatQuote(item.Path))
-		builder.WriteByte('\n')
-		if item.StartSeconds > 0 {
-			builder.WriteString("inpoint ")
-			builder.WriteString(strconv.FormatFloat(item.StartSeconds, 'f', 3, 64))
-			builder.WriteByte('\n')
-		}
-		if item.DurationSeconds > 0 {
-			builder.WriteString("outpoint ")
-			builder.WriteString(strconv.FormatFloat(item.StartSeconds+item.DurationSeconds, 'f', 3, 64))
-			builder.WriteByte('\n')
-			builder.WriteString("duration ")
-			builder.WriteString(strconv.FormatFloat(item.DurationSeconds, 'f', 3, 64))
-			builder.WriteByte('\n')
-		}
-	}
-	return os.WriteFile(path, []byte(builder.String()), 0644)
-}
-
-func ffconcatQuote(path string) string {
-	return "'" + strings.ReplaceAll(path, "'", "'\\''") + "'"
 }
 
 func (s *taterTVHLSSession) appendItemSegments(itemDirRel, playlistPath string, item taterTVStreamItem) {
@@ -463,33 +540,6 @@ func (s *taterTVHLSSession) appendItemSegments(itemDirRel, playlistPath string, 
 	}
 }
 
-func (s *taterTVHLSSession) appendContinuousSegments(streamDirRel, playlistPath string) {
-	segments, err := parseTaterTVHLSPlaylist(playlistPath)
-	if err != nil {
-		return
-	}
-	for _, segment := range segments {
-		relPath := filepath.ToSlash(filepath.Join(streamDirRel, segment.File))
-		absPath := filepath.Join(s.root, filepath.FromSlash(relPath))
-		if stat, err := os.Stat(absPath); err != nil || stat.IsDir() || stat.Size() == 0 {
-			continue
-		}
-		s.mu.Lock()
-		if s.seen[relPath] {
-			s.mu.Unlock()
-			continue
-		}
-		sequence := int64(len(s.segments))
-		s.seen[relPath] = true
-		s.segments = append(s.segments, taterTVHLSSegment{
-			Sequence: sequence,
-			Duration: segment.Duration,
-			Path:     relPath,
-		})
-		s.mu.Unlock()
-	}
-}
-
 func (s *taterTVHLSSession) segmentURI(relPath, playerToken string) string {
 	u := "/api/tater/tv/channel/" + url.PathEscape(s.number) + "/hls/" + url.PathEscape(s.publicID)
 	for _, part := range strings.Split(filepath.ToSlash(relPath), "/") {
@@ -528,6 +578,9 @@ func (s *taterTVHLSSession) playlist(playerToken string) string {
 	builder.WriteString("#EXT-X-INDEPENDENT-SEGMENTS\n")
 	builder.WriteString("#EXT-X-TARGETDURATION:" + strconv.Itoa(target) + "\n")
 	builder.WriteString("#EXT-X-MEDIA-SEQUENCE:" + strconv.FormatInt(sequence, 10) + "\n")
+	if len(segments) > 2 {
+		builder.WriteString("#EXT-X-START:TIME-OFFSET=-8.000,PRECISE=YES\n")
+	}
 	for _, segment := range segments {
 		if segment.Discontinuity {
 			builder.WriteString("#EXT-X-DISCONTINUITY\n")
@@ -635,68 +688,6 @@ func buildTaterTVChannelHLSArgs(cfg config.TranscodingConfig, profile transcodeP
 	}
 	if durationSeconds > 0 {
 		args = append(args, "-t", strconv.FormatFloat(durationSeconds, 'f', 3, 64))
-	}
-	videoCodec, filters := transcodeVideoSettings(accel, cfg.HardwareDevice, profile)
-	if logoFile != "" {
-		args = append(args,
-			"-filter_complex", taterTVChannelLogoFilter(filters, profile, logoPosition),
-			"-map", "[vout]",
-			"-map", "0:a:0?",
-			"-sn",
-		)
-	} else {
-		args = append(args,
-			"-map", "0:v:0",
-			"-map", "0:a:0?",
-			"-sn",
-		)
-		if filters != "" {
-			args = append(args, "-vf", filters)
-		}
-	}
-	args = append(args,
-		"-af", "aresample=async=1:first_pts=0",
-		"-c:v", videoCodec,
-		"-b:v", profile.VideoBitrate,
-		"-maxrate", profile.MaxRate,
-		"-bufsize", profile.BufferSize,
-	)
-	args = appendVideoEncoderOptions(args, videoCodec, profile)
-	args = append(args,
-		"-c:a", "aac",
-		"-b:a", profile.AudioBitrate,
-		"-ac", "2",
-		"-ar", "48000",
-		"-fflags", "+genpts",
-		"-avoid_negative_ts", "make_zero",
-		"-force_key_frames", "expr:gte(t,n_forced*"+strconv.Itoa(taterTVHLSSegmentSeconds)+")",
-		"-f", "hls",
-		"-hls_time", strconv.Itoa(taterTVHLSSegmentSeconds),
-		"-hls_segment_type", "mpegts",
-		"-hls_flags", "independent_segments+temp_file",
-		"-hls_list_size", "0",
-		"-hls_segment_filename", segmentPattern,
-		outputPlaylist,
-	)
-	return args
-}
-
-func buildTaterTVContinuousHLSArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, concatPath string, logoFile, logoPosition, outputPlaylist, segmentPattern string) []string {
-	args := []string{
-		"-hide_banner",
-		"-loglevel", "warning",
-		"-nostdin",
-	}
-	args = append(args, transcodeHardwareInitArgs(cfg, accel)...)
-	args = append(args,
-		"-re",
-		"-f", "concat",
-		"-safe", "0",
-		"-i", concatPath,
-	)
-	logoFile = strings.TrimSpace(logoFile)
-	if logoFile != "" {
-		args = append(args, "-loop", "1", "-framerate", "30", "-i", logoFile)
 	}
 	videoCodec, filters := transcodeVideoSettings(accel, cfg.HardwareDevice, profile)
 	if logoFile != "" {

@@ -132,3 +132,52 @@ func TestStreamTracker_GetHistory_KeepsCompletedPlayback(t *testing.T) {
 	assert.NotZero(t, history[0].LastActivity)
 	assert.Greater(t, history[0].PlaybackPosition, 0.0)
 }
+
+func TestStreamTracker_RecordPlayback_CoalescesPlaybackEvents(t *testing.T) {
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+
+	started := time.Now().Add(-2 * time.Minute)
+	tracker.RecordPlayback(nzbfilesystem.ActiveStream{
+		FilePath:         "Tube TV CH 02 - Cartoons",
+		StartedAt:        started,
+		LastActivity:     started.Add(time.Minute),
+		Source:           "Tube TV",
+		PlayerID:         "player-crt",
+		UserName:         "CRT",
+		ClientIP:         "10.0.0.2",
+		BytesSent:        1024,
+		Status:           "Streaming",
+		PlaybackPosition: 60,
+		MediaDuration:    1800,
+		Transcoded:       true,
+		HardwareAccel:    "qsv",
+		VideoCodec:       "h264_qsv",
+		HardwareActive:   true,
+	})
+	tracker.RecordPlayback(nzbfilesystem.ActiveStream{
+		FilePath:         "Tube TV CH 02 - Cartoons",
+		LastActivity:     started.Add(2 * time.Minute),
+		Source:           "Tube TV",
+		PlayerID:         "player-crt",
+		UserName:         "CRT",
+		ClientIP:         "10.0.0.2",
+		BytesSent:        2048,
+		Status:           "Streaming",
+		PlaybackPosition: 120,
+		MediaDuration:    1800,
+		Transcoded:       true,
+		HardwareAccel:    "qsv",
+		VideoCodec:       "h264_qsv",
+		HardwareActive:   true,
+	})
+
+	history := tracker.GetHistory()
+
+	assert.Len(t, history, 1)
+	assert.Equal(t, "Tube TV", history[0].Source)
+	assert.Equal(t, int64(3072), history[0].BytesSent)
+	assert.Equal(t, 120.0, history[0].PlaybackPosition)
+	assert.Equal(t, 1800.0, history[0].MediaDuration)
+	assert.True(t, history[0].HardwareActive)
+}
