@@ -126,3 +126,54 @@ func TestLocalStreamHandlerTracksActiveDirectStreams(t *testing.T) {
 		t.Fatalf("expected local stream cleanup, got %#v", active)
 	}
 }
+
+func TestTaterTVItemHandlerServesScheduledMediaDirectly(t *testing.T) {
+	taterTVResetGuide()
+	root := t.TempDir()
+	mediaPath := filepath.Join(root, "Scheduled Movie.mp4")
+	if err := os.WriteFile(mediaPath, []byte("scheduled media bytes"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig(root)
+	cfg.Transcoding.FFmpegPath = fakeFFmpegWithProbe(t, root, "#!/bin/sh\nprintf '120.000\\n'\n")
+	cfg.LocalMedia.Enabled = boolPtr(true)
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID:          "movies",
+		Name:        "Movies",
+		LibraryType: "movies",
+		Paths:       []string{root},
+		Enabled:     boolPtr(true),
+	}}
+	cfg.TubeTV.AutoChannels = boolPtr(false)
+	cfg.TubeTV.CustomChannels = []config.TubeTVCustomChannel{{
+		ID:    "movies",
+		Title: "Movie Channel",
+		Sources: []config.TubeTVCustomSource{{
+			CategoryID:  "movies",
+			SourceIndex: -1,
+		}},
+	}}
+	cfg.Players.Paired = []config.PlayerConfig{{
+		ID:        "player-1",
+		Name:      "Living Room",
+		TokenHash: hashTaterSecret("item-token"),
+	}}
+	defer taterTVResetGuideForConfig(cfg)
+
+	handler := NewTaterTVStreamHandler(func() *config.Config { return cfg }, nil).GetHTTPHandler()
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/tater/tv/channel/02/item/0?player_token=item-token&transcode=0",
+		nil,
+	)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected scheduled item response 200, got %d: %s", res.Code, res.Body.String())
+	}
+	if res.Body.String() != "scheduled media bytes" {
+		t.Fatalf("unexpected scheduled item body: %q", res.Body.String())
+	}
+}

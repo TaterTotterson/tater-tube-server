@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -36,6 +37,10 @@ func NewTaterTVStreamHandler(configGetter config.ConfigGetter, streamTracker *St
 
 func (h *TaterTVStreamHandler) GetHTTPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/item/") {
+			h.serveItem(w, r)
+			return
+		}
 		if strings.Contains(r.URL.Path, "/playlist.m3u8") {
 			h.serveHLSPlaylist(w, r)
 			return
@@ -46,6 +51,173 @@ func (h *TaterTVStreamHandler) GetHTTPHandler() http.Handler {
 		}
 		h.serveChannel(w, r)
 	})
+}
+
+func (h *TaterTVStreamHandler) serveItem(w http.ResponseWriter, r *http.Request) {
+	cfg, _, player, ok := h.authorizeTaterTVRequest(w, r)
+	if !ok {
+		return
+	}
+	if !taterTubeTVEnabled(cfg) {
+		http.Error(w, "Tube TV is not enabled", http.StatusServiceUnavailable)
+		return
+	}
+
+	number, itemIndex, ok := taterTVChannelItemFromPath(r.URL.Path)
+	if !ok {
+		http.Error(w, "Channel item required", http.StatusBadRequest)
+		return
+	}
+	guide, err := taterTVEnsureGuide(cfg, taterHTTPRequestBaseURL(r), time.Now())
+	if err != nil {
+		http.Error(w, "Failed to build TV lineup", http.StatusServiceUnavailable)
+		return
+	}
+	channel, ok := taterTVFindChannel(guide.Channels, number)
+	if !ok || itemIndex < 0 || itemIndex >= len(channel.Schedule) {
+		http.Error(w, "Channel item not found", http.StatusNotFound)
+		return
+	}
+
+	row := channel.Schedule[itemIndex]
+	startSeconds := parseTranscodeStartSeconds(r.URL.Query().Get("start"))
+	mediaOffset := math.Max(0, rowFloat(row, "mediaOffset"))
+	if startSeconds <= 0 {
+		startSeconds = mediaOffset
+	}
+	segmentOffset := math.Max(0, startSeconds-mediaOffset)
+	remaining := math.Max(0, rowFloat(row, "duration")-segmentOffset)
+	item, err := taterTVResolveStreamItem(cfg, row, startSeconds, remaining)
+	if err != nil {
+		http.Error(w, "Channel item unavailable", http.StatusNotFound)
+		return
+	}
+
+	file, err := os.Open(item.Path)
+	if err != nil {
+		http.Error(w, "Channel item unavailable", http.StatusNotFound)
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || info.IsDir() {
+		http.Error(w, "Channel item unavailable", http.StatusNotFound)
+		return
+	}
+
+	streamReq := r
+	var stream *nzbfilesystem.ActiveStream
+	if h.streamTracker != nil {
+		streamCtx, cancel := context.WithCancel(r.Context())
+		streamReq = r.WithContext(streamCtx)
+		defer cancel()
+		stream = h.streamTracker.AddStream(
+			"Tube TV CH "+channel.Number+" - "+item.Title,
+			"Tube TV",
+			taterPlayerDisplayName(player),
+			r.RemoteAddr,
+			r.UserAgent(),
+			info.Size(),
+		)
+		h.streamTracker.SetPlayerID(stream.ID, player.ID)
+		h.streamTracker.SetCancelFunc(stream.ID, cancel)
+		h.streamTracker.SetMediaInfo(stream.ID, item.FullDuration, item.StartSeconds)
+		defer h.streamTracker.Remove(stream.ID)
+	}
+
+	transcoder := &StreamHandler{configGetter: h.configGetter, streamTracker: h.streamTracker}
+	if !transcoder.shouldTranscode(r, item.Path) {
+		if mimeType := mime.TypeByExtension(filepath.Ext(item.Path)); mimeType != "" {
+			w.Header().Set("Content-Type", mimeType)
+		} else {
+			w.Header().Set("Content-Type", "application/octet-stream")
+		}
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.Header().Set("Content-Disposition", `inline; filename="`+filepath.Base(item.Path)+`"`)
+		var streamWriter http.ResponseWriter = w
+		if stream != nil {
+			streamWriter = &trackedResponseWriter{
+				ResponseWriter: w,
+				stream:         stream,
+				streamTracker:  h.streamTracker,
+			}
+		}
+		http.ServeContent(streamWriter, streamReq, filepath.Base(item.Path), info.ModTime(), file)
+		return
+	}
+
+	ffmpegPath := effectiveFFmpegPath(cfg.Transcoding.FFmpegPath)
+	if _, err := exec.LookPath(ffmpegPath); err != nil {
+		http.Error(w, "Transcoding unavailable: ffmpeg not found", http.StatusServiceUnavailable)
+		return
+	}
+	profileID, profile := taterTVRequestedTranscodeProfile(cfg, r)
+	requestedCodec := requestedTranscodeCodec(r)
+	requestedAccel := strings.TrimSpace(r.URL.Query().Get("hwaccel"))
+	if requestedAccel == "" {
+		requestedAccel = cfg.Transcoding.HardwareAcceleration
+	}
+	if requestedAccel == "" {
+		requestedAccel = "none"
+	}
+	accel, selectedHardwareDevice, videoCodecPreference := transcoder.selectTranscodeAccelerationAndCodec(
+		streamReq.Context(), ffmpegPath, cfg.Transcoding, profile, requestedAccel, requestedCodec)
+	if requestedCodec == transcodeCodecHEVC && videoCodecPreference != transcodeCodecHEVC {
+		if fallbackID, fallbackProfile, available := requestedFallbackTranscodeProfile(r); available {
+			profileID = fallbackID
+			profile = fallbackProfile
+			accel, selectedHardwareDevice = transcoder.selectTranscodeAcceleration(
+				streamReq.Context(), ffmpegPath, cfg.Transcoding, profile, requestedAccel)
+		}
+	}
+	transcodeCfg := cfg.Transcoding
+	if selectedHardwareDevice != "" {
+		transcodeCfg.HardwareDevice = selectedHardwareDevice
+	}
+	videoCodec, _ := transcodeVideoSettingsForCodec(accel, transcodeCfg.HardwareDevice, profile, videoCodecPreference)
+	effectiveAccel := effectiveTranscodeHardwareAccel(videoCodec)
+	hardwareDevice := effectiveTranscodeHardwareDevice(effectiveAccel, transcodeCfg.HardwareDevice)
+	if stream != nil {
+		h.streamTracker.SetTranscodingInfo(stream.ID, profileID, profile.Name, effectiveAccel, hardwareDevice, videoCodec, effectiveAccel != "" && effectiveAccel != "none")
+	}
+
+	logoFile := ""
+	if taterTVChannelLogosEnabled(cfg) && channel.LogoPath != "" {
+		if resolvedLogo, logoErr := taterTVResolveLogoFile(streamReq.Context(), cfg, channel.LogoPath); logoErr == nil {
+			logoFile = resolvedLogo
+		} else {
+			slog.WarnContext(streamReq.Context(), "Tube TV channel logo unavailable",
+				"channel", channel.Number, "logo_path", channel.LogoPath, "error", logoErr)
+		}
+	}
+
+	w.Header().Set("Content-Type", "video/mp2t")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Disposition", `inline; filename="TaterTube-CH`+channel.Number+`-item.ts"`)
+	w.Header().Del("Accept-Ranges")
+	w.WriteHeader(http.StatusOK)
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+
+	err = runTaterTVChannelSegments(
+		streamReq.Context(),
+		ffmpegPath,
+		transcodeCfg,
+		profile,
+		accel,
+		videoCodecPreference,
+		taterTVStreamWriter{w: w, stream: stream, streamTracker: h.streamTracker},
+		h.streamTracker,
+		stream,
+		channel,
+		[]taterTVStreamItem{item},
+		logoFile,
+	)
+	if err != nil && streamReq.Context().Err() == nil {
+		slog.WarnContext(streamReq.Context(), "Tube TV item stream failed",
+			"channel", channel.Number, "item", itemIndex, "title", item.Title, "error", err)
+	}
 }
 
 func (h *TaterTVStreamHandler) serveChannel(w http.ResponseWriter, r *http.Request) {
@@ -235,6 +407,13 @@ type taterTVStreamItem struct {
 	FullDuration    float64
 }
 
+func taterTVLogoForItem(item taterTVStreamItem, logoFile string) string {
+	if strings.EqualFold(strings.TrimSpace(item.Kind), "commercial") {
+		return ""
+	}
+	return logoFile
+}
+
 func runTaterTVChannelSegments(ctx context.Context, ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, writer taterTVStreamWriter, tracker *StreamTracker, stream *nzbfilesystem.ActiveStream, channel taterTVChannel, items []taterTVStreamItem, logoFile string) error {
 	if len(items) == 0 {
 		return fmt.Errorf("no channel segments")
@@ -248,7 +427,7 @@ func runTaterTVChannelSegments(ctx context.Context, ffmpegPath string, cfg confi
 		if tracker != nil && stream != nil {
 			tracker.SetMediaInfo(stream.ID, item.FullDuration, item.StartSeconds)
 		}
-		args := buildTaterTVChannelTranscodeArgsWithCodec(cfg, profile, accel, preferredCodec, item.Path, item.StartSeconds, item.DurationSeconds, logoFile, channel.LogoPosition)
+		args := buildTaterTVChannelTranscodeArgsWithCodec(cfg, profile, accel, preferredCodec, item.Path, item.StartSeconds, item.DurationSeconds, taterTVLogoForItem(item, logoFile), channel.LogoPosition)
 		videoCodec, _ := transcodeVideoSettingsForCodec(accel, cfg.HardwareDevice, profile, preferredCodec)
 		var stderr limitedBuffer
 		cmd := exec.CommandContext(ctx, ffmpegPath, args...)
@@ -328,6 +507,23 @@ func taterTVChannelNumberFromPath(path string) string {
 		return ""
 	}
 	return strings.TrimSpace(number)
+}
+
+func taterTVChannelItemFromPath(path string) (string, int, bool) {
+	rest := strings.TrimPrefix(path, "/api/tater/tv/channel/")
+	parts := strings.Split(rest, "/")
+	if len(parts) != 3 || parts[1] != "item" {
+		return "", -1, false
+	}
+	number, err := url.PathUnescape(parts[0])
+	if err != nil || strings.TrimSpace(number) == "" {
+		return "", -1, false
+	}
+	index, err := strconv.Atoi(parts[2])
+	if err != nil || index < 0 {
+		return "", -1, false
+	}
+	return strings.TrimSpace(number), index, true
 }
 
 func taterHTTPRequestBaseURL(r *http.Request) string {

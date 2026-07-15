@@ -424,7 +424,7 @@ func (s *taterTVHLSSession) transcodeProgramSegments(ctx context.Context, items 
 		}
 		playlistPath := filepath.Join(itemDir, "index.m3u8")
 		segmentPattern := filepath.Join(itemDir, "seg-%05d.ts")
-		args := buildTaterTVChannelHLSArgsWithCodec(s.transcodeCfg, s.profile, s.accel, s.preferredCodec, item.Path, item.StartSeconds, item.DurationSeconds, logoFile, s.channel.LogoPosition, playlistPath, segmentPattern)
+		args := buildTaterTVChannelHLSArgsWithCodec(s.transcodeCfg, s.profile, s.accel, s.preferredCodec, item.Path, item.StartSeconds, item.DurationSeconds, taterTVLogoForItem(item, logoFile), s.channel.LogoPosition, playlistPath, segmentPattern)
 		var stderr limitedBuffer
 		cmd := exec.CommandContext(ctx, s.ffmpegPath, args...)
 		cmd.Stderr = &stderr
