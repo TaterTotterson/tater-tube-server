@@ -1064,12 +1064,13 @@ func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
 	joined := strings.Join(args, " ")
 
 	for _, expected := range []string{
-		"-re",
+		"-readrate 1",
+		"-readrate_initial_burst 2",
 		"-filter_complex",
 		"overlay=x=W-w-",
 		"-af aresample=async=1:first_pts=0",
 		"-f hls",
-		"-hls_time 4",
+		"-hls_time 2",
 		"-hls_flags independent_segments+temp_file",
 		"-hls_segment_filename /tmp/hls/seg-%05d.ts",
 		"/tmp/hls/index.m3u8",
@@ -1138,7 +1139,7 @@ func TestTaterTVHLSPlaylistUsesSmallLiveWindow(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		session.segments = append(session.segments, taterTVHLSSegment{
 			Sequence: int64(i),
-			Duration: 4,
+			Duration: 2,
 			Path:     fmt.Sprintf("item-%05d/seg-00000.ts", i),
 		})
 	}
@@ -1150,7 +1151,7 @@ func TestTaterTVHLSPlaylistUsesSmallLiveWindow(t *testing.T) {
 	if !strings.Contains(playlist, "#EXT-X-MEDIA-SEQUENCE:8") {
 		t.Fatalf("expected playlist to start near live edge: %s", playlist)
 	}
-	if !strings.Contains(playlist, "#EXT-X-START:TIME-OFFSET=-8.000,PRECISE=YES") {
+	if !strings.Contains(playlist, "#EXT-X-START:TIME-OFFSET=-4.000,PRECISE=YES") {
 		t.Fatalf("expected live-edge start hint: %s", playlist)
 	}
 }
@@ -1248,5 +1249,46 @@ EOF
 	}
 	if !strings.Contains(session.segments[0].Path, "item-00001/seg-00000.ts") {
 		t.Fatalf("expected segment from second item, got %#v", session.segments[0])
+	}
+}
+
+func TestTaterTVProgramHLSStopsAfterSessionGoesIdle(t *testing.T) {
+	tempDir := t.TempDir()
+	ffmpegPath := filepath.Join(tempDir, "ffmpeg")
+	startsPath := filepath.Join(tempDir, "starts")
+	script := fmt.Sprintf(`#!/bin/sh
+printf 'start\n' >> %q
+exec sleep 30
+`, startsPath)
+	if err := os.WriteFile(ffmpegPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	session := &taterTVHLSSession{
+		number:     "02",
+		ffmpegPath: ffmpegPath,
+		profileID:  "crt_480p",
+		profile:    transcodeProfiles["crt_480p"],
+		accel:      "none",
+		channel:    taterTVChannel{Number: "02", Title: "Test"},
+		root:       t.TempDir(),
+		seen:       map[string]bool{},
+		accessed:   time.Now().Add(-taterTVHLSIdleTimeout - time.Second),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := session.transcodeProgramSegments(ctx, []taterTVStreamItem{
+		{Title: "First Video", Kind: "movie", Path: "first.mkv", DurationSeconds: 30, FullDuration: 30},
+		{Title: "Second Video", Kind: "movie", Path: "second.mkv", DurationSeconds: 30, FullDuration: 30},
+	}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	starts, err := os.ReadFile(startsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count := strings.Count(string(starts), "start\n"); count != 1 {
+		t.Fatalf("expected idle session to stop after one FFmpeg process, got %d starts", count)
 	}
 }
