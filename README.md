@@ -182,6 +182,8 @@ The frontend dev server proxies API requests to `http://localhost:8080`.
 
 This project is based on [javi11/altmount](https://github.com/javi11/altmount).
 The streaming internals and queue/import pipeline come from that project.
+Tube TV channel logo browsing uses the public logo catalog from
+[tv-logo/tv-logos](https://github.com/tv-logo/tv-logos).
 
 ## License
 
