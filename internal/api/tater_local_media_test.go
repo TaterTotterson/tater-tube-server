@@ -1069,11 +1069,45 @@ func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
 		"-filter_complex",
 		"overlay=x=W-w-",
 		"-af aresample=async=1:first_pts=0",
+		"pad=w=640:h=480:x=(ow-iw)/2:y=(oh-ih)/2:color=black,setsar=1,fps=30000/1001",
+		"-flags:v +cgop",
+		"-g 60",
+		"-bf 0",
+		"-bsf:v dump_extra=freq=keyframe",
+		"-muxdelay 0",
+		"-muxpreload 0",
 		"-f hls",
 		"-hls_time 2",
+		"-hls_segment_options mpegts_flags=+resend_headers+initial_discontinuity:mpegts_copyts=1",
 		"-hls_flags independent_segments+temp_file",
 		"-hls_segment_filename /tmp/hls/seg-%05d.ts",
 		"/tmp/hls/index.m3u8",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("expected %q in HLS args: %s", expected, joined)
+		}
+	}
+}
+
+func TestTaterTVHLSArgsUseIndependentQSVSegments(t *testing.T) {
+	args := buildTaterTVChannelHLSArgsWithCodec(
+		config.TranscodingConfig{},
+		transcodeProfiles["hdmi_1080p"],
+		"qsv",
+		transcodeCodecHEVC,
+		"/media/movie.mkv",
+		0,
+		30,
+		"",
+		"",
+		"/tmp/hls/index.m3u8",
+		"/tmp/hls/seg-%05d.ts",
+	)
+	joined := strings.Join(args, " ")
+	for _, expected := range []string{
+		"-c:v hevc_qsv",
+		"-forced_idr 1",
+		"pad=w=1920:h=1080",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("expected %q in HLS args: %s", expected, joined)
@@ -1138,9 +1172,10 @@ func TestTaterTVHLSPlaylistUsesSmallLiveWindow(t *testing.T) {
 	}
 	for i := 0; i < 20; i++ {
 		session.segments = append(session.segments, taterTVHLSSegment{
-			Sequence: int64(i),
-			Duration: 2,
-			Path:     fmt.Sprintf("item-%05d/seg-00000.ts", i),
+			Sequence:      int64(i),
+			Duration:      2,
+			Path:          fmt.Sprintf("item-%05d/seg-00000.ts", i),
+			Discontinuity: i > 0 && i%4 == 0,
 		})
 	}
 	playlist := session.playlist("token")
@@ -1150,6 +1185,9 @@ func TestTaterTVHLSPlaylistUsesSmallLiveWindow(t *testing.T) {
 	}
 	if !strings.Contains(playlist, "#EXT-X-MEDIA-SEQUENCE:8") {
 		t.Fatalf("expected playlist to start near live edge: %s", playlist)
+	}
+	if !strings.Contains(playlist, "#EXT-X-DISCONTINUITY-SEQUENCE:1") {
+		t.Fatalf("expected dropped discontinuities to be counted: %s", playlist)
 	}
 	if !strings.Contains(playlist, "#EXT-X-START:TIME-OFFSET=-4.000,PRECISE=YES") {
 		t.Fatalf("expected live-edge start hint: %s", playlist)

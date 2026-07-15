@@ -584,6 +584,12 @@ func (s *taterTVHLSSession) playlist(playerToken string) string {
 	if len(s.segments) > taterTVHLSPlaylistLimit {
 		start = len(s.segments) - taterTVHLSPlaylistLimit
 	}
+	discontinuitySequence := 0
+	for _, segment := range s.segments[:start] {
+		if segment.Discontinuity {
+			discontinuitySequence++
+		}
+	}
 	segments := append([]taterTVHLSSegment(nil), s.segments[start:]...)
 	target := taterTVHLSSegmentSeconds
 	for _, segment := range segments {
@@ -601,6 +607,9 @@ func (s *taterTVHLSSession) playlist(playerToken string) string {
 	builder.WriteString("#EXT-X-INDEPENDENT-SEGMENTS\n")
 	builder.WriteString("#EXT-X-TARGETDURATION:" + strconv.Itoa(target) + "\n")
 	builder.WriteString("#EXT-X-MEDIA-SEQUENCE:" + strconv.FormatInt(sequence, 10) + "\n")
+	if discontinuitySequence > 0 {
+		builder.WriteString("#EXT-X-DISCONTINUITY-SEQUENCE:" + strconv.Itoa(discontinuitySequence) + "\n")
+	}
 	if len(segments) > taterTVHLSLiveStartSegments {
 		startOffset := -float64(taterTVHLSSegmentSeconds * taterTVHLSLiveStartSegments)
 		builder.WriteString("#EXT-X-START:TIME-OFFSET=" + strconv.FormatFloat(startOffset, 'f', 3, 64) + ",PRECISE=YES\n")
@@ -721,6 +730,7 @@ func buildTaterTVChannelHLSArgsWithCodec(cfg config.TranscodingConfig, profile t
 		args = append(args, "-t", strconv.FormatFloat(durationSeconds, 'f', 3, 64))
 	}
 	videoCodec, filters := transcodeVideoSettingsForCodec(accel, cfg.HardwareDevice, profile, preferredCodec)
+	filters = taterTVHLSNormalizeFilters(filters, profile)
 	if logoFile != "" {
 		args = append(args,
 			"-filter_complex", taterTVChannelLogoFilter(filters, profile, logoPosition),
@@ -747,6 +757,14 @@ func buildTaterTVChannelHLSArgsWithCodec(cfg config.TranscodingConfig, profile t
 	)
 	args = appendVideoEncoderOptions(args, videoCodec, profile)
 	args = append(args,
+		"-flags:v", "+cgop",
+		"-g", "60",
+		"-bf", "0",
+	)
+	if videoCodec == "h264_qsv" || videoCodec == "hevc_qsv" {
+		args = append(args, "-forced_idr", "1")
+	}
+	args = append(args,
 		"-c:a", "aac",
 		"-b:a", profile.AudioBitrate,
 		"-ac", "2",
@@ -754,15 +772,34 @@ func buildTaterTVChannelHLSArgsWithCodec(cfg config.TranscodingConfig, profile t
 		"-fflags", "+genpts",
 		"-avoid_negative_ts", "make_zero",
 		"-force_key_frames", "expr:gte(t,n_forced*"+strconv.Itoa(taterTVHLSSegmentSeconds)+")",
+		"-bsf:v", "dump_extra=freq=keyframe",
+		"-muxdelay", "0",
+		"-muxpreload", "0",
 		"-f", "hls",
 		"-hls_time", strconv.Itoa(taterTVHLSSegmentSeconds),
 		"-hls_segment_type", "mpegts",
+		"-hls_segment_options", "mpegts_flags=+resend_headers+initial_discontinuity:mpegts_copyts=1",
 		"-hls_flags", "independent_segments+temp_file",
 		"-hls_list_size", "0",
 		"-hls_segment_filename", segmentPattern,
 		outputPlaylist,
 	)
 	return args
+}
+
+func taterTVHLSNormalizeFilters(filters string, profile transcodeProfile) string {
+	preFilters, postFilters := splitTaterTVOverlayFilters(filters)
+	normalize := fmt.Sprintf(
+		"pad=w=%d:h=%d:x=(ow-iw)/2:y=(oh-ih)/2:color=black,setsar=1,fps=30000/1001",
+		profile.MaxWidth,
+		profile.MaxHeight,
+	)
+	if strings.TrimSpace(preFilters) == "" {
+		preFilters = normalize
+	} else {
+		preFilters += "," + normalize
+	}
+	return preFilters + postFilters
 }
 
 func taterTVHLSRoot(cfg *config.Config) string {
