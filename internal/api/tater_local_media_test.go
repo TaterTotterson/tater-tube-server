@@ -1014,66 +1014,6 @@ func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
 	}
 }
 
-func TestTaterTVConcatListUsesLiveInpointAndOutpoint(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "channel.ffconcat")
-	err := writeTaterTVConcatList(path, []taterTVStreamItem{
-		{Path: "/media/Show's Episode.mkv", StartSeconds: 45.25, DurationSeconds: 74.75},
-		{Path: "/commercials/Spot.mp4", DurationSeconds: 30},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(data)
-	for _, expected := range []string{
-		"ffconcat version 1.0",
-		"file '/media/Show'\\''s Episode.mkv'",
-		"inpoint 45.250",
-		"outpoint 120.000",
-		"duration 74.750",
-		"file '/commercials/Spot.mp4'",
-		"outpoint 30.000",
-		"duration 30.000",
-	} {
-		if !strings.Contains(text, expected) {
-			t.Fatalf("expected %q in concat list:\n%s", expected, text)
-		}
-	}
-}
-
-func TestTaterTVContinuousHLSArgsUseConcatInput(t *testing.T) {
-	args := buildTaterTVContinuousHLSArgs(
-		config.TranscodingConfig{},
-		transcodeProfiles["crt_480p"],
-		"none",
-		"/tmp/channel.ffconcat",
-		"/metadata/logos/cartoon.png",
-		"bottom_right",
-		"/tmp/hls/index.m3u8",
-		"/tmp/hls/seg-%05d.ts",
-	)
-	joined := strings.Join(args, " ")
-
-	for _, expected := range []string{
-		"-re -f concat -safe 0 -i /tmp/channel.ffconcat",
-		"-filter_complex",
-		"overlay=x=W-w-",
-		"-af aresample=async=1:first_pts=0",
-		"-f hls",
-		"-hls_time 4",
-		"-hls_flags independent_segments+temp_file",
-		"-hls_segment_filename /tmp/hls/seg-%05d.ts",
-		"/tmp/hls/index.m3u8",
-	} {
-		if !strings.Contains(joined, expected) {
-			t.Fatalf("expected %q in continuous HLS args: %s", expected, joined)
-		}
-	}
-}
-
 func TestTaterTVChannelLogoOverlayPositions(t *testing.T) {
 	profile := transcodeProfiles["crt_480p"]
 	tests := []struct {
@@ -1121,6 +1061,34 @@ func TestTaterTVHLSPlaylistIncludesTokenAndDiscontinuity(t *testing.T) {
 	}
 }
 
+func TestTaterTVHLSPlaylistUsesSmallLiveWindow(t *testing.T) {
+	session := &taterTVHLSSession{
+		publicID:       "live",
+		number:         "02",
+		profileID:      "hdmi_1080p",
+		requestedAccel: "auto",
+		accessed:       time.Now(),
+	}
+	for i := 0; i < 20; i++ {
+		session.segments = append(session.segments, taterTVHLSSegment{
+			Sequence: int64(i),
+			Duration: 4,
+			Path:     fmt.Sprintf("item-%05d/seg-00000.ts", i),
+		})
+	}
+	playlist := session.playlist("token")
+
+	if strings.Contains(playlist, "item-00000/seg-00000.ts") {
+		t.Fatalf("playlist should not include stale early segments: %s", playlist)
+	}
+	if !strings.Contains(playlist, "#EXT-X-MEDIA-SEQUENCE:8") {
+		t.Fatalf("expected playlist to start near live edge: %s", playlist)
+	}
+	if !strings.Contains(playlist, "#EXT-X-START:TIME-OFFSET=-8.000,PRECISE=YES") {
+		t.Fatalf("expected live-edge start hint: %s", playlist)
+	}
+}
+
 func TestRunTaterTVChannelSegmentsSkipsFailedSegment(t *testing.T) {
 	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg")
 	script := `#!/bin/sh
@@ -1157,5 +1125,61 @@ printf "segment-ok"
 	}
 	if body := recorder.Body.String(); body != "segment-ok" {
 		t.Fatalf("expected successful segment output after failed commercial, got %q", body)
+	}
+}
+
+func TestTaterTVProgramHLSSkipsFailedItem(t *testing.T) {
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg")
+	script := `#!/bin/sh
+case "$*" in
+  *bad-commercial.mp4*) echo "bad commercial" >&2; exit 2 ;;
+esac
+pattern=""
+playlist=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-hls_segment_filename" ]; then pattern="$arg"; fi
+  playlist="$arg"
+  prev="$arg"
+done
+mkdir -p "$(dirname "$playlist")"
+segment="$(printf "$pattern" 0)"
+printf "segment-ok" > "$segment"
+cat > "$playlist" <<EOF
+#EXTM3U
+#EXT-X-TARGETDURATION:4
+#EXTINF:4.000,
+$(basename "$segment")
+EOF
+`
+	if err := os.WriteFile(ffmpegPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	session := &taterTVHLSSession{
+		number:     "02",
+		ffmpegPath: ffmpegPath,
+		profileID:  "crt_480p",
+		profile:    transcodeProfiles["crt_480p"],
+		accel:      "none",
+		channel:    taterTVChannel{Number: "02", Title: "Test"},
+		root:       t.TempDir(),
+		seen:       map[string]bool{},
+		accessed:   time.Now(),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := session.transcodeProgramSegments(ctx, []taterTVStreamItem{
+		{Title: "Bad Ad", Kind: "commercial", Path: "bad-commercial.mp4", DurationSeconds: 30, FullDuration: 30},
+		{Title: "Next Video", Kind: "movie", Path: "next-video.mkv", DurationSeconds: 30, FullDuration: 30},
+	}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(session.segments) != 1 {
+		t.Fatalf("expected one good HLS segment after failed item, got %#v", session.segments)
+	}
+	if !strings.Contains(session.segments[0].Path, "item-00001/seg-00000.ts") {
+		t.Fatalf("expected segment from second item, got %#v", session.segments[0])
 	}
 }

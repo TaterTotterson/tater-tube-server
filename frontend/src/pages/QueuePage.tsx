@@ -57,7 +57,7 @@ import {
 	useUpdateQueueItemPriority,
 } from "../hooks/useApi";
 import { useQueueStream } from "../hooks/useQueueStream";
-import { formatBytes, formatRelativeTime, truncateText } from "../lib/utils";
+import { formatBytes, formatDuration, formatRelativeTime, truncateText } from "../lib/utils";
 import { type ActiveStream, type QueueItem, QueueStatus } from "../types/api";
 
 type QueueFilter = "" | "pending" | "processing" | "completed" | "failed";
@@ -101,8 +101,45 @@ function streamPlayerLabel(stream?: ActiveStream) {
 function streamSourceLabel(stream?: ActiveStream) {
 	if (!stream) return "";
 	if (stream.source === "Local") return "Local";
+	if (stream.source === "Tube TV") return "Tube TV";
 	if (stream.source === "API" || stream.source === "Stremio") return "NZB Stream";
 	return stream.source || "Playback";
+}
+
+function streamSourceBadge(stream?: ActiveStream) {
+	if (!stream) return "badge-ghost";
+	if (stream.source === "Local") return "badge-accent";
+	if (stream.source === "Tube TV") return "badge-secondary";
+	if (stream.source === "API" || stream.source === "Stremio") return "badge-primary";
+	return "badge-ghost";
+}
+
+function streamStatsLabel(stream: ActiveStream) {
+	const parts: string[] = [];
+	if (
+		Number.isFinite(stream.playback_position_seconds) &&
+		stream.playback_position_seconds > 0
+	) {
+		const position = formatDuration(Math.round(stream.playback_position_seconds));
+		if (Number.isFinite(stream.media_duration_seconds || 0) && (stream.media_duration_seconds || 0) > 0) {
+			parts.push(`${position} / ${formatDuration(Math.round(stream.media_duration_seconds || 0))}`);
+		} else {
+			parts.push(position);
+		}
+	}
+	if (stream.bytes_sent > 0) {
+		parts.push(`${formatBytes(stream.bytes_sent)} sent`);
+	}
+	if (stream.transcoded) {
+		const engine = stream.hardware_active
+			? stream.hardware_acceleration || stream.video_codec || "hardware"
+			: stream.video_codec || "software";
+		parts.push(`${stream.hardware_active ? "HW" : "SW"} ${engine}`);
+	}
+	if (parts.length === 0) {
+		return formatBytes(stream.total_size || stream.bytes_sent || 0);
+	}
+	return parts.join(" · ");
 }
 
 function queuePlaybackMatch(stream: ActiveStream, item: QueueItem) {
@@ -732,7 +769,7 @@ export function QueuePage() {
 															Player
 														</th>
 														<th className="font-bold text-base-content/80 text-xs uppercase tracking-widest">
-															Size
+															Stats
 														</th>
 														<th className="font-bold text-base-content/80 text-xs uppercase tracking-widest">
 															When
@@ -760,9 +797,7 @@ export function QueuePage() {
 															</td>
 															<td>
 																<span
-																	className={`badge badge-sm ${
-																		stream.source === "Local" ? "badge-accent" : "badge-primary"
-																	}`}
+																	className={`badge badge-sm ${streamSourceBadge(stream)}`}
 																>
 																	{streamSourceLabel(stream)}
 																</span>
@@ -779,8 +814,8 @@ export function QueuePage() {
 																	)}
 																</div>
 															</td>
-															<td className="font-mono text-xs opacity-70">
-																{formatBytes(stream.total_size || stream.bytes_sent || 0)}
+															<td className="max-w-[260px] text-xs opacity-70">
+																<div className="line-clamp-2">{streamStatsLabel(stream)}</div>
 															</td>
 															<td className="whitespace-nowrap text-xs opacity-70">
 																{streamActivityTime(stream)
