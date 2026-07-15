@@ -336,6 +336,11 @@ type transcodeProfile struct {
 	Level        string
 }
 
+const (
+	transcodeCodecH264 = "h264"
+	transcodeCodecHEVC = "hevc"
+)
+
 var transcodeProfiles = map[string]transcodeProfile{
 	"crt_480p": {
 		Name:         "CRT 480p",
@@ -346,6 +351,16 @@ var transcodeProfiles = map[string]transcodeProfile{
 		BufferSize:   "3600k",
 		AudioBitrate: "128k",
 		Level:        "3.0",
+	},
+	"hdmi_720p": {
+		Name:         "HDMI 720p",
+		MaxWidth:     1280,
+		MaxHeight:    720,
+		VideoBitrate: "4000k",
+		MaxRate:      "6000k",
+		BufferSize:   "12000k",
+		AudioBitrate: "160k",
+		Level:        "3.1",
 	},
 	"hdmi_1080p": {
 		Name:         "HDMI 1080p",
@@ -423,8 +438,10 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	}
 	profile, ok := transcodeProfiles[profileID]
 	if !ok {
+		profileID = "crt_480p"
 		profile = transcodeProfiles["crt_480p"]
 	}
+	requestedCodec := requestedTranscodeCodec(r)
 
 	accel := r.URL.Query().Get("hwaccel")
 	if accel == "" {
@@ -434,7 +451,14 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 		accel = "none"
 	}
 
-	accel, selectedHardwareDevice := h.selectTranscodeAcceleration(r.Context(), ffmpegPath, cfg.Transcoding, profile, accel)
+	accel, selectedHardwareDevice, videoCodecPreference := h.selectTranscodeAccelerationAndCodec(r.Context(), ffmpegPath, cfg.Transcoding, profile, accel, requestedCodec)
+	if requestedCodec == transcodeCodecHEVC && videoCodecPreference != transcodeCodecHEVC {
+		if fallbackID, fallbackProfile, ok := requestedFallbackTranscodeProfile(r); ok {
+			profileID = fallbackID
+			profile = fallbackProfile
+			accel, selectedHardwareDevice = h.selectTranscodeAcceleration(r.Context(), ffmpegPath, cfg.Transcoding, profile, accel)
+		}
+	}
 	transcodeCfg := cfg.Transcoding
 	if selectedHardwareDevice != "" {
 		transcodeCfg.HardwareDevice = selectedHardwareDevice
@@ -444,8 +468,8 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	if startSeconds > 0 {
 		inputPath = path
 	}
-	args := buildFFmpegTranscodeArgs(transcodeCfg, profile, accel, inputPath, startSeconds)
-	videoCodec, _ := transcodeVideoSettings(accel, transcodeCfg.HardwareDevice, profile)
+	args := buildFFmpegTranscodeArgsWithCodec(transcodeCfg, profile, accel, videoCodecPreference, inputPath, startSeconds)
+	videoCodec, _ := transcodeVideoSettingsForCodec(accel, transcodeCfg.HardwareDevice, profile, videoCodecPreference)
 	effectiveAccel := effectiveTranscodeHardwareAccel(videoCodec)
 	hardwareDevice := effectiveTranscodeHardwareDevice(effectiveAccel, transcodeCfg.HardwareDevice)
 	durationSeconds := h.probeMediaDuration(ctx, path)
@@ -632,6 +656,10 @@ func (h *StreamHandler) markTranscodedStream(w http.ResponseWriter, file afero.F
 }
 
 func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, inputPath string, startSeconds float64) []string {
+	return buildFFmpegTranscodeArgsWithCodec(cfg, profile, accel, transcodeCodecH264, inputPath, startSeconds)
+}
+
+func buildFFmpegTranscodeArgsWithCodec(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, inputPath string, startSeconds float64) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
@@ -651,7 +679,7 @@ func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodePro
 		"-sn",
 	)
 
-	videoCodec, filters := transcodeVideoSettings(accel, cfg.HardwareDevice, profile)
+	videoCodec, filters := transcodeVideoSettingsForCodec(accel, cfg.HardwareDevice, profile, preferredCodec)
 	if filters != "" {
 		args = append(args, "-vf", filters)
 	}
@@ -678,6 +706,24 @@ func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodePro
 	)
 
 	return args
+}
+
+func (h *StreamHandler) selectTranscodeAccelerationAndCodec(ctx context.Context, ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, requestedAccel, requestedCodec string) (string, string, string) {
+	codec := normalizeTranscodeCodec(requestedCodec)
+	if codec != transcodeCodecHEVC {
+		accel, device := h.selectTranscodeAcceleration(ctx, ffmpegPath, cfg, profile, requestedAccel)
+		return accel, device, transcodeCodecH264
+	}
+
+	accel, device, ok := h.selectTranscodeAccelerationForCodec(ctx, ffmpegPath, cfg, profile, requestedAccel, transcodeCodecHEVC)
+	if ok {
+		return accel, device, transcodeCodecHEVC
+	}
+
+	slog.WarnContext(ctx, "Requested HEVC hardware transcoding is not usable; falling back to H.264",
+		"requested", requestedAccel)
+	accel, device = h.selectTranscodeAcceleration(ctx, ffmpegPath, cfg, profile, requestedAccel)
+	return accel, device, transcodeCodecH264
 }
 
 func (h *StreamHandler) selectTranscodeAcceleration(ctx context.Context, ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, requested string) (string, string) {
@@ -728,6 +774,58 @@ func (h *StreamHandler) selectTranscodeAcceleration(ctx context.Context, ffmpegP
 	return "none", ""
 }
 
+func (h *StreamHandler) selectTranscodeAccelerationForCodec(ctx context.Context, ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, requested, codec string) (string, string, bool) {
+	requested = strings.ToLower(strings.TrimSpace(requested))
+	if requested == "" {
+		requested = "none"
+	}
+	if requested == "none" {
+		return "", "", false
+	}
+	if requested == "auto" {
+		for _, candidate := range []string{"nvenc", "qsv", "vaapi", "videotoolbox", "v4l2m2m"} {
+			if accel, device, ok := h.selectTranscodeAccelerationForCodec(ctx, ffmpegPath, cfg, profile, candidate, codec); ok {
+				slog.InfoContext(ctx, "Selected FFmpeg hardware acceleration",
+					"requested", requested,
+					"selected", accel,
+					"device", device,
+					"codec", codec)
+				return accel, device, true
+			}
+		}
+		return "", "", false
+	}
+
+	if strings.TrimSpace(cfg.HardwareDevice) == "" && (requested == "vaapi" || requested == "qsv") {
+		vendors := []string{"intel", "amd"}
+		if requested == "qsv" {
+			vendors = []string{"intel"}
+		}
+		device, reason, ok := probeTranscodeEncoderDevicesCodec(
+			ffmpegPath, cfg, profile, requested, codec,
+			candidateDRIRenderDevices(detectDRMGPUVendors(), vendors, ""),
+		)
+		if ok {
+			return requested, device, true
+		}
+		slog.WarnContext(ctx, "Configured FFmpeg hardware acceleration is not usable",
+			"requested", requested,
+			"codec", codec,
+			"reason", reason)
+		return "", "", false
+	}
+
+	ok, reason := probeTranscodeEncoderCodec(ctx, ffmpegPath, cfg, profile, requested, codec)
+	if ok {
+		return requested, strings.TrimSpace(cfg.HardwareDevice), true
+	}
+	slog.WarnContext(ctx, "Configured FFmpeg hardware acceleration is not usable",
+		"requested", requested,
+		"codec", codec,
+		"reason", reason)
+	return "", "", false
+}
+
 func transcodeHardwareInitArgs(cfg config.TranscodingConfig, accel string) []string {
 	device := strings.TrimSpace(cfg.HardwareDevice)
 	if device == "" {
@@ -759,15 +857,50 @@ func appendVideoEncoderOptions(args []string, videoCodec string, profile transco
 		)
 	case "h264_nvenc":
 		return append(args, "-preset", "p4", "-profile:v", "main")
+	case "hevc_nvenc":
+		return append(args, "-preset", "p4")
 	case "h264_videotoolbox":
 		return append(args, "-profile:v", "main", "-allow_sw", "1")
+	case "hevc_videotoolbox":
+		return append(args, "-allow_sw", "0")
+	case "libx265":
+		return append(args,
+			"-preset", "veryfast",
+			"-pix_fmt", "yuv420p",
+		)
 	default:
 		return args
 	}
 }
 
 func transcodeVideoSettings(accel, device string, profile transcodeProfile) (codec string, filters string) {
+	return transcodeVideoSettingsForCodec(accel, device, profile, transcodeCodecH264)
+}
+
+func transcodeVideoSettingsForCodec(accel, device string, profile transcodeProfile, preferredCodec string) (codec string, filters string) {
 	scaleFilter := "scale=w=" + strconv.Itoa(profile.MaxWidth) + ":h=" + strconv.Itoa(profile.MaxHeight) + ":force_original_aspect_ratio=decrease:force_divisible_by=2"
+
+	if normalizeTranscodeCodec(preferredCodec) == transcodeCodecHEVC {
+		switch accel {
+		case "auto":
+			if hasDefaultVAAPIDevice() {
+				return "hevc_vaapi", scaleFilter + ",format=nv12,hwupload"
+			}
+			return "libx265", scaleFilter
+		case "vaapi":
+			return "hevc_vaapi", scaleFilter + ",format=nv12,hwupload"
+		case "qsv":
+			return "hevc_qsv", scaleFilter + ",format=nv12"
+		case "nvenc":
+			return "hevc_nvenc", scaleFilter
+		case "videotoolbox":
+			return "hevc_videotoolbox", scaleFilter
+		case "v4l2m2m":
+			return "hevc_v4l2m2m", scaleFilter
+		default:
+			return "libx265", scaleFilter
+		}
+	}
 
 	switch accel {
 	case "auto":
@@ -792,15 +925,15 @@ func transcodeVideoSettings(accel, device string, profile transcodeProfile) (cod
 
 func effectiveTranscodeHardwareAccel(videoCodec string) string {
 	switch videoCodec {
-	case "h264_vaapi":
+	case "h264_vaapi", "hevc_vaapi":
 		return "vaapi"
-	case "h264_qsv":
+	case "h264_qsv", "hevc_qsv":
 		return "qsv"
-	case "h264_nvenc":
+	case "h264_nvenc", "hevc_nvenc":
 		return "nvenc"
-	case "h264_videotoolbox":
+	case "h264_videotoolbox", "hevc_videotoolbox":
 		return "videotoolbox"
-	case "h264_v4l2m2m":
+	case "h264_v4l2m2m", "hevc_v4l2m2m":
 		return "v4l2m2m"
 	default:
 		return "none"
@@ -831,10 +964,14 @@ func effectiveFFmpegPath(configuredPath string) string {
 }
 
 func probeTranscodeEncoder(parent context.Context, ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, accel string) (bool, string) {
+	return probeTranscodeEncoderCodec(parent, ffmpegPath, cfg, profile, accel, transcodeCodecH264)
+}
+
+func probeTranscodeEncoderCodec(parent context.Context, ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string) (bool, string) {
 	ctx, cancel := context.WithTimeout(parent, 8*time.Second)
 	defer cancel()
 
-	args := buildFFmpegTranscodeProbeArgs(cfg, profile, accel)
+	args := buildFFmpegTranscodeProbeArgsWithCodec(cfg, profile, accel, preferredCodec)
 	out, err := exec.CommandContext(ctx, ffmpegPath, args...).CombinedOutput()
 	if ctx.Err() != nil {
 		return false, "probe timed out"
@@ -850,6 +987,10 @@ func probeTranscodeEncoder(parent context.Context, ffmpegPath string, cfg config
 }
 
 func buildFFmpegTranscodeProbeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string) []string {
+	return buildFFmpegTranscodeProbeArgsWithCodec(cfg, profile, accel, transcodeCodecH264)
+}
+
+func buildFFmpegTranscodeProbeArgsWithCodec(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "error",
@@ -862,7 +1003,7 @@ func buildFFmpegTranscodeProbeArgs(cfg config.TranscodingConfig, profile transco
 		"-frames:v", "8",
 	)
 
-	videoCodec, filters := transcodeVideoSettings(accel, cfg.HardwareDevice, profile)
+	videoCodec, filters := transcodeVideoSettingsForCodec(accel, cfg.HardwareDevice, profile, preferredCodec)
 	if filters != "" {
 		args = append(args, "-vf", filters)
 	}
@@ -876,6 +1017,38 @@ func buildFFmpegTranscodeProbeArgs(cfg config.TranscodingConfig, profile transco
 	args = appendVideoEncoderOptions(args, videoCodec, profile)
 	args = append(args, "-f", "null", "-")
 	return args
+}
+
+func normalizeTranscodeCodec(codec string) string {
+	switch strings.ToLower(strings.TrimSpace(codec)) {
+	case "hevc", "h265", "h.265", "x265":
+		return transcodeCodecHEVC
+	default:
+		return transcodeCodecH264
+	}
+}
+
+func requestedTranscodeCodec(r *http.Request) string {
+	if r == nil {
+		return transcodeCodecH264
+	}
+	codec := r.URL.Query().Get("codec")
+	if codec == "" {
+		codec = r.URL.Query().Get("video_codec")
+	}
+	return normalizeTranscodeCodec(codec)
+}
+
+func requestedFallbackTranscodeProfile(r *http.Request) (string, transcodeProfile, bool) {
+	if r == nil {
+		return "", transcodeProfile{}, false
+	}
+	profileID := strings.TrimSpace(r.URL.Query().Get("fallback_profile"))
+	profile, ok := transcodeProfiles[profileID]
+	if !ok {
+		return "", transcodeProfile{}, false
+	}
+	return profileID, profile, true
 }
 
 func truncateProbeReason(reason string) string {

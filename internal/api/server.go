@@ -130,7 +130,8 @@ func NewServer(
 	if configManager != nil {
 		configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 			if taterTVGuideConfigChanged(oldConfig, newConfig) {
-				taterTVResetGuide()
+				taterTVResetGuideForConfig(oldConfig)
+				taterTVResetGuideForConfig(newConfig)
 				taterTVResetHLS()
 			}
 		})

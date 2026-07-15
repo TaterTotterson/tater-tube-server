@@ -104,6 +104,7 @@ func (h *TaterTVStreamHandler) serveChannel(w http.ResponseWriter, r *http.Reque
 	}
 
 	profileID, profile := taterTVRequestedTranscodeProfile(cfg, r)
+	requestedCodec := requestedTranscodeCodec(r)
 	requestedAccel := strings.TrimSpace(r.URL.Query().Get("hwaccel"))
 	if requestedAccel == "" {
 		requestedAccel = cfg.Transcoding.HardwareAcceleration
@@ -112,12 +113,19 @@ func (h *TaterTVStreamHandler) serveChannel(w http.ResponseWriter, r *http.Reque
 		requestedAccel = "none"
 	}
 	transcoder := &StreamHandler{configGetter: h.configGetter, streamTracker: h.streamTracker}
-	accel, selectedHardwareDevice := transcoder.selectTranscodeAcceleration(r.Context(), ffmpegPath, cfg.Transcoding, profile, requestedAccel)
+	accel, selectedHardwareDevice, videoCodecPreference := transcoder.selectTranscodeAccelerationAndCodec(r.Context(), ffmpegPath, cfg.Transcoding, profile, requestedAccel, requestedCodec)
+	if requestedCodec == transcodeCodecHEVC && videoCodecPreference != transcodeCodecHEVC {
+		if fallbackID, fallbackProfile, ok := requestedFallbackTranscodeProfile(r); ok {
+			profileID = fallbackID
+			profile = fallbackProfile
+			accel, selectedHardwareDevice = transcoder.selectTranscodeAcceleration(r.Context(), ffmpegPath, cfg.Transcoding, profile, requestedAccel)
+		}
+	}
 	transcodeCfg := cfg.Transcoding
 	if selectedHardwareDevice != "" {
 		transcodeCfg.HardwareDevice = selectedHardwareDevice
 	}
-	videoCodec, _ := transcodeVideoSettings(accel, transcodeCfg.HardwareDevice, profile)
+	videoCodec, _ := transcodeVideoSettingsForCodec(accel, transcodeCfg.HardwareDevice, profile, videoCodecPreference)
 	effectiveAccel := effectiveTranscodeHardwareAccel(videoCodec)
 	hardwareDevice := effectiveTranscodeHardwareDevice(effectiveAccel, transcodeCfg.HardwareDevice)
 
@@ -201,7 +209,7 @@ func (h *TaterTVStreamHandler) serveChannel(w http.ResponseWriter, r *http.Reque
 				logoFile = resolvedLogo
 			}
 		}
-		err = runTaterTVChannelSegments(streamReq.Context(), ffmpegPath, transcodeCfg, profile, accel, writer, h.streamTracker, stream, channel, items, logoFile)
+		err = runTaterTVChannelSegments(streamReq.Context(), ffmpegPath, transcodeCfg, profile, accel, videoCodecPreference, writer, h.streamTracker, stream, channel, items, logoFile)
 		if err != nil && streamReq.Context().Err() == nil {
 			consecutiveFailures++
 			slog.WarnContext(streamReq.Context(), "Tube TV channel run failed",
@@ -227,7 +235,7 @@ type taterTVStreamItem struct {
 	FullDuration    float64
 }
 
-func runTaterTVChannelSegments(ctx context.Context, ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, accel string, writer taterTVStreamWriter, tracker *StreamTracker, stream *nzbfilesystem.ActiveStream, channel taterTVChannel, items []taterTVStreamItem, logoFile string) error {
+func runTaterTVChannelSegments(ctx context.Context, ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, writer taterTVStreamWriter, tracker *StreamTracker, stream *nzbfilesystem.ActiveStream, channel taterTVChannel, items []taterTVStreamItem, logoFile string) error {
 	if len(items) == 0 {
 		return fmt.Errorf("no channel segments")
 	}
@@ -240,7 +248,8 @@ func runTaterTVChannelSegments(ctx context.Context, ffmpegPath string, cfg confi
 		if tracker != nil && stream != nil {
 			tracker.SetMediaInfo(stream.ID, item.FullDuration, item.StartSeconds)
 		}
-		args := buildTaterTVChannelTranscodeArgs(cfg, profile, accel, item.Path, item.StartSeconds, item.DurationSeconds, logoFile, channel.LogoPosition)
+		args := buildTaterTVChannelTranscodeArgsWithCodec(cfg, profile, accel, preferredCodec, item.Path, item.StartSeconds, item.DurationSeconds, logoFile, channel.LogoPosition)
+		videoCodec, _ := transcodeVideoSettingsForCodec(accel, cfg.HardwareDevice, profile, preferredCodec)
 		var stderr limitedBuffer
 		cmd := exec.CommandContext(ctx, ffmpegPath, args...)
 		cmd.Stdout = writer
@@ -253,7 +262,9 @@ func runTaterTVChannelSegments(ctx context.Context, ffmpegPath string, cfg confi
 			"kind", item.Kind,
 			"path", item.Path,
 			"start_seconds", item.StartSeconds,
-			"duration_seconds", item.DurationSeconds)
+			"duration_seconds", item.DurationSeconds,
+			"profile", profile.Name,
+			"video_codec", videoCodec)
 		if err := cmd.Run(); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -509,6 +520,10 @@ func taterTVResolveSchedulePath(cfg *config.Config, row map[string]any) (string,
 }
 
 func buildTaterTVChannelTranscodeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, inputPath string, startSeconds, durationSeconds float64, logoFile, logoPosition string) []string {
+	return buildTaterTVChannelTranscodeArgsWithCodec(cfg, profile, accel, transcodeCodecH264, inputPath, startSeconds, durationSeconds, logoFile, logoPosition)
+}
+
+func buildTaterTVChannelTranscodeArgsWithCodec(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, inputPath string, startSeconds, durationSeconds float64, logoFile, logoPosition string) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
@@ -528,7 +543,7 @@ func buildTaterTVChannelTranscodeArgs(cfg config.TranscodingConfig, profile tran
 		args = append(args, "-t", strconv.FormatFloat(durationSeconds, 'f', 3, 64))
 	}
 
-	videoCodec, filters := transcodeVideoSettings(accel, cfg.HardwareDevice, profile)
+	videoCodec, filters := transcodeVideoSettingsForCodec(accel, cfg.HardwareDevice, profile, preferredCodec)
 	if logoFile != "" {
 		args = append(args,
 			"-filter_complex", taterTVChannelLogoFilter(filters, profile, logoPosition),

@@ -46,6 +46,7 @@ type taterTVHLSSession struct {
 	transcodeCfg     config.TranscodingConfig
 	profile          transcodeProfile
 	accel            string
+	preferredCodec   string
 	effectiveAccel   string
 	hardwareDevice   string
 	videoCodec       string
@@ -121,7 +122,7 @@ func (h *TaterTVStreamHandler) serveHLSSegment(w http.ResponseWriter, r *http.Re
 	}
 	profileID, _ := taterTVRequestedTranscodeProfile(cfg, r)
 	requestedAccel := h.requestedHLSAccel(cfg, r)
-	key := taterTVHLSKey(number, sessionID, profileID, requestedAccel)
+	key := taterTVHLSKey(number, sessionID, profileID, requestedAccel, requestedTranscodeCodec(r))
 	session := globalTaterTVHLS.get(key)
 	if session == nil {
 		http.Error(w, "HLS session not found", http.StatusNotFound)
@@ -178,16 +179,24 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 	}
 
 	profileID, profile := taterTVRequestedTranscodeProfile(cfg, r)
+	requestedCodec := requestedTranscodeCodec(r)
 	requestedAccel := h.requestedHLSAccel(cfg, r)
 	transcoder := &StreamHandler{configGetter: h.configGetter, streamTracker: h.streamTracker}
-	accel, selectedHardwareDevice := transcoder.selectTranscodeAcceleration(r.Context(), ffmpegPath, cfg.Transcoding, profile, requestedAccel)
+	accel, selectedHardwareDevice, videoCodecPreference := transcoder.selectTranscodeAccelerationAndCodec(r.Context(), ffmpegPath, cfg.Transcoding, profile, requestedAccel, requestedCodec)
+	if requestedCodec == transcodeCodecHEVC && videoCodecPreference != transcodeCodecHEVC {
+		if fallbackID, fallbackProfile, ok := requestedFallbackTranscodeProfile(r); ok {
+			profileID = fallbackID
+			profile = fallbackProfile
+			accel, selectedHardwareDevice = transcoder.selectTranscodeAcceleration(r.Context(), ffmpegPath, cfg.Transcoding, profile, requestedAccel)
+		}
+	}
 	transcodeCfg := cfg.Transcoding
 	if selectedHardwareDevice != "" {
 		transcodeCfg.HardwareDevice = selectedHardwareDevice
 	}
 
 	publicID := taterTVHLSPublicID(r, guide.StartedAt)
-	key := taterTVHLSKey(channel.Number, publicID, profileID, requestedAccel)
+	key := taterTVHLSKey(channel.Number, publicID, profileID, requestedAccel, videoCodecPreference)
 	session := globalTaterTVHLS.get(key)
 	if session != nil {
 		if session.finished() {
@@ -208,7 +217,7 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 
 	sessionRoot := filepath.Join(taterTVHLSRoot(cfg), taterTVSafeName(key, "channel"))
 	ctx, cancel := context.WithCancel(context.Background())
-	videoCodec, _ := transcodeVideoSettings(accel, transcodeCfg.HardwareDevice, profile)
+	videoCodec, _ := transcodeVideoSettingsForCodec(accel, transcodeCfg.HardwareDevice, profile, videoCodecPreference)
 	effectiveAccel := effectiveTranscodeHardwareAccel(videoCodec)
 	hardwareDevice := effectiveTranscodeHardwareDevice(effectiveAccel, transcodeCfg.HardwareDevice)
 	session = &taterTVHLSSession{
@@ -222,6 +231,7 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 		transcodeCfg:     transcodeCfg,
 		profile:          profile,
 		accel:            accel,
+		preferredCodec:   videoCodecPreference,
 		effectiveAccel:   effectiveAccel,
 		hardwareDevice:   hardwareDevice,
 		videoCodec:       videoCodec,
@@ -410,7 +420,7 @@ func (s *taterTVHLSSession) transcodeProgramSegments(ctx context.Context, items 
 		}
 		playlistPath := filepath.Join(itemDir, "index.m3u8")
 		segmentPattern := filepath.Join(itemDir, "seg-%05d.ts")
-		args := buildTaterTVChannelHLSArgs(s.transcodeCfg, s.profile, s.accel, item.Path, item.StartSeconds, item.DurationSeconds, logoFile, s.channel.LogoPosition, playlistPath, segmentPattern)
+		args := buildTaterTVChannelHLSArgsWithCodec(s.transcodeCfg, s.profile, s.accel, s.preferredCodec, item.Path, item.StartSeconds, item.DurationSeconds, logoFile, s.channel.LogoPosition, playlistPath, segmentPattern)
 		var stderr limitedBuffer
 		cmd := exec.CommandContext(ctx, s.ffmpegPath, args...)
 		cmd.Stderr = &stderr
@@ -426,7 +436,8 @@ func (s *taterTVHLSSession) transcodeProgramSegments(ctx context.Context, items 
 			"start_seconds", item.StartSeconds,
 			"duration_seconds", item.DurationSeconds,
 			"profile", s.profileID,
-			"hardware_acceleration", s.accel)
+			"hardware_acceleration", s.accel,
+			"video_codec", s.videoCodec)
 
 		if err := cmd.Start(); err != nil {
 			failed++
@@ -549,6 +560,7 @@ func (s *taterTVHLSSession) segmentURI(relPath, playerToken string) string {
 	q.Set("player_token", playerToken)
 	q.Set("profile", s.profileID)
 	q.Set("hwaccel", s.requestedAccel)
+	q.Set("codec", normalizeTranscodeCodec(s.preferredCodec))
 	return u + "?" + q.Encode()
 }
 
@@ -671,6 +683,10 @@ func parseTaterTVHLSPlaylist(path string) ([]taterTVParsedHLSSegment, error) {
 }
 
 func buildTaterTVChannelHLSArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, inputPath string, startSeconds, durationSeconds float64, logoFile, logoPosition, outputPlaylist, segmentPattern string) []string {
+	return buildTaterTVChannelHLSArgsWithCodec(cfg, profile, accel, transcodeCodecH264, inputPath, startSeconds, durationSeconds, logoFile, logoPosition, outputPlaylist, segmentPattern)
+}
+
+func buildTaterTVChannelHLSArgsWithCodec(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, inputPath string, startSeconds, durationSeconds float64, logoFile, logoPosition, outputPlaylist, segmentPattern string) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
@@ -689,7 +705,7 @@ func buildTaterTVChannelHLSArgs(cfg config.TranscodingConfig, profile transcodeP
 	if durationSeconds > 0 {
 		args = append(args, "-t", strconv.FormatFloat(durationSeconds, 'f', 3, 64))
 	}
-	videoCodec, filters := transcodeVideoSettings(accel, cfg.HardwareDevice, profile)
+	videoCodec, filters := transcodeVideoSettingsForCodec(accel, cfg.HardwareDevice, profile, preferredCodec)
 	if logoFile != "" {
 		args = append(args,
 			"-filter_complex", taterTVChannelLogoFilter(filters, profile, logoPosition),
@@ -756,8 +772,8 @@ func taterTVHLSPublicID(r *http.Request, guideStartedAt time.Time) string {
 	return taterTVSafeName(session, "live")
 }
 
-func taterTVHLSKey(number, sessionID, profileID, requestedAccel string) string {
-	raw := strings.Join([]string{number, sessionID, profileID, requestedAccel}, "|")
+func taterTVHLSKey(number, sessionID, profileID, requestedAccel, preferredCodec string) string {
+	raw := strings.Join([]string{number, sessionID, profileID, requestedAccel, normalizeTranscodeCodec(preferredCodec)}, "|")
 	sum := sha1.Sum([]byte(raw))
 	return number + "-" + hex.EncodeToString(sum[:])[:16]
 }

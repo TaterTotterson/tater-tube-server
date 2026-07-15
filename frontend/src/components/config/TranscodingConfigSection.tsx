@@ -192,16 +192,17 @@ export function TranscodingConfigSection({
 						<span className="label-text font-bold text-base-content text-sm">
 							Fallback Profile
 						</span>
-						<select
-							className="select select-bordered mt-2 w-full"
-							value={transcodingData.profile || "crt_480p"}
-							disabled={isReadOnly}
-							onChange={(e) => handleTranscodingChange("profile", e.target.value)}
-						>
-							<option value="crt_480p">CRT 480p</option>
-							<option value="hdmi_1080p">HDMI 1080p</option>
-							<option value="hdmi_4k">HDMI 4K</option>
-						</select>
+							<select
+								className="select select-bordered mt-2 w-full"
+								value={transcodingData.profile || "crt_480p"}
+								disabled={isReadOnly}
+								onChange={(e) => handleTranscodingChange("profile", e.target.value)}
+							>
+								<option value="crt_480p">CRT 480p</option>
+								<option value="hdmi_720p">HDMI 720p</option>
+								<option value="hdmi_1080p">HDMI 1080p</option>
+								<option value="hdmi_4k">HDMI 4K</option>
+							</select>
 						<span className="mt-2 text-[11px] text-base-content/50">
 							Used only when a player or manual stream URL does not request a profile.
 						</span>
