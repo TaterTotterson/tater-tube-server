@@ -1652,7 +1652,13 @@ func taterLocalDurationSeconds(cfg *config.Config, path string) float64 {
 	if cfg != nil {
 		ffmpegPath = effectiveFFmpegPath(cfg.Transcoding.FFmpegPath)
 	}
-	durationSeconds := probeMediaDurationSeconds(context.Background(), ffmpegPath, absPath)
+	durationSeconds, probeErr := probeMediaDurationSecondsWithError(context.Background(), ffmpegPath, absPath)
+	if probeErr != nil {
+		slog.Warn("Unable to read local media duration",
+			"path", absPath,
+			"ffmpeg_path", ffmpegPath,
+			"error", probeErr)
+	}
 
 	taterLocalDurationCache.Lock()
 	taterLocalDurationCache.Items[cacheKey] = taterLocalDurationCacheEntry{

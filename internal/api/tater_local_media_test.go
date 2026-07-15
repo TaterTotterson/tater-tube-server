@@ -557,6 +557,42 @@ func boolPtr(value bool) *bool {
 	return &value
 }
 
+func fakeFFmpegWithProbe(t *testing.T, configDir string, probeScript string) string {
+	t.Helper()
+	binDir := filepath.Join(configDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegPath := filepath.Join(binDir, "ffmpeg")
+	ffprobePath := filepath.Join(binDir, "ffprobe")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ffprobePath, []byte(probeScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return ffmpegPath
+}
+
+func TestEffectiveFFprobePathFindsTaterSibling(t *testing.T) {
+	binDir := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegPath := filepath.Join(binDir, "tater-ffmpeg")
+	ffprobePath := filepath.Join(binDir, "tater-ffprobe")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ffprobePath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := effectiveFFprobePath(ffmpegPath); got != ffprobePath {
+		t.Fatalf("expected sibling tater-ffprobe, got %q want %q", got, ffprobePath)
+	}
+}
+
 func TestTaterBuildTVLineupUsesServerLocalMediaAndCommercials(t *testing.T) {
 	configDir := t.TempDir()
 	mediaRoot := filepath.Join(configDir, "media")
@@ -578,6 +614,7 @@ func TestTaterBuildTVLineupUsesServerLocalMediaAndCommercials(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig(configDir)
+	cfg.Transcoding.FFmpegPath = fakeFFmpegWithProbe(t, configDir, "#!/bin/sh\nprintf '600.000\\n'\n")
 	cfg.LocalMedia.Enabled = boolPtr(true)
 	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
 		ID:          "tv",
@@ -630,18 +667,7 @@ func TestTaterBuildTVLineupUsesServerLocalMediaAndCommercials(t *testing.T) {
 
 func TestTaterTVCommercialCategoriesProbeDurations(t *testing.T) {
 	configDir := t.TempDir()
-	binDir := filepath.Join(configDir, "bin")
-	if err := os.MkdirAll(binDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	ffmpegPath := filepath.Join(binDir, "ffmpeg")
-	ffprobePath := filepath.Join(binDir, "ffprobe")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(ffprobePath, []byte("#!/bin/sh\nprintf '12.500\\n11.000\\n'\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
+	ffmpegPath := fakeFFmpegWithProbe(t, configDir, "#!/bin/sh\nprintf '12.500\\n11.000\\n'\n")
 
 	commercialRoot := filepath.Join(configDir, "commercials")
 	commercialDir := filepath.Join(commercialRoot, "retro-ads")
@@ -669,6 +695,52 @@ func TestTaterTVCommercialCategoriesProbeDurations(t *testing.T) {
 	}
 }
 
+func TestTaterTVUnknownDurationsAreNotScheduled(t *testing.T) {
+	configDir := t.TempDir()
+	mediaRoot := filepath.Join(configDir, "movies")
+	movieDir := filepath.Join(mediaRoot, "Unknown.Movie.2024")
+	if err := os.MkdirAll(movieDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(movieDir, "Unknown.Movie.2024.mkv"), []byte("not real media"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig(configDir)
+	cfg.Transcoding.FFmpegPath = fakeFFmpegWithProbe(t, configDir, "#!/bin/sh\necho probe failed >&2\nexit 1\n")
+	cfg.LocalMedia.Enabled = boolPtr(true)
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID:          "movies",
+		Name:        "Movies",
+		LibraryType: "movies",
+		Paths:       []string{mediaRoot},
+		Enabled:     boolPtr(true),
+	}}
+	cfg.TubeTV.AutoChannels = boolPtr(false)
+	cfg.TubeTV.CustomChannels = []config.TubeTVCustomChannel{{
+		ID:    "movie-channel",
+		Title: "Movie Channel",
+		Sources: []config.TubeTVCustomSource{{
+			CategoryID:  "movies",
+			SourceIndex: -1,
+		}},
+	}}
+
+	channels, err := taterBuildTVLineup(cfg, "http://server", "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(channels) != 0 {
+		t.Fatalf("unknown-duration media should not create fallback Tube TV channels: %#v", channels)
+	}
+	if duration := taterTVDuration(taterUsenetItem{Title: "Unknown"}, "movie"); duration != 0 {
+		t.Fatalf("movie fallback duration should be disabled, got %f", duration)
+	}
+	if duration := taterTVDuration(taterUsenetItem{Title: "Unknown"}, "episode"); duration != 0 {
+		t.Fatalf("episode fallback duration should be disabled, got %f", duration)
+	}
+}
+
 func TestTaterTVGuideBuildsAndExtendsSharedSchedule(t *testing.T) {
 	taterTVResetGuide()
 	defer taterTVResetGuide()
@@ -684,6 +756,7 @@ func TestTaterTVGuideBuildsAndExtendsSharedSchedule(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig(configDir)
+	cfg.Transcoding.FFmpegPath = fakeFFmpegWithProbe(t, configDir, "#!/bin/sh\nprintf '7200.000\\n'\n")
 	cfg.LocalMedia.Enabled = boolPtr(true)
 	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
 		ID:          "movies",
