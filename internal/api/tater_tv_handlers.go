@@ -1,6 +1,9 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -104,6 +107,7 @@ type taterTVGuideCacheEntry struct {
 	GeneratedAt  time.Time        `json:"generatedAt"`
 	UpdatedAt    time.Time        `json:"updatedAt"`
 	PlannedUntil time.Time        `json:"plannedUntil"`
+	Fingerprint  string           `json:"fingerprint,omitempty"`
 }
 
 type tubeTVGuideResponse struct {
@@ -120,6 +124,8 @@ const (
 	taterTVGuideHorizon         = 12 * time.Hour
 	taterTVGuideRefillThreshold = 2 * time.Hour
 	taterTVGuidePlannerInterval = 5 * time.Minute
+	taterTVGuideCacheVersion    = 1
+	taterTVGuideCacheFile       = "tube-tv-guide-cache.json"
 )
 
 var (
@@ -144,6 +150,7 @@ func (s *Server) handleTaterTVLineup(c *fiber.Ctx) error {
 		"channels":     taterTVPersonalizeChannels(guide.Channels, baseURL, playerToken),
 		"startedAt":    guide.StartedAt,
 		"plannedUntil": guide.PlannedUntil,
+		"serverNow":    time.Now(),
 		"settings": fiber.Map{
 			"enabled":               cfg.TubeTV.Enabled == nil || *cfg.TubeTV.Enabled,
 			"auto_channels":         cfg.TubeTV.AutoChannels == nil || *cfg.TubeTV.AutoChannels,
@@ -174,7 +181,8 @@ func (s *Server) handleTubeTVGuide(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleTubeTVGuideRebuild(c *fiber.Ctx) error {
-	taterTVResetGuide()
+	cfg := s.configManager.GetConfig()
+	taterTVResetGuideForConfig(cfg)
 	return s.handleTubeTVGuide(c)
 }
 
@@ -276,7 +284,7 @@ func (s *Server) handleTubeTVCreateCommercialCategory(c *fiber.Ctx) error {
 	if err := os.MkdirAll(filepath.Join(taterTVCommercialRoot(cfg), name), 0755); err != nil {
 		return RespondInternalError(c, "Failed to create commercial category", err.Error())
 	}
-	taterTVResetGuide()
+	taterTVResetGuideForConfig(cfg)
 	return s.handleTubeTVCommercialLibrary(c)
 }
 
@@ -322,7 +330,7 @@ func (s *Server) handleTubeTVUploadCommercials(c *fiber.Ctx) error {
 			return RespondInternalError(c, "Failed to finish commercial upload", closeErr.Error())
 		}
 	}
-	taterTVResetGuide()
+	taterTVResetGuideForConfig(cfg)
 	return s.handleTubeTVCommercialLibrary(c)
 }
 
@@ -339,7 +347,7 @@ func (s *Server) handleTubeTVDeleteCommercialFile(c *fiber.Ctx) error {
 	if err := os.Remove(filepath.Join(taterTVCommercialRoot(cfg), category, name)); err != nil && !os.IsNotExist(err) {
 		return RespondInternalError(c, "Failed to delete commercial", err.Error())
 	}
-	taterTVResetGuide()
+	taterTVResetGuideForConfig(cfg)
 	return s.handleTubeTVCommercialLibrary(c)
 }
 
@@ -355,7 +363,7 @@ func (s *Server) handleTubeTVDeleteCommercialCategory(c *fiber.Ctx) error {
 	if err := os.RemoveAll(filepath.Join(taterTVCommercialRoot(cfg), category)); err != nil {
 		return RespondInternalError(c, "Failed to delete commercial category", err.Error())
 	}
-	taterTVResetGuide()
+	taterTVResetGuideForConfig(cfg)
 	return s.handleTubeTVCommercialLibrary(c)
 }
 
@@ -1215,6 +1223,19 @@ func taterTVEnsureGuide(cfg *config.Config, baseURL string, now time.Time) (tate
 	if now.IsZero() {
 		now = time.Now()
 	}
+	fingerprint := taterTVGuideFingerprint(cfg)
+	if taterTVGuideCache != nil && taterTVGuideCache.Fingerprint != "" && taterTVGuideCache.Fingerprint != fingerprint {
+		taterTVGuideCache = nil
+	}
+	if taterTVGuideCache == nil {
+		if cached, ok := taterTVLoadGuideCache(cfg, fingerprint); ok {
+			taterTVGuideCache = cached
+			slog.Info("Loaded Tube TV guide cache",
+				"channels", len(cached.Channels),
+				"started_at", cached.StartedAt,
+				"planned_until", cached.PlannedUntil)
+		}
+	}
 	if taterTVGuideCache == nil || taterTVGuideCache.StartedAt.IsZero() || now.After(taterTVGuideCache.PlannedUntil.Add(-taterTVGuideRefillThreshold)) {
 		targetEndSeconds := taterTVGuideHorizon.Seconds()
 		var existing []taterTVChannel
@@ -1241,13 +1262,17 @@ func taterTVEnsureGuide(cfg *config.Config, baseURL string, now time.Time) (tate
 			}
 			plannedUntil = startedAt.Add(time.Duration(minDuration * float64(time.Second)))
 		}
-		taterTVGuideCache = &taterTVGuideCacheEntry{
+		entry := taterTVGuideCacheEntry{
 			Channels:     channels,
 			StartedAt:    startedAt,
 			GeneratedAt:  generatedAt,
 			UpdatedAt:    now,
 			PlannedUntil: plannedUntil,
+			Fingerprint:  fingerprint,
 		}
+		entry = taterTVSanitizeGuide(entry)
+		taterTVGuideCache = &entry
+		taterTVSaveGuideCache(cfg, entry)
 	}
 	return taterTVCloneGuide(*taterTVGuideCache), nil
 }
@@ -1256,6 +1281,123 @@ func taterTVResetGuide() {
 	taterTVGuideMu.Lock()
 	defer taterTVGuideMu.Unlock()
 	taterTVGuideCache = nil
+}
+
+func taterTVResetGuideForConfig(cfg *config.Config) {
+	taterTVResetGuide()
+	taterTVDeleteGuideCache(cfg)
+}
+
+type taterTVGuideDiskCache struct {
+	Version     int                    `json:"version"`
+	Fingerprint string                 `json:"fingerprint"`
+	Entry       taterTVGuideCacheEntry `json:"entry"`
+}
+
+func taterTVGuideFingerprint(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	payload := struct {
+		Version    int                     `json:"version"`
+		TubeTV     config.TubeTVConfig     `json:"tubeTV"`
+		LocalMedia config.LocalMediaConfig `json:"localMedia"`
+	}{
+		Version:    taterTVGuideCacheVersion,
+		TubeTV:     cfg.TubeTV,
+		LocalMedia: cfg.LocalMedia,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func taterTVGuideCachePath(cfg *config.Config) string {
+	dir := ""
+	if cfg != nil {
+		dir = strings.TrimSpace(cfg.RClone.CacheDir)
+		if dir == "" && strings.TrimSpace(cfg.Metadata.RootPath) != "" {
+			dir = filepath.Join(cfg.Metadata.RootPath, "cache")
+		}
+	}
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	return filepath.Join(filepath.Clean(dir), taterTVGuideCacheFile)
+}
+
+func taterTVLoadGuideCache(cfg *config.Config, fingerprint string) (*taterTVGuideCacheEntry, bool) {
+	path := taterTVGuideCachePath(cfg)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	var disk taterTVGuideDiskCache
+	if err := json.Unmarshal(data, &disk); err != nil {
+		slog.Warn("Ignoring invalid Tube TV guide cache", "path", path, "error", err)
+		return nil, false
+	}
+	if disk.Version != taterTVGuideCacheVersion || disk.Fingerprint != fingerprint {
+		return nil, false
+	}
+	if disk.Entry.StartedAt.IsZero() || disk.Entry.PlannedUntil.IsZero() {
+		return nil, false
+	}
+	disk.Entry.Fingerprint = fingerprint
+	entry := taterTVSanitizeGuide(disk.Entry)
+	return &entry, true
+}
+
+func taterTVSaveGuideCache(cfg *config.Config, entry taterTVGuideCacheEntry) {
+	path := taterTVGuideCachePath(cfg)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		slog.Warn("Unable to create Tube TV guide cache directory", "path", path, "error", err)
+		return
+	}
+	entry = taterTVSanitizeGuide(entry)
+	disk := taterTVGuideDiskCache{
+		Version:     taterTVGuideCacheVersion,
+		Fingerprint: entry.Fingerprint,
+		Entry:       entry,
+	}
+	data, err := json.MarshalIndent(disk, "", "  ")
+	if err != nil {
+		slog.Warn("Unable to encode Tube TV guide cache", "error", err)
+		return
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		slog.Warn("Unable to write Tube TV guide cache", "path", path, "error", err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		slog.Warn("Unable to replace Tube TV guide cache", "path", path, "error", err)
+	}
+}
+
+func taterTVDeleteGuideCache(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	path := taterTVGuideCachePath(cfg)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		slog.Warn("Unable to delete Tube TV guide cache", "path", path, "error", err)
+	}
+}
+
+func taterTVSanitizeGuide(entry taterTVGuideCacheEntry) taterTVGuideCacheEntry {
+	entry.Channels = taterTVPersonalizeChannels(entry.Channels, "", "")
+	for channelIndex := range entry.Channels {
+		for rowIndex := range entry.Channels[channelIndex].Schedule {
+			delete(entry.Channels[channelIndex].Schedule[rowIndex], "streamUrl")
+			delete(entry.Channels[channelIndex].Schedule[rowIndex], "url")
+		}
+	}
+	return entry
 }
 
 func taterTVGuideResponse(entry taterTVGuideCacheEntry, baseURL, playerToken string) tubeTVGuideResponse {

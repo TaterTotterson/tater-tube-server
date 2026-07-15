@@ -804,6 +804,72 @@ func TestTaterTVGuideBuildsAndExtendsSharedSchedule(t *testing.T) {
 	}
 }
 
+func TestTaterTVGuidePersistsAcrossMemoryReset(t *testing.T) {
+	taterTVResetGuide()
+
+	configDir := t.TempDir()
+	mediaRoot := filepath.Join(configDir, "movies")
+	movieDir := filepath.Join(mediaRoot, "Saved.Guide.Movie.2024")
+	if err := os.MkdirAll(movieDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(movieDir, "Saved.Guide.Movie.2024.mkv"), []byte("movie"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig(configDir)
+	cfg.Transcoding.FFmpegPath = fakeFFmpegWithProbe(t, configDir, "#!/bin/sh\nprintf '7200.000\\n'\n")
+	cfg.LocalMedia.Enabled = boolPtr(true)
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID:          "movies",
+		Name:        "Movies",
+		LibraryType: "movies",
+		Paths:       []string{mediaRoot},
+		Enabled:     boolPtr(true),
+	}}
+	cfg.TubeTV.AutoChannels = boolPtr(false)
+	cfg.TubeTV.CustomChannels = []config.TubeTVCustomChannel{{
+		ID:    "movie-channel",
+		Title: "Movie Channel",
+		Sources: []config.TubeTVCustomSource{{
+			CategoryID:  "movies",
+			SourceIndex: -1,
+		}},
+	}}
+	defer taterTVResetGuideForConfig(cfg)
+
+	now := time.Now().Truncate(time.Second)
+	guide, err := taterTVEnsureGuide(cfg, "http://server", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(guide.Channels) != 1 {
+		t.Fatalf("expected one guide channel, got %#v", guide.Channels)
+	}
+	if _, err := os.Stat(taterTVGuideCachePath(cfg)); err != nil {
+		t.Fatalf("expected guide cache file: %v", err)
+	}
+
+	if err := os.WriteFile(cfg.Transcoding.FFmpegPath, []byte("#!/bin/sh\necho should not probe >&2\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	taterTVResetGuide()
+
+	loaded, err := taterTVEnsureGuide(cfg, "http://server", now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.StartedAt != guide.StartedAt {
+		t.Fatalf("expected persisted guide start %s, got %s", guide.StartedAt, loaded.StartedAt)
+	}
+	if len(loaded.Channels) != 1 || loaded.Channels[0].Title != "Movie Channel" {
+		t.Fatalf("expected persisted channel, got %#v", loaded.Channels)
+	}
+	if loaded.Channels[0].TotalDuration != guide.Channels[0].TotalDuration {
+		t.Fatalf("expected persisted duration %f, got %f", guide.Channels[0].TotalDuration, loaded.Channels[0].TotalDuration)
+	}
+}
+
 func TestTaterTVCurrentSchedulePositionWrapsElapsedTime(t *testing.T) {
 	startedAt := time.Now().Add(-95 * time.Second)
 	channel := taterTVChannel{
@@ -1110,6 +1176,7 @@ printf "segment-ok"
 		config.TranscodingConfig{},
 		transcodeProfiles["crt_480p"],
 		"none",
+		transcodeCodecH264,
 		taterTVStreamWriter{w: recorder},
 		nil,
 		nil,

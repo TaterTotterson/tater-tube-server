@@ -156,7 +156,7 @@ function blockClasses(row: TubeTVGuideScheduleItem, isCurrent: boolean, isCompac
 		return `${base}${padding} border-primary/25 bg-primary/12 text-primary${current}`;
 	}
 	if (kind === "episode") {
-		return `${base}${padding} border-info/30 bg-info/10 text-info-content${current}`;
+		return `${base}${padding} border-secondary/35 bg-secondary/12 text-secondary-content${current}`;
 	}
 	if (kind === "movie") {
 		return `${base}${padding} border-secondary/35 bg-secondary/12 text-secondary-content${current}`;

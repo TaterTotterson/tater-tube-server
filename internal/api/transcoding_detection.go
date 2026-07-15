@@ -365,6 +365,10 @@ func candidateDRIRenderDevices(gpus []drmGPUVendor, preferredVendors []string, c
 }
 
 func probeTranscodeEncoderDevices(ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, accel string, devices []string) (string, string, bool) {
+	return probeTranscodeEncoderDevicesCodec(ffmpegPath, cfg, profile, accel, transcodeCodecH264, devices)
+}
+
+func probeTranscodeEncoderDevicesCodec(ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, devices []string) (string, string, bool) {
 	if len(devices) == 0 {
 		return "", "no DRM render devices found", false
 	}
@@ -373,7 +377,7 @@ func probeTranscodeEncoderDevices(ffmpegPath string, cfg config.TranscodingConfi
 	for _, device := range devices {
 		probeCfg := cfg
 		probeCfg.HardwareDevice = device
-		if ok, reason := probeTranscodeEncoder(context.Background(), ffmpegPath, probeCfg, profile, accel); ok {
+		if ok, reason := probeTranscodeEncoderCodec(context.Background(), ffmpegPath, probeCfg, profile, accel, preferredCodec); ok {
 			return device, "", true
 		} else {
 			failures = append(failures, device+": "+reason)
