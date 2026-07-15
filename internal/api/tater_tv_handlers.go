@@ -1390,6 +1390,10 @@ func taterTVDeleteGuideCache(cfg *config.Config) {
 }
 
 func taterTVSanitizeGuide(entry taterTVGuideCacheEntry) taterTVGuideCacheEntry {
+	entry.StartedAt = sanitizeGuideTime(entry.StartedAt)
+	entry.GeneratedAt = sanitizeGuideTime(entry.GeneratedAt)
+	entry.UpdatedAt = sanitizeGuideTime(entry.UpdatedAt)
+	entry.PlannedUntil = sanitizeGuideTime(entry.PlannedUntil)
 	entry.Channels = taterTVPersonalizeChannels(entry.Channels, "", "")
 	for channelIndex := range entry.Channels {
 		for rowIndex := range entry.Channels[channelIndex].Schedule {
@@ -1398,6 +1402,13 @@ func taterTVSanitizeGuide(entry taterTVGuideCacheEntry) taterTVGuideCacheEntry {
 		}
 	}
 	return entry
+}
+
+func sanitizeGuideTime(value time.Time) time.Time {
+	if value.IsZero() {
+		return value
+	}
+	return value.UTC()
 }
 
 func taterTVGuideResponse(entry taterTVGuideCacheEntry, baseURL, playerToken string) tubeTVGuideResponse {
