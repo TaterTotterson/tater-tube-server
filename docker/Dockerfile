@@ -117,6 +117,9 @@ RUN apt-get update && \
         v4l-utils \
         vainfo && \
     ln -sf "/usr/lib/${media_ffmpeg_vendor}-ffmpeg/ffmpeg" /usr/local/bin/tater-ffmpeg && \
+    ln -sf "/usr/lib/${media_ffmpeg_vendor}-ffmpeg/ffprobe" /usr/local/bin/tater-ffprobe && \
+    ln -sf "/usr/lib/${media_ffmpeg_vendor}-ffmpeg/ffmpeg" /usr/local/bin/ffmpeg && \
+    ln -sf "/usr/lib/${media_ffmpeg_vendor}-ffmpeg/ffprobe" /usr/local/bin/ffprobe && \
     rm -rf /var/lib/apt/lists/*
 
 # Make binary executable

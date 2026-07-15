@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"fmt"
 	"log/slog"
 	"math"
 	"mime"
@@ -522,20 +523,38 @@ func (h *StreamHandler) setStreamMediaInfoFromPath(ctx context.Context, streamID
 }
 
 func probeMediaDurationSeconds(parent context.Context, ffmpegPath, path string) float64 {
-	ffprobePath := effectiveFFprobePath(ffmpegPath)
-	if ffprobePath == "" {
+	duration, err := probeMediaDurationSecondsWithError(parent, ffmpegPath, path)
+	if err != nil {
 		return 0
 	}
-	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
+	return duration
+}
+
+func probeMediaDurationSecondsWithError(parent context.Context, ffmpegPath, path string) (float64, error) {
+	ffprobePath := effectiveFFprobePath(ffmpegPath)
+	if ffprobePath == "" {
+		return 0, fmt.Errorf("ffprobe not found")
+	}
+	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, ffprobePath,
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, ffprobePath,
 		"-v", "error",
 		"-show_entries", "format=duration:stream=duration",
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		path,
-	).Output()
-	if err != nil || ctx.Err() != nil {
-		return 0
+	)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return 0, ctx.Err()
+	}
+	if err != nil {
+		reason := strings.TrimSpace(stderr.String())
+		if reason == "" {
+			reason = err.Error()
+		}
+		return 0, fmt.Errorf("%s: %s", filepath.Base(ffprobePath), reason)
 	}
 	duration := 0.0
 	for _, field := range strings.Fields(string(out)) {
@@ -544,7 +563,10 @@ func probeMediaDurationSeconds(parent context.Context, ffmpegPath, path string) 
 			duration = candidate
 		}
 	}
-	return duration
+	if duration <= 0 {
+		return 0, fmt.Errorf("%s returned no duration", filepath.Base(ffprobePath))
+	}
+	return duration, nil
 }
 
 func effectiveFFprobePath(ffmpegPath string) string {
@@ -562,6 +584,20 @@ func effectiveFFprobePath(ffmpegPath string) string {
 	}
 	if path, err := exec.LookPath("ffprobe"); err == nil {
 		return path
+	}
+	for _, pattern := range []string{
+		"/usr/local/bin/tater-ffprobe",
+		"/usr/lib/*-ffmpeg/ffprobe",
+	} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, candidate := range matches {
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
+		}
 	}
 	return ""
 }
