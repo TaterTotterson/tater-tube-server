@@ -1216,6 +1216,20 @@ func taterTVChannelStreamURL(baseURL, number, playerToken string) string {
 	return u.String()
 }
 
+func taterTVChannelItemURL(baseURL, number string, index int, playerToken string) string {
+	if strings.TrimSpace(baseURL) == "" || index < 0 {
+		return ""
+	}
+	u, err := url.Parse(strings.TrimRight(baseURL, "/") + "/api/tater/tv/channel/" + url.PathEscape(number) + "/item/" + strconv.Itoa(index))
+	if err != nil {
+		return ""
+	}
+	q := u.Query()
+	q.Set("player_token", playerToken)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
 func taterTVEnsureGuide(cfg *config.Config, baseURL string, now time.Time) (taterTVGuideCacheEntry, error) {
 	taterTVGuideMu.Lock()
 	defer taterTVGuideMu.Unlock()
@@ -1429,6 +1443,23 @@ func taterTVPersonalizeChannels(channels []taterTVChannel, baseURL, playerToken 
 		next := channel
 		next.StreamURL = taterTVChannelStreamURL(baseURL, channel.Number, playerToken)
 		next.Schedule = cloneTaterTVSchedule(channel.Schedule)
+		for index := range next.Schedule {
+			itemURL := taterTVChannelItemURL(baseURL, channel.Number, index, playerToken)
+			if itemURL == "" {
+				delete(next.Schedule[index], "streamUrl")
+				delete(next.Schedule[index], "url")
+				continue
+			}
+			if strings.EqualFold(rowString(next.Schedule[index], "kind"), "commercial") {
+				next.Schedule[index]["url"] = itemURL
+				delete(next.Schedule[index], "streamUrl")
+			} else {
+				next.Schedule[index]["streamUrl"] = itemURL
+				delete(next.Schedule[index], "url")
+			}
+			next.Schedule[index]["serverSeek"] = true
+			next.Schedule[index]["seekMode"] = "server"
+		}
 		out = append(out, next)
 	}
 	return out

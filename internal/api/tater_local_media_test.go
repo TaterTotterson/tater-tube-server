@@ -870,6 +870,70 @@ func TestTaterTVGuidePersistsAcrossMemoryReset(t *testing.T) {
 	}
 }
 
+func TestTaterTVPersonalizeChannelsRestoresScheduledItemURLs(t *testing.T) {
+	channels := []taterTVChannel{{
+		Number: "02",
+		Title:  "Cartoons",
+		Schedule: []map[string]any{
+			{
+				"title":       "Episode One",
+				"kind":        "episode",
+				"categoryId":  "local:tv",
+				"sourceIndex": 0,
+				"path":        "Show/Season 01/Episode One.mkv",
+			},
+			{
+				"title":      "Snack Time",
+				"kind":       "commercial",
+				"categoryId": "retro-ads",
+				"name":       "Snack Time.mp4",
+			},
+		},
+	}}
+
+	personalized := taterTVPersonalizeChannels(channels, "http://server:8080", "player token")
+	if len(personalized) != 1 || len(personalized[0].Schedule) != 2 {
+		t.Fatalf("unexpected personalized channels: %#v", personalized)
+	}
+	if !strings.Contains(personalized[0].StreamURL, "/api/tater/tv/channel/02/playlist.m3u8") {
+		t.Fatalf("expected compatibility channel URL, got %q", personalized[0].StreamURL)
+	}
+	episodeURL := rowString(personalized[0].Schedule[0], "streamUrl")
+	commercialURL := rowString(personalized[0].Schedule[1], "url")
+	if !strings.Contains(episodeURL, "/api/tater/tv/channel/02/item/0") ||
+		!strings.Contains(episodeURL, "player_token=player+token") {
+		t.Fatalf("episode item URL was not restored: %q", episodeURL)
+	}
+	if !strings.Contains(commercialURL, "/api/tater/tv/channel/02/item/1") ||
+		!strings.Contains(commercialURL, "player_token=player+token") {
+		t.Fatalf("commercial item URL was not restored: %q", commercialURL)
+	}
+	if personalized[0].Schedule[0]["serverSeek"] != true ||
+		rowString(personalized[0].Schedule[0], "seekMode") != "server" {
+		t.Fatalf("scheduled server item should use server seek: %#v", personalized[0].Schedule[0])
+	}
+	if rowString(channels[0].Schedule[0], "streamUrl") != "" {
+		t.Fatal("personalizing the guide mutated the cached schedule")
+	}
+}
+
+func TestTaterTVChannelItemFromPath(t *testing.T) {
+	number, index, ok := taterTVChannelItemFromPath("/api/tater/tv/channel/09/item/42")
+	if !ok || number != "09" || index != 42 {
+		t.Fatalf("unexpected parsed channel item: number=%q index=%d ok=%v", number, index, ok)
+	}
+	for _, path := range []string{
+		"/api/tater/tv/channel/09/item",
+		"/api/tater/tv/channel/09/item/nope",
+		"/api/tater/tv/channel/09/item/-1",
+		"/api/tater/tv/channel/09/playlist.m3u8",
+	} {
+		if _, _, ok := taterTVChannelItemFromPath(path); ok {
+			t.Fatalf("malformed channel item path accepted: %s", path)
+		}
+	}
+}
+
 func TestTaterTVCurrentSchedulePositionWrapsElapsedTime(t *testing.T) {
 	startedAt := time.Now().Add(-95 * time.Second)
 	channel := taterTVChannel{
@@ -1134,6 +1198,19 @@ func TestTaterTVChannelLogoOverlayPositions(t *testing.T) {
 		if !strings.Contains(filter, "overlay="+tt.x+":"+tt.y+":") {
 			t.Fatalf("position %q produced unexpected overlay filter: %s", tt.position, filter)
 		}
+	}
+}
+
+func TestTaterTVChannelLogoIsHiddenForCommercials(t *testing.T) {
+	logo := "/tmp/channel-logo.png"
+	if got := taterTVLogoForItem(taterTVStreamItem{Kind: "movie"}, logo); got != logo {
+		t.Fatalf("movie should retain channel logo, got %q", got)
+	}
+	if got := taterTVLogoForItem(taterTVStreamItem{Kind: "episode"}, logo); got != logo {
+		t.Fatalf("episode should retain channel logo, got %q", got)
+	}
+	if got := taterTVLogoForItem(taterTVStreamItem{Kind: "commercial"}, logo); got != "" {
+		t.Fatalf("commercial should not receive channel logo, got %q", got)
 	}
 }
 
