@@ -43,7 +43,6 @@ type TubeTVTab = "general" | "commercials" | "channels";
 const DEFAULT_TUBE_TV: TubeTVConfig = {
 	enabled: true,
 	auto_channels: true,
-	channel_one_enabled: false,
 	commercials_enabled: true,
 	midroll_commercials: false,
 	channel_logos_enabled: true,
@@ -99,11 +98,11 @@ function cleanChannelNumberInput(value: string) {
 	return value.replace(/\D+/g, "").slice(0, 2);
 }
 
-function formatChannelNumber(value: string, channelOneEnabled = false) {
+function formatChannelNumber(value: string) {
 	const digits = cleanChannelNumberInput(value);
 	if (digits === "") return "";
 	const number = Number.parseInt(digits, 10);
-	if (!Number.isFinite(number) || number < (channelOneEnabled ? 1 : 2) || number > 99) return "";
+	if (!Number.isFinite(number) || number < 1 || number > 99) return "";
 	return number.toString().padStart(2, "0");
 }
 
@@ -125,11 +124,9 @@ function normalizeLogoPosition(value?: string) {
 
 function normalize(config: ConfigResponse): TubeTVConfig {
 	const source = config.tube_tv ?? DEFAULT_TUBE_TV;
-	const channelOneEnabled = source.channel_one_enabled ?? false;
 	return {
 		enabled: source.enabled ?? true,
 		auto_channels: source.auto_channels ?? true,
-		channel_one_enabled: channelOneEnabled,
 		commercials_enabled: source.commercials_enabled ?? true,
 		midroll_commercials: source.midroll_commercials ?? false,
 		channel_logos_enabled: source.channel_logos_enabled ?? true,
@@ -138,7 +135,7 @@ function normalize(config: ConfigResponse): TubeTVConfig {
 		custom_channels: (source.custom_channels ?? []).map((channel) => ({
 			id: channel.id || slug(channel.title || "channel"),
 			title: channel.title || "Custom Channel",
-			channel_number: formatChannelNumber(channel.channel_number || "", channelOneEnabled),
+			channel_number: formatChannelNumber(channel.channel_number || ""),
 			commercial_category: channel.commercial_category || "",
 			logo_path: channel.logo_path || "",
 			logo_title: channel.logo_title || "",
@@ -580,7 +577,7 @@ export function TubeTVConfigSection({
 
 			{activeTab === "general" && (
 				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-					<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+					<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
 						<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
 							<span className="font-bold text-sm">Enabled</span>
 							<input
@@ -599,29 +596,6 @@ export function TubeTVConfigSection({
 								checked={formData.auto_channels}
 								disabled={isReadOnly}
 								onChange={(event) => update({ ...formData, auto_channels: event.target.checked })}
-							/>
-						</label>
-						<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
-							<span className="font-bold text-sm">Channel 01</span>
-							<input
-								type="checkbox"
-								className="toggle toggle-primary"
-								checked={formData.channel_one_enabled}
-								disabled={isReadOnly}
-								onChange={(event) => {
-									const enabled = event.target.checked;
-									update({
-										...formData,
-										channel_one_enabled: enabled,
-										custom_channels: enabled
-											? formData.custom_channels
-											: formData.custom_channels.map((channel) =>
-													channel.channel_number === "01"
-														? { ...channel, channel_number: "" }
-														: channel,
-												),
-									});
-								}}
 							/>
 						</label>
 						<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
@@ -859,12 +833,9 @@ export function TubeTVConfigSection({
 												})
 											}
 											onBlur={() =>
-												updateChannel(channelIndex, {
-													channel_number: formatChannelNumber(
-														channel.channel_number || "",
-														formData.channel_one_enabled,
-													),
-												})
+											updateChannel(channelIndex, {
+												channel_number: formatChannelNumber(channel.channel_number || ""),
+											})
 											}
 										/>
 									</label>

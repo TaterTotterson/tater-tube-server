@@ -154,7 +154,6 @@ func (s *Server) handleTaterTVLineup(c *fiber.Ctx) error {
 		"settings": fiber.Map{
 			"enabled":               cfg.TubeTV.Enabled == nil || *cfg.TubeTV.Enabled,
 			"auto_channels":         cfg.TubeTV.AutoChannels == nil || *cfg.TubeTV.AutoChannels,
-			"channel_one_enabled":   cfg.TubeTV.ChannelOneEnabled != nil && *cfg.TubeTV.ChannelOneEnabled,
 			"commercials_enabled":   cfg.TubeTV.CommercialsEnabled == nil || *cfg.TubeTV.CommercialsEnabled,
 			"midroll_commercials":   cfg.TubeTV.MidrollCommercials != nil && *cfg.TubeTV.MidrollCommercials,
 			"commercial_categories": cfg.TubeTV.CommercialCategories,
@@ -409,8 +408,7 @@ func taterBuildTVLineupUntil(cfg *config.Config, baseURL, playerToken string, mi
 	for _, channel := range existing {
 		existingByNumber[channel.Number] = channel
 	}
-	channelOneEnabled := cfg.TubeTV.ChannelOneEnabled != nil && *cfg.TubeTV.ChannelOneEnabled
-	for _, numbered := range taterTVNumberSources(ordered, channelOneEnabled) {
+	for _, numbered := range taterTVNumberSources(ordered) {
 		number := numbered.Number
 		source := numbered.Source
 		var schedule []map[string]any
@@ -440,11 +438,11 @@ func taterBuildTVLineupUntil(cfg *config.Config, baseURL, playerToken string, mi
 	return channels, nil
 }
 
-func taterTVNumberSources(sources []taterTVSource, channelOneEnabled bool) []taterTVNumberedSource {
+func taterTVNumberSources(sources []taterTVSource) []taterTVNumberedSource {
 	reserved := make(map[int]taterTVSource)
 	unnumbered := make([]taterTVSource, 0, len(sources))
 	for _, source := range sources {
-		number, ok := parseTaterTVChannelNumber(source.ChannelNumber, channelOneEnabled)
+		number, ok := parseTaterTVChannelNumber(source.ChannelNumber)
 		if ok {
 			if _, exists := reserved[number]; !exists {
 				reserved[number] = source
@@ -456,14 +454,12 @@ func taterTVNumberSources(sources []taterTVSource, channelOneEnabled bool) []tat
 
 	numbered := make([]taterTVNumberedSource, 0, len(sources))
 	unnumberedIndex := 0
-	if channelOneEnabled {
-		if source, ok := reserved[1]; ok {
-			numbered = append(numbered, taterTVNumberedSource{
-				Number: "01",
-				Source: source,
-			})
-			delete(reserved, 1)
-		}
+	if source, ok := reserved[1]; ok {
+		numbered = append(numbered, taterTVNumberedSource{
+			Number: "01",
+			Source: source,
+		})
+		delete(reserved, 1)
 	}
 	for channelNumber := 2; channelNumber <= 99 && (unnumberedIndex < len(unnumbered) || len(reserved) > 0); channelNumber++ {
 		if source, ok := reserved[channelNumber]; ok {
@@ -485,13 +481,13 @@ func taterTVNumberSources(sources []taterTVSource, channelOneEnabled bool) []tat
 	return numbered
 }
 
-func parseTaterTVChannelNumber(value string, channelOneEnabled bool) (int, bool) {
+func parseTaterTVChannelNumber(value string) (int, bool) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return 0, false
 	}
 	number, err := strconv.Atoi(value)
-	if err != nil || number < 1 || number > 99 || (number == 1 && !channelOneEnabled) {
+	if err != nil || number < 1 || number > 99 {
 		return 0, false
 	}
 	return number, true

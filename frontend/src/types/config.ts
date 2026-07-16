@@ -551,7 +551,6 @@ export interface TubeTVCustomChannel {
 export interface TubeTVConfig {
 	enabled: boolean;
 	auto_channels: boolean;
-	channel_one_enabled: boolean;
 	commercials_enabled: boolean;
 	midroll_commercials: boolean;
 	channel_logos_enabled: boolean;
