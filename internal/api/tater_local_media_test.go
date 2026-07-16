@@ -605,7 +605,7 @@ func TestTaterBuildTVLineupUsesServerLocalMediaAndCommercials(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	commercialRoot := filepath.Join(configDir, "commercials")
+	commercialRoot := filepath.Join(configDir, "metadata", "tube-tv-commercials")
 	commercialDir := filepath.Join(commercialRoot, "cartoon-network")
 	if err := os.MkdirAll(commercialDir, 0755); err != nil {
 		t.Fatal(err)
@@ -626,7 +626,6 @@ func TestTaterBuildTVLineupUsesServerLocalMediaAndCommercials(t *testing.T) {
 	}}
 	cfg.TubeTV.AutoChannels = boolPtr(false)
 	cfg.TubeTV.CommercialsEnabled = boolPtr(true)
-	cfg.TubeTV.CommercialsPath = commercialRoot
 	cfg.TubeTV.CustomChannels = []config.TubeTVCustomChannel{{
 		ID:                 "cartoons",
 		Title:              "Cartoons",
@@ -670,7 +669,7 @@ func TestTaterTVCommercialCategoriesProbeDurations(t *testing.T) {
 	configDir := t.TempDir()
 	ffmpegPath := fakeFFmpegWithProbe(t, configDir, "#!/bin/sh\nprintf '12.500\\n11.000\\n'\n")
 
-	commercialRoot := filepath.Join(configDir, "commercials")
+	commercialRoot := filepath.Join(configDir, "metadata", "tube-tv-commercials")
 	commercialDir := filepath.Join(commercialRoot, "retro-ads")
 	if err := os.MkdirAll(commercialDir, 0755); err != nil {
 		t.Fatal(err)
@@ -681,7 +680,6 @@ func TestTaterTVCommercialCategoriesProbeDurations(t *testing.T) {
 
 	cfg := config.DefaultConfig(configDir)
 	cfg.Transcoding.FFmpegPath = ffmpegPath
-	cfg.TubeTV.CommercialsPath = commercialRoot
 
 	categories := taterTVCommercialCategories(cfg, "http://server", "token")
 	if len(categories) != 1 || len(categories[0].Videos) != 1 {
@@ -1053,7 +1051,7 @@ func TestTaterTVStreamItemsStartAtLivePosition(t *testing.T) {
 	if err := os.WriteFile(moviePath, []byte("movie"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	commercialRoot := filepath.Join(configDir, "commercials")
+	commercialRoot := filepath.Join(configDir, "metadata", "tube-tv-commercials")
 	commercialDir := filepath.Join(commercialRoot, "retro-ads")
 	if err := os.MkdirAll(commercialDir, 0755); err != nil {
 		t.Fatal(err)
@@ -1072,7 +1070,6 @@ func TestTaterTVStreamItemsStartAtLivePosition(t *testing.T) {
 		Paths:       []string{mediaRoot},
 		Enabled:     boolPtr(true),
 	}}
-	cfg.TubeTV.CommercialsPath = commercialRoot
 
 	channel := taterTVChannel{
 		Number:        "02",

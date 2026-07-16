@@ -301,6 +301,7 @@ func (h *TaterTVStreamHandler) recordHLSPlayback(r *http.Request, session *tater
 		position = 0
 	}
 	h.streamTracker.RecordPlayback(nzbfilesystem.ActiveStream{
+		ID:               "tube-tv-" + session.key + "-" + player.ID,
 		FilePath:         "Tube TV CH " + session.channel.Number + " - " + session.channel.Title,
 		StartedAt:        startedAt,
 		LastActivity:     now,

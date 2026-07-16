@@ -1089,10 +1089,10 @@ func taterTVNextCommercial(pool []taterTVCommercial, deck *[]taterTVCommercial, 
 }
 
 func taterTVCommercialRoot(cfg *config.Config) string {
-	if cfg == nil || strings.TrimSpace(cfg.TubeTV.CommercialsPath) == "" {
+	if cfg == nil || strings.TrimSpace(cfg.Metadata.RootPath) == "" {
 		return filepath.Join(os.TempDir(), "tater-tube-commercials")
 	}
-	return filepath.Clean(cfg.TubeTV.CommercialsPath)
+	return filepath.Join(filepath.Clean(cfg.Metadata.RootPath), "tube-tv-commercials")
 }
 
 func taterTVCommercialURL(baseURL, category, name, playerToken string) string {

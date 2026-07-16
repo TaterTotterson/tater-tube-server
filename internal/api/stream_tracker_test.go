@@ -1,13 +1,38 @@
 package api
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
 	"github.com/TaterTotterson/tater-tube-server/internal/nzbfilesystem"
 	"github.com/stretchr/testify/assert"
 )
+
+type memoryPlaybackHistoryStore struct {
+	entries map[string]database.PlaybackHistoryEntry
+}
+
+func (s *memoryPlaybackHistoryStore) UpsertPlaybackHistory(_ context.Context, entry *database.PlaybackHistoryEntry) error {
+	if s.entries == nil {
+		s.entries = make(map[string]database.PlaybackHistoryEntry)
+	}
+	s.entries[entry.ID] = *entry
+	return nil
+}
+
+func (s *memoryPlaybackHistoryStore) ListPlaybackHistory(_ context.Context, limit int) ([]database.PlaybackHistoryEntry, error) {
+	rows := make([]database.PlaybackHistoryEntry, 0, len(s.entries))
+	for _, entry := range s.entries {
+		rows = append(rows, entry)
+		if len(rows) == limit {
+			break
+		}
+	}
+	return rows, nil
+}
 
 func TestStreamTracker_GetAll_Grouping(t *testing.T) {
 	tracker := NewStreamTracker(nil)
@@ -180,4 +205,35 @@ func TestStreamTracker_RecordPlayback_CoalescesPlaybackEvents(t *testing.T) {
 	assert.Equal(t, 120.0, history[0].PlaybackPosition)
 	assert.Equal(t, 1800.0, history[0].MediaDuration)
 	assert.True(t, history[0].HardwareActive)
+}
+
+func TestStreamTracker_RestoresPersistentPlaybackActivity(t *testing.T) {
+	store := &memoryPlaybackHistoryStore{}
+	started := time.Now().Add(-90 * time.Second)
+
+	tracker := NewStreamTracker(nil, store)
+	tracker.RecordPlayback(nzbfilesystem.ActiveStream{
+		ID:             "tube-session-1",
+		FilePath:       "Tube TV CH 02 - Cartoons",
+		StartedAt:      started,
+		LastActivity:   time.Now(),
+		Source:         "Tube TV",
+		PlayerID:       "player-crt",
+		UserName:       "CRT",
+		Status:         "Streaming",
+		Transcoded:     true,
+		HardwareAccel:  "qsv",
+		HardwareActive: true,
+	})
+	tracker.Stop()
+
+	restored := NewStreamTracker(nil, store)
+	defer restored.Stop()
+	history := restored.GetHistory()
+
+	assert.Len(t, history, 1)
+	assert.Equal(t, "tube-session-1", history[0].ID)
+	assert.Equal(t, "CRT", history[0].UserName)
+	assert.True(t, history[0].HardwareActive)
+	assert.GreaterOrEqual(t, history[0].WatchedSeconds, 89.0)
 }

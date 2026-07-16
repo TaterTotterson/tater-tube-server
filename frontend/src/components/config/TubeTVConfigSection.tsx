@@ -18,7 +18,6 @@ import { useCallback, useEffect, useState } from "react";
 import { apiClient } from "../../api/client";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
-import { ConfigMiniTabs } from "./ConfigMiniTabs";
 import type {
 	ConfigResponse,
 	LocalMediaCategory,
@@ -30,6 +29,7 @@ import type {
 	TubeTVLocalLibraryRow,
 	TubeTVLogoResult,
 } from "../../types/config";
+import { ConfigMiniTabs } from "./ConfigMiniTabs";
 
 interface TubeTVConfigSectionProps {
 	config: ConfigResponse;
@@ -47,7 +47,6 @@ const DEFAULT_TUBE_TV: TubeTVConfig = {
 	midroll_commercials: false,
 	channel_logos_enabled: true,
 	commercial_categories: [],
-	commercials_path: "",
 	custom_channels: [],
 };
 
@@ -131,7 +130,6 @@ function normalize(config: ConfigResponse): TubeTVConfig {
 		midroll_commercials: source.midroll_commercials ?? false,
 		channel_logos_enabled: source.channel_logos_enabled ?? true,
 		commercial_categories: source.commercial_categories ?? [],
-		commercials_path: source.commercials_path ?? "",
 		custom_channels: (source.custom_channels ?? []).map((channel) => ({
 			id: channel.id || slug(channel.title || "channel"),
 			title: channel.title || "Custom Channel",
@@ -635,20 +633,6 @@ export function TubeTVConfigSection({
 							/>
 						</label>
 					</div>
-
-					<label className="form-control mt-5">
-						<span className="label-text font-bold text-base-content text-sm">
-							Commercial Storage Path
-						</span>
-						<input
-							type="text"
-							className="input input-bordered mt-2 w-full"
-							value={formData.commercials_path}
-							disabled={isReadOnly}
-							onChange={(event) => update({ ...formData, commercials_path: event.target.value })}
-							placeholder="/config/metadata/tube-tv-commercials"
-						/>
-					</label>
 				</div>
 			)}
 
@@ -833,9 +817,9 @@ export function TubeTVConfigSection({
 												})
 											}
 											onBlur={() =>
-											updateChannel(channelIndex, {
-												channel_number: formatChannelNumber(channel.channel_number || ""),
-											})
+												updateChannel(channelIndex, {
+													channel_number: formatChannelNumber(channel.channel_number || ""),
+												})
 											}
 										/>
 									</label>
@@ -1026,7 +1010,7 @@ export function TubeTVConfigSection({
 													</span>
 													<span className="min-w-0">
 														<span className="block truncate font-bold text-xs">{logo.title}</span>
-														<span className="block truncate text-base-content/45 text-[0.65rem]">
+														<span className="block truncate text-[0.65rem] text-base-content/45">
 															{logo.path}
 														</span>
 													</span>

@@ -104,7 +104,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	defer progressBroadcaster.Close()
 
 	// Create stream tracker for monitoring active streams
-	streamTracker := api.NewStreamTracker(poolManager)
+	streamTracker := api.NewStreamTracker(poolManager, repos.MainRepo)
 	defer streamTracker.Stop()
 
 	importerService, err := initializeImporter(ctx, cfg, metadataService, db, poolManager, configManager.GetConfigGetter(), progressBroadcaster, repos.UserRepo, repos.HealthRepo)

@@ -195,6 +195,15 @@ type ImportHistory struct {
 	CompletedAt time.Time `db:"completed_at"`
 }
 
+// PlaybackHistoryEntry stores a complete player activity event as JSON while
+// keeping session timestamps indexed for fast recent-history queries.
+type PlaybackHistoryEntry struct {
+	ID           string    `db:"id"`
+	StartedAt    time.Time `db:"started_at"`
+	LastActivity time.Time `db:"last_activity"`
+	Payload      string    `db:"payload"`
+}
+
 // ImportMigrationStatus represents the status of a migration item
 type ImportMigrationStatus string
 

@@ -182,7 +182,6 @@ type TubeTVConfig struct {
 	MidrollCommercials   *bool                 `yaml:"midroll_commercials" mapstructure:"midroll_commercials" json:"midroll_commercials"`
 	ChannelLogosEnabled  *bool                 `yaml:"channel_logos_enabled" mapstructure:"channel_logos_enabled" json:"channel_logos_enabled"`
 	CommercialCategories []string              `yaml:"commercial_categories" mapstructure:"commercial_categories" json:"commercial_categories"`
-	CommercialsPath      string                `yaml:"commercials_path" mapstructure:"commercials_path" json:"commercials_path"`
 	CustomChannels       []TubeTVCustomChannel `yaml:"custom_channels" mapstructure:"custom_channels" json:"custom_channels"`
 }
 
@@ -898,13 +897,6 @@ func (c *Config) Validate() error {
 		enabled := true
 		c.TubeTV.ChannelLogosEnabled = &enabled
 	}
-	if strings.TrimSpace(c.TubeTV.CommercialsPath) == "" {
-		c.TubeTV.CommercialsPath = filepath.Join(c.Metadata.RootPath, "tube-tv-commercials")
-	}
-	if !filepath.IsAbs(c.TubeTV.CommercialsPath) {
-		return fmt.Errorf("tube_tv commercials_path must be absolute: %s", c.TubeTV.CommercialsPath)
-	}
-	c.TubeTV.CommercialsPath = filepath.Clean(c.TubeTV.CommercialsPath)
 	cleanCommercialCategories := make([]string, 0, len(c.TubeTV.CommercialCategories))
 	seenCommercialCategories := make(map[string]bool, len(c.TubeTV.CommercialCategories))
 	for _, rawCategory := range c.TubeTV.CommercialCategories {
@@ -1920,7 +1912,6 @@ func DefaultConfig(configDir ...string) *Config {
 			MidrollCommercials:   &tubeTVMidroll,
 			ChannelLogosEnabled:  &tubeTVEnabled,
 			CommercialCategories: []string{},
-			CommercialsPath:      filepath.Join(metadataPath, "tube-tv-commercials"),
 			CustomChannels:       []TubeTVCustomChannel{},
 		},
 		Players: PlayersConfig{

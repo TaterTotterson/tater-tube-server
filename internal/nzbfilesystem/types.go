@@ -32,6 +32,7 @@ type ActiveStream struct {
 	PlaybackPosition float64   `json:"playback_position_seconds"`
 	PlaybackStart    float64   `json:"playback_start_seconds,omitempty"`
 	MediaDuration    float64   `json:"media_duration_seconds,omitempty"`
+	WatchedSeconds   float64   `json:"watched_seconds"`
 	Transcoded       bool      `json:"transcoded"`
 	TranscodeProfile string    `json:"transcode_profile,omitempty"`
 	TranscodeName    string    `json:"transcode_name,omitempty"`

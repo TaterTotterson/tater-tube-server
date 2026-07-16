@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"math"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
 	"github.com/TaterTotterson/tater-tube-server/internal/nzbfilesystem"
 	"github.com/TaterTotterson/tater-tube-server/internal/usenet"
 	"github.com/google/uuid"
@@ -18,6 +20,12 @@ import (
 
 // Default timeout for stale streams (4 hours - covers most movie lengths)
 const defaultStreamTimeout = 4 * time.Hour
+const playbackHistoryLimit = 250
+
+type playbackHistoryStore interface {
+	UpsertPlaybackHistory(context.Context, *database.PlaybackHistoryEntry) error
+	ListPlaybackHistory(context.Context, int) ([]database.PlaybackHistoryEntry, error)
+}
 
 // StreamChangeNotifier is notified whenever the active stream count changes.
 // Implemented by pool.Manager; declared here to avoid an api -> pool import
@@ -34,6 +42,9 @@ type StreamTracker struct {
 	mu             sync.Mutex // For history protection
 	timeout        time.Duration
 	metricsTracker usenet.MetricsTracker
+	historyStore   playbackHistoryStore
+	persistQueue   chan nzbfilesystem.ActiveStream
+	persistDone    chan struct{}
 
 	// activeCount is the exact number of entries currently in the streams map.
 	// Maintained as an int64 counter so ActiveStreams() is O(1) and safe to
@@ -61,15 +72,96 @@ type streamInternal struct {
 }
 
 // NewStreamTracker creates a new stream tracker
-func NewStreamTracker(metricsTracker usenet.MetricsTracker) *StreamTracker {
+func NewStreamTracker(metricsTracker usenet.MetricsTracker, historyStores ...playbackHistoryStore) *StreamTracker {
 	t := &StreamTracker{
 		done:           make(chan struct{}),
-		history:        make([]nzbfilesystem.ActiveStream, 0, 50),
+		history:        make([]nzbfilesystem.ActiveStream, 0, playbackHistoryLimit),
 		timeout:        defaultStreamTimeout,
 		metricsTracker: metricsTracker,
 	}
+	if len(historyStores) > 0 {
+		t.historyStore = historyStores[0]
+		t.persistQueue = make(chan nzbfilesystem.ActiveStream, 256)
+		t.persistDone = make(chan struct{})
+		t.restorePlaybackHistory()
+		go t.playbackPersistenceLoop()
+	}
 	go t.snapshotLoop()
 	return t
+}
+
+func (t *StreamTracker) restorePlaybackHistory() {
+	if t == nil || t.historyStore == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	entries, err := t.historyStore.ListPlaybackHistory(ctx, playbackHistoryLimit)
+	if err != nil {
+		slog.Warn("Failed to restore playback activity", "error", err)
+		return
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		var record nzbfilesystem.ActiveStream
+		if err := json.Unmarshal([]byte(entries[i].Payload), &record); err != nil {
+			slog.Warn("Skipped invalid playback activity", "id", entries[i].ID, "error", err)
+			continue
+		}
+		record.ID = entries[i].ID
+		record.StartedAt = entries[i].StartedAt
+		record.LastActivity = entries[i].LastActivity
+		updateWatchedDuration(&record)
+		t.history = append(t.history, record)
+	}
+}
+
+func (t *StreamTracker) persistPlaybackHistory(record nzbfilesystem.ActiveStream) {
+	if t == nil || t.historyStore == nil || strings.TrimSpace(record.ID) == "" {
+		return
+	}
+	select {
+	case t.persistQueue <- record:
+	default:
+		slog.Warn("Playback activity queue is full", "id", record.ID)
+	}
+}
+
+func (t *StreamTracker) playbackPersistenceLoop() {
+	defer close(t.persistDone)
+	for {
+		select {
+		case record := <-t.persistQueue:
+			t.writePlaybackHistory(record)
+		case <-t.done:
+			for {
+				select {
+				case record := <-t.persistQueue:
+					t.writePlaybackHistory(record)
+				default:
+					return
+				}
+			}
+		}
+	}
+}
+
+func (t *StreamTracker) writePlaybackHistory(record nzbfilesystem.ActiveStream) {
+	updateWatchedDuration(&record)
+	payload, err := json.Marshal(record)
+	if err != nil {
+		slog.Warn("Failed to encode playback activity", "id", record.ID, "error", err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := t.historyStore.UpsertPlaybackHistory(ctx, &database.PlaybackHistoryEntry{
+		ID:           record.ID,
+		StartedAt:    record.StartedAt,
+		LastActivity: record.LastActivity,
+		Payload:      string(payload),
+	}); err != nil {
+		slog.Warn("Failed to save playback activity", "id", record.ID, "error", err)
+	}
 }
 
 // StartCleanup starts a background goroutine that periodically removes stale streams.
@@ -119,6 +211,9 @@ func (t *StreamTracker) cleanupStale() {
 
 func (t *StreamTracker) Stop() {
 	close(t.done)
+	if t.persistDone != nil {
+		<-t.persistDone
+	}
 }
 
 func (t *StreamTracker) snapshotLoop() {
@@ -406,6 +501,7 @@ func (t *StreamTracker) RecordPlayback(record nzbfilesystem.ActiveStream) {
 		return
 	}
 	now := time.Now()
+	hasStableID := strings.TrimSpace(record.ID) != ""
 	if record.ID == "" {
 		record.ID = uuid.New().String()
 	}
@@ -421,22 +517,33 @@ func (t *StreamTracker) RecordPlayback(record nzbfilesystem.ActiveStream) {
 	if record.PlaybackPosition <= 0 {
 		updatePlaybackPosition(&record, record.LastActivity)
 	}
+	updateWatchedDuration(&record)
 
 	key := playbackRecordKey(record)
+	if hasStableID {
+		key = "id|" + strings.ToLower(strings.TrimSpace(record.ID))
+	}
 	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	for i := range t.history {
-		if playbackRecordKey(t.history[i]) == key {
+		existingKey := playbackRecordKey(t.history[i])
+		if hasStableID {
+			existingKey = "id|" + strings.ToLower(strings.TrimSpace(t.history[i].ID))
+		}
+		if existingKey == key {
 			mergePlaybackRecord(&t.history[i], record)
+			persisted := t.history[i]
+			t.mu.Unlock()
+			t.persistPlaybackHistory(persisted)
 			return
 		}
 	}
 
-	if len(t.history) >= 50 {
+	if len(t.history) >= playbackHistoryLimit {
 		t.history = t.history[1:]
 	}
 	t.history = append(t.history, record)
+	t.mu.Unlock()
+	t.persistPlaybackHistory(record)
 }
 
 // Remove removes a stream by ID and adds it to history
@@ -464,14 +571,15 @@ func (t *StreamTracker) Remove(id string) {
 			finalStream.LastActivity = time.Now()
 		}
 		updatePlaybackPosition(&finalStream, finalStream.LastActivity)
+		updateWatchedDuration(&finalStream)
 
 		t.mu.Lock()
-		// Keep last 50 streams in history
-		if len(t.history) >= 50 {
+		if len(t.history) >= playbackHistoryLimit {
 			t.history = t.history[1:]
 		}
 		t.history = append(t.history, finalStream)
 		t.mu.Unlock()
+		t.persistPlaybackHistory(finalStream)
 
 		t.streams.Delete(id)
 		t.activeCount.Add(-1)
@@ -540,6 +648,9 @@ func mergePlaybackRecord(existing *nzbfilesystem.ActiveStream, next nzbfilesyste
 	if next.MediaDuration > 0 {
 		existing.MediaDuration = next.MediaDuration
 	}
+	if next.WatchedSeconds > 0 {
+		existing.WatchedSeconds = next.WatchedSeconds
+	}
 	if next.UserName != "" {
 		existing.UserName = next.UserName
 	}
@@ -561,6 +672,7 @@ func mergePlaybackRecord(existing *nzbfilesystem.ActiveStream, next nzbfilesyste
 		existing.VideoCodec = next.VideoCodec
 		existing.HardwareActive = next.HardwareActive
 	}
+	updateWatchedDuration(existing)
 }
 
 // KillStream cancels the context associated with a stream
@@ -588,8 +700,8 @@ func (t *StreamTracker) GetHistory() []nzbfilesystem.ActiveStream {
 	sort.SliceStable(streams, func(i, j int) bool {
 		return streamSortTime(streams[i]).After(streamSortTime(streams[j]))
 	})
-	if len(streams) > 50 {
-		streams = streams[:50]
+	if len(streams) > playbackHistoryLimit {
+		streams = streams[:playbackHistoryLimit]
 	}
 	return streams
 }
@@ -680,6 +792,7 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 
 			existing.TotalConnections++
 			updatePlaybackPosition(existing, existing.LastActivity)
+			updateWatchedDuration(existing)
 		} else {
 			// Initialize new group with this stream
 			streamCopy := *s
@@ -697,6 +810,7 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			streamCopy.ID = groupKey
 			streamCopy.TotalConnections = 1
 			updatePlaybackPosition(&streamCopy, internal.lastReadAt)
+			updateWatchedDuration(&streamCopy)
 			grouped[groupKey] = &streamCopy
 		}
 		return true
@@ -749,6 +863,21 @@ func updatePlaybackPosition(stream *nzbfilesystem.ActiveStream, lastReadAt time.
 		position = 0
 	}
 	stream.PlaybackPosition = position
+}
+
+func updateWatchedDuration(stream *nzbfilesystem.ActiveStream) {
+	if stream == nil || stream.StartedAt.IsZero() {
+		return
+	}
+	end := stream.LastActivity
+	if end.IsZero() {
+		end = time.Now()
+	}
+	watched := end.Sub(stream.StartedAt).Seconds()
+	if watched < 0 || math.IsNaN(watched) || math.IsInf(watched, 0) {
+		watched = 0
+	}
+	stream.WatchedSeconds = watched
 }
 
 // GetStream returns an active stream by ID
