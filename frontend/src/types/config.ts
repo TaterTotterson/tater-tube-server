@@ -555,7 +555,6 @@ export interface TubeTVConfig {
 	midroll_commercials: boolean;
 	channel_logos_enabled: boolean;
 	commercial_categories: string[];
-	commercials_path: string;
 	custom_channels: TubeTVCustomChannel[];
 }
 
