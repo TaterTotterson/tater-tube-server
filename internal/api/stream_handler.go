@@ -660,6 +660,21 @@ func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodePro
 }
 
 func buildFFmpegTranscodeArgsWithCodec(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, inputPath string, startSeconds float64) []string {
+	return buildFFmpegTranscodeArgsWithOptions(cfg, profile, accel, preferredCodec, transcodeOutputOptions{
+		InputPath:    inputPath,
+		StartSeconds: startSeconds,
+	})
+}
+
+type transcodeOutputOptions struct {
+	InputPath       string
+	StartSeconds    float64
+	DurationSeconds float64
+	LogoFile        string
+	LogoPosition    string
+}
+
+func buildFFmpegTranscodeArgsWithOptions(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, options transcodeOutputOptions) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
@@ -667,20 +682,39 @@ func buildFFmpegTranscodeArgsWithCodec(cfg config.TranscodingConfig, profile tra
 	}
 
 	args = append(args, transcodeHardwareInitArgs(cfg, accel)...)
-	if startSeconds > 0 && strings.TrimSpace(inputPath) != "" {
-		args = append(args, "-ss", strconv.FormatFloat(startSeconds, 'f', 3, 64), "-i", inputPath)
+	if strings.TrimSpace(options.InputPath) != "" {
+		if options.StartSeconds > 0 {
+			args = append(args, "-ss", strconv.FormatFloat(options.StartSeconds, 'f', 3, 64))
+		}
+		args = append(args, "-i", options.InputPath)
 	} else {
 		args = append(args, "-i", "pipe:0")
 	}
 
-	args = append(args,
-		"-map", "0:v:0",
-		"-map", "0:a:0?",
-		"-sn",
-	)
+	logoFile := strings.TrimSpace(options.LogoFile)
+	if logoFile != "" {
+		args = append(args, "-loop", "1", "-framerate", "30", "-i", logoFile)
+	}
+	if options.DurationSeconds > 0 {
+		args = append(args, "-t", strconv.FormatFloat(options.DurationSeconds, 'f', 3, 64))
+	}
 
 	videoCodec, filters := transcodeVideoSettingsForCodec(accel, cfg.HardwareDevice, profile, preferredCodec)
-	if filters != "" {
+	if logoFile != "" {
+		args = append(args,
+			"-filter_complex", taterTVChannelLogoFilter(filters, profile, options.LogoPosition),
+			"-map", "[vout]",
+			"-map", "0:a:0?",
+			"-sn",
+		)
+	} else {
+		args = append(args,
+			"-map", "0:v:0",
+			"-map", "0:a:0?",
+			"-sn",
+		)
+	}
+	if filters != "" && logoFile == "" {
 		args = append(args, "-vf", filters)
 	}
 
