@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -801,6 +802,42 @@ func TestTaterTVGuideBuildsAndExtendsSharedSchedule(t *testing.T) {
 	}
 	if extended.Channels[0].TotalDuration <= firstDuration {
 		t.Fatalf("expected guide extension beyond %f, got %f", firstDuration, extended.Channels[0].TotalDuration)
+	}
+}
+
+func TestTaterTVGuideCapsLargeSeriesWhileBuilding(t *testing.T) {
+	cfg := config.DefaultConfig(t.TempDir())
+	episodes := make([]taterUsenetItem, 5000)
+	for i := range episodes {
+		episodes[i] = taterUsenetItem{
+			Title:           fmt.Sprintf("Episode %04d", i+1),
+			Path:            fmt.Sprintf("/series/season/episode-%04d.mkv", i+1),
+			StreamURL:       fmt.Sprintf("http://server/episode/%04d", i+1),
+			DurationSeconds: 10 * 60,
+		}
+	}
+	source := taterTVSource{
+		Title: "Large Series Channel",
+		Groups: []taterTVEpisodeGroup{{
+			Title:    "Large Series",
+			Episodes: episodes,
+		}},
+	}
+
+	schedule, total := taterTVBuildScheduleUntil(
+		cfg,
+		source,
+		nil,
+		rand.New(rand.NewSource(1)),
+		0,
+		taterTVGuideHorizon.Seconds(),
+	)
+
+	if total < taterTVGuideHorizon.Seconds() || total > taterTVGuideHorizon.Seconds()+10*60 {
+		t.Fatalf("expected schedule to stop at the guide horizon, got %.0f seconds", total)
+	}
+	if len(schedule) > 73 {
+		t.Fatalf("expected a bounded guide schedule, got %d rows", len(schedule))
 	}
 }
 
