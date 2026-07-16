@@ -1000,7 +1000,7 @@ func TestTaterTVNumberSourcesHonorsReservedCustomChannels(t *testing.T) {
 		Title:         "The Phooey",
 		SourceType:    "custom",
 		ChannelNumber: "09",
-	}}, false)
+	}})
 	if len(numbered) != 1 || numbered[0].Number != "09" || numbered[0].Source.Title != "The Phooey" {
 		t.Fatalf("expected lone custom channel to keep 09, got %#v", numbered)
 	}
@@ -1009,7 +1009,7 @@ func TestTaterTVNumberSourcesHonorsReservedCustomChannels(t *testing.T) {
 	for i := 1; i <= 8; i++ {
 		sources = append(sources, taterTVSource{Title: fmt.Sprintf("Auto %d", i), SourceType: "auto"})
 	}
-	numbered = taterTVNumberSources(sources, false)
+	numbered = taterTVNumberSources(sources)
 	if len(numbered) != 9 {
 		t.Fatalf("expected 9 numbered sources, got %#v", numbered)
 	}
@@ -1030,7 +1030,7 @@ func TestTaterTVNumberSourcesHonorsReservedCustomChannels(t *testing.T) {
 	numbered = taterTVNumberSources([]taterTVSource{
 		{Title: "Regional One", SourceType: "custom", ChannelNumber: "01"},
 		{Title: "Auto Two", SourceType: "auto"},
-	}, true)
+	})
 	if len(numbered) != 2 {
 		t.Fatalf("expected channel 01 plus an auto channel, got %#v", numbered)
 	}

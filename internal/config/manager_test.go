@@ -181,17 +181,7 @@ func TestConfig_Validate_TubeTVChannelNumbers(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "duplicated")
 
-	invalid := DefaultConfig(t.TempDir())
-	invalid.TubeTV.CustomChannels = []TubeTVCustomChannel{
-		{ID: "one", Title: "One", ChannelNumber: "01"},
-	}
-	err = invalid.Validate()
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "channel 01 is disabled")
-
 	channelOne := DefaultConfig(t.TempDir())
-	enabled := true
-	channelOne.TubeTV.ChannelOneEnabled = &enabled
 	channelOne.TubeTV.CustomChannels = []TubeTVCustomChannel{
 		{ID: "one", Title: "One", ChannelNumber: "1"},
 	}
