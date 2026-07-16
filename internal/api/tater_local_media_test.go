@@ -1079,18 +1079,18 @@ func TestTaterTVStreamItemsStartAtLivePosition(t *testing.T) {
 	}
 }
 
-func TestTaterTVSegmentTranscodeArgsMarkDiscontinuity(t *testing.T) {
+func TestTaterTVItemTranscodeArgsMatchLocalPlayback(t *testing.T) {
 	args := buildTaterTVChannelTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["crt_480p"], "none", "/media/movie.mkv", 12.5, 30, "", "")
 	joined := strings.Join(args, " ")
 
 	if strings.Contains(joined, "-f concat") {
-		t.Fatalf("segment transcode path must not use concat demuxer: %s", joined)
+		t.Fatalf("item transcode path must not use concat demuxer: %s", joined)
 	}
-	if !strings.Contains(joined, "-mpegts_flags +resend_headers+initial_discontinuity") {
-		t.Fatalf("expected MPEG-TS discontinuity headers in args: %s", joined)
+	if strings.Contains(joined, "-re") || strings.Contains(joined, "initial_discontinuity") {
+		t.Fatalf("item playback must not use continuous-channel pacing or discontinuities: %s", joined)
 	}
 	if !strings.Contains(joined, "-ss 12.500") || !strings.Contains(joined, "-t 30.000") {
-		t.Fatalf("expected segment start/duration in args: %s", joined)
+		t.Fatalf("expected scheduled item start/duration in args: %s", joined)
 	}
 }
 

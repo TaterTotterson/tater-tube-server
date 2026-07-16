@@ -720,63 +720,13 @@ func buildTaterTVChannelTranscodeArgs(cfg config.TranscodingConfig, profile tran
 }
 
 func buildTaterTVChannelTranscodeArgsWithCodec(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, inputPath string, startSeconds, durationSeconds float64, logoFile, logoPosition string) []string {
-	args := []string{
-		"-hide_banner",
-		"-loglevel", "warning",
-		"-nostdin",
-	}
-	args = append(args, transcodeHardwareInitArgs(cfg, accel)...)
-	args = append(args, "-re")
-	if startSeconds > 0 {
-		args = append(args, "-ss", strconv.FormatFloat(startSeconds, 'f', 3, 64))
-	}
-	args = append(args, "-i", inputPath)
-	logoFile = strings.TrimSpace(logoFile)
-	if logoFile != "" {
-		args = append(args, "-loop", "1", "-framerate", "30", "-i", logoFile)
-	}
-	if durationSeconds > 0 {
-		args = append(args, "-t", strconv.FormatFloat(durationSeconds, 'f', 3, 64))
-	}
-
-	videoCodec, filters := transcodeVideoSettingsForCodec(accel, cfg.HardwareDevice, profile, preferredCodec)
-	if logoFile != "" {
-		args = append(args,
-			"-filter_complex", taterTVChannelLogoFilter(filters, profile, logoPosition),
-			"-map", "[vout]",
-			"-map", "0:a:0?",
-			"-sn",
-		)
-	} else {
-		args = append(args,
-			"-map", "0:v:0",
-			"-map", "0:a:0?",
-			"-sn",
-		)
-	}
-	if filters != "" && logoFile == "" {
-		args = append(args, "-vf", filters)
-	}
-	args = append(args,
-		"-c:v", videoCodec,
-		"-b:v", profile.VideoBitrate,
-		"-maxrate", profile.MaxRate,
-		"-bufsize", profile.BufferSize,
-	)
-	args = appendVideoEncoderOptions(args, videoCodec, profile)
-	args = append(args,
-		"-c:a", "aac",
-		"-b:a", profile.AudioBitrate,
-		"-ac", "2",
-		"-ar", "48000",
-		"-fflags", "+genpts",
-		"-muxdelay", "0",
-		"-muxpreload", "0",
-		"-mpegts_flags", "+resend_headers+initial_discontinuity",
-		"-f", "mpegts",
-		"pipe:1",
-	)
-	return args
+	return buildFFmpegTranscodeArgsWithOptions(cfg, profile, accel, preferredCodec, transcodeOutputOptions{
+		InputPath:       inputPath,
+		StartSeconds:    startSeconds,
+		DurationSeconds: durationSeconds,
+		LogoFile:        logoFile,
+		LogoPosition:    logoPosition,
+	})
 }
 
 func taterTVChannelLogoFilter(baseFilters string, profile transcodeProfile, logoPosition string) string {
