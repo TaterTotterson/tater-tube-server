@@ -187,7 +187,16 @@ func TestConfig_Validate_TubeTVChannelNumbers(t *testing.T) {
 	}
 	err = invalid.Validate()
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "02 to 99")
+	assert.Contains(t, err.Error(), "channel 01 is disabled")
+
+	channelOne := DefaultConfig(t.TempDir())
+	enabled := true
+	channelOne.TubeTV.ChannelOneEnabled = &enabled
+	channelOne.TubeTV.CustomChannels = []TubeTVCustomChannel{
+		{ID: "one", Title: "One", ChannelNumber: "1"},
+	}
+	assert.NoError(t, channelOne.Validate())
+	assert.Equal(t, "01", channelOne.TubeTV.CustomChannels[0].ChannelNumber)
 }
 
 func TestConfig_Validate_TubeTVLogoPaths(t *testing.T) {

@@ -178,6 +178,7 @@ type LocalMediaCategory struct {
 type TubeTVConfig struct {
 	Enabled              *bool                 `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	AutoChannels         *bool                 `yaml:"auto_channels" mapstructure:"auto_channels" json:"auto_channels"`
+	ChannelOneEnabled    *bool                 `yaml:"channel_one_enabled" mapstructure:"channel_one_enabled" json:"channel_one_enabled"`
 	CommercialsEnabled   *bool                 `yaml:"commercials_enabled" mapstructure:"commercials_enabled" json:"commercials_enabled"`
 	MidrollCommercials   *bool                 `yaml:"midroll_commercials" mapstructure:"midroll_commercials" json:"midroll_commercials"`
 	ChannelLogosEnabled  *bool                 `yaml:"channel_logos_enabled" mapstructure:"channel_logos_enabled" json:"channel_logos_enabled"`
@@ -934,7 +935,8 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("tube_tv custom channel id %q is duplicated", channel.ID)
 		}
 		seenTubeTVChannels[channel.ID] = true
-		normalizedChannelNumber, err := normalizeTubeTVChannelNumber(channel.ChannelNumber)
+		channelOneEnabled := c.TubeTV.ChannelOneEnabled != nil && *c.TubeTV.ChannelOneEnabled
+		normalizedChannelNumber, err := normalizeTubeTVChannelNumber(channel.ChannelNumber, channelOneEnabled)
 		if err != nil {
 			return fmt.Errorf("tube_tv custom channel %q channel_number is invalid: %w", channel.Title, err)
 		}
@@ -1291,7 +1293,7 @@ func sanitizeTubeTVSourceCategoryID(value string) string {
 	return sanitizeLocalMediaID(value)
 }
 
-func normalizeTubeTVChannelNumber(value string) (string, error) {
+func normalizeTubeTVChannelNumber(value string, channelOneEnabled bool) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", nil
@@ -1301,8 +1303,11 @@ func normalizeTubeTVChannelNumber(value string) (string, error) {
 		value = "0"
 	}
 	number, err := strconv.Atoi(value)
-	if err != nil || number < 2 || number > 99 {
+	if err != nil || number < 1 || number > 99 {
 		return "", fmt.Errorf("must be a number from 02 to 99")
+	}
+	if number == 1 && !channelOneEnabled {
+		return "", fmt.Errorf("channel 01 is disabled")
 	}
 	return fmt.Sprintf("%02d", number), nil
 }
@@ -1842,6 +1847,7 @@ func DefaultConfig(configDir ...string) *Config {
 	localMediaEnabled := false      // Server-local media catalog disabled by default
 	tubeTVEnabled := true           // Tube TV is available when local media is configured
 	tubeTVAutoChannels := true      // Tube TV auto-generates channels by default
+	tubeTVChannelOne := false       // Channel 01 is opt-in for regions that used it
 	tubeTVCommercials := true       // Commercial breaks enabled when commercials exist
 	tubeTVMidroll := false          // Mid-roll breaks opt-in by default
 	prowlarrEnabled := false        // Prowlarr integration disabled by default
@@ -1916,6 +1922,7 @@ func DefaultConfig(configDir ...string) *Config {
 		TubeTV: TubeTVConfig{
 			Enabled:              &tubeTVEnabled,
 			AutoChannels:         &tubeTVAutoChannels,
+			ChannelOneEnabled:    &tubeTVChannelOne,
 			CommercialsEnabled:   &tubeTVCommercials,
 			MidrollCommercials:   &tubeTVMidroll,
 			ChannelLogosEnabled:  &tubeTVEnabled,
