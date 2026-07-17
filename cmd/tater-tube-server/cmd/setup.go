@@ -365,7 +365,7 @@ func createHTTPServer(apiServer *api.Server, app *fiber.App, streamHandler *api.
 		}
 
 		// Route stream requests directly to stream handler
-		if strings.HasPrefix(path, "/api/files/stream") {
+		if isDirectFileStreamPath(path) {
 			streamHTTPHandler.ServeHTTP(w, r)
 			return
 		}
@@ -406,4 +406,8 @@ func createHTTPServer(apiServer *api.Server, app *fiber.App, streamHandler *api.
 		WriteTimeout: time.Minute * 30,
 		ReadTimeout:  time.Minute * 5,
 	}
+}
+
+func isDirectFileStreamPath(path string) bool {
+	return path == "/api/files/stream" || strings.HasPrefix(path, "/api/files/stream/")
 }
