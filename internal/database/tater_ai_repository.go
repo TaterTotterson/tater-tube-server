@@ -67,6 +67,21 @@ type TaterRecommendation struct {
 	CreatedAt   time.Time    `json:"created_at"`
 }
 
+type TaterTTSRequest struct {
+	ID          string    `json:"id"`
+	ProfileID   string    `json:"profile_id"`
+	PlayerID    string    `json:"player_id"`
+	CoreID      string    `json:"core_id,omitempty"`
+	Text        string    `json:"text"`
+	Status      string    `json:"status"`
+	AudioBase64 string    `json:"-"`
+	ContentType string    `json:"content_type,omitempty"`
+	Error       string    `json:"error,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	ExpiresAt   time.Time `json:"expires_at"`
+}
+
 func (r *Repository) CreateTaterCorePairingCode(ctx context.Context, code TaterCorePairingCode) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO tater_core_pairing_codes (id, name, code_hash, created_at, expires_at)
@@ -342,6 +357,179 @@ func (r *Repository) SetTaterRecommendationFeedback(ctx context.Context, id, fee
 	count, _ := result.RowsAffected()
 	if count == 0 {
 		return fmt.Errorf("recommendation not found")
+	}
+	return nil
+}
+
+func (r *Repository) GetActiveTaterRecommendationReason(
+	ctx context.Context,
+	id, profileID string,
+	now time.Time,
+) (string, error) {
+	var reason string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT recommendation.reason
+		FROM tater_recommendations AS recommendation
+		INNER JOIN tater_recommendation_batches AS batch
+			ON batch.id = recommendation.batch_id
+		WHERE recommendation.id = ?
+			AND batch.profile_id = ?
+			AND batch.expires_at > ?
+			AND recommendation.feedback NOT IN ('dismissed', 'not_for_me')
+		LIMIT 1
+	`, id, profileID, now).Scan(&reason)
+	return reason, err
+}
+
+func (r *Repository) CreateTaterTTSRequest(ctx context.Context, item TaterTTSRequest) error {
+	if _, err := r.db.ExecContext(ctx, `
+		DELETE FROM tater_tts_requests WHERE expires_at <= ?
+	`, item.CreatedAt.Add(-24*time.Hour)); err != nil {
+		return err
+	}
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO tater_tts_requests (
+			id, profile_id, player_id, core_id, text, status, audio_base64,
+			content_type, error, created_at, updated_at, expires_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, item.ID, item.ProfileID, item.PlayerID, item.CoreID, item.Text, item.Status,
+		item.AudioBase64, item.ContentType, item.Error, item.CreatedAt, item.UpdatedAt,
+		item.ExpiresAt)
+	return err
+}
+
+func (r *Repository) GetTaterTTSRequest(ctx context.Context, id, playerID string) (*TaterTTSRequest, error) {
+	var item TaterTTSRequest
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, profile_id, player_id, core_id, text, status, audio_base64,
+			content_type, error, created_at, updated_at, expires_at
+		FROM tater_tts_requests
+		WHERE id = ? AND (? = '' OR player_id = ?)
+	`, id, playerID, playerID).Scan(
+		&item.ID, &item.ProfileID, &item.PlayerID, &item.CoreID, &item.Text,
+		&item.Status, &item.AudioBase64, &item.ContentType, &item.Error,
+		&item.CreatedAt, &item.UpdatedAt, &item.ExpiresAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+func (r *Repository) ClaimTaterTTSRequests(ctx context.Context, coreID string, limit int, now time.Time) ([]TaterTTSRequest, error) {
+	if limit <= 0 || limit > 4 {
+		limit = 1
+	}
+	claimed := []TaterTTSRequest{}
+	err := r.WithTransaction(ctx, func(tx *Repository) error {
+		if _, err := tx.db.ExecContext(ctx, `
+			DELETE FROM tater_tts_requests WHERE expires_at <= ?
+		`, now.Add(-24*time.Hour)); err != nil {
+			return err
+		}
+		if _, err := tx.db.ExecContext(ctx, `
+			UPDATE tater_tts_requests
+			SET status = 'pending', core_id = '', updated_at = ?
+			WHERE status = 'processing' AND updated_at <= ? AND expires_at > ?
+		`, now, now.Add(-2*time.Minute), now); err != nil {
+			return err
+		}
+		if _, err := tx.db.ExecContext(ctx, `
+			UPDATE tater_tts_requests
+			SET status = 'failed', error = 'TTS request expired', updated_at = ?
+			WHERE status IN ('pending', 'processing') AND expires_at <= ?
+		`, now, now); err != nil {
+			return err
+		}
+		rows, err := tx.db.QueryContext(ctx, `
+			SELECT id, profile_id, player_id, core_id, text, status, audio_base64,
+				content_type, error, created_at, updated_at, expires_at
+			FROM tater_tts_requests
+			WHERE status = 'pending' AND expires_at > ?
+			ORDER BY created_at ASC LIMIT ?
+		`, now, limit)
+		if err != nil {
+			return err
+		}
+		pending := []TaterTTSRequest{}
+		for rows.Next() {
+			var item TaterTTSRequest
+			if err := rows.Scan(
+				&item.ID, &item.ProfileID, &item.PlayerID, &item.CoreID, &item.Text,
+				&item.Status, &item.AudioBase64, &item.ContentType, &item.Error,
+				&item.CreatedAt, &item.UpdatedAt, &item.ExpiresAt,
+			); err != nil {
+				rows.Close()
+				return err
+			}
+			pending = append(pending, item)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for _, item := range pending {
+			result, err := tx.db.ExecContext(ctx, `
+				UPDATE tater_tts_requests
+				SET status = 'processing', core_id = ?, updated_at = ?
+				WHERE id = ? AND status = 'pending'
+			`, coreID, now, item.ID)
+			if err != nil {
+				return err
+			}
+			count, _ := result.RowsAffected()
+			if count == 1 {
+				item.CoreID = coreID
+				item.Status = "processing"
+				item.UpdatedAt = now
+				claimed = append(claimed, item)
+			}
+		}
+		return nil
+	})
+	return claimed, err
+}
+
+func (r *Repository) CompleteTaterTTSRequest(
+	ctx context.Context,
+	id, coreID, audioBase64, contentType, errorMessage string,
+	now time.Time,
+) error {
+	status := "ready"
+	if errorMessage != "" {
+		status = "failed"
+		audioBase64 = ""
+	}
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE tater_tts_requests
+		SET status = ?, audio_base64 = ?, content_type = ?, error = ?, updated_at = ?
+		WHERE id = ? AND core_id = ? AND status = 'processing'
+	`, status, audioBase64, contentType, errorMessage, now, id, coreID)
+	if err != nil {
+		return err
+	}
+	count, _ := result.RowsAffected()
+	if count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (r *Repository) CancelTaterTTSRequest(ctx context.Context, id, playerID string, now time.Time) error {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE tater_tts_requests
+		SET status = 'canceled', audio_base64 = '', updated_at = ?
+		WHERE id = ? AND player_id = ? AND status NOT IN ('canceled', 'failed')
+	`, now, id, playerID)
+	if err != nil {
+		return err
+	}
+	count, _ := result.RowsAffected()
+	if count == 0 {
+		return sql.ErrNoRows
 	}
 	return nil
 }

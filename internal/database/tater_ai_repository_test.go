@@ -74,5 +74,32 @@ func TestTaterAIRepositoryLifecycle(t *testing.T) {
 	require.Equal(t, batch.ID, activeBatch.ID)
 	require.Len(t, picks, 1)
 	require.Equal(t, "pick-1", picks[0].ID)
+	reason, err := repo.GetActiveTaterRecommendationReason(ctx, "pick-1", "household", now)
+	require.NoError(t, err)
+	require.Equal(t, "A good follow-up.", reason)
 	require.NoError(t, repo.SetTaterRecommendationFeedback(ctx, "pick-1", "played", now))
+
+	ttsRequest := TaterTTSRequest{
+		ID: "tts-1", ProfileID: "household", PlayerID: "player-1",
+		Text: "A short recommendation.", Status: "pending", ContentType: "audio/wav",
+		CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(10 * time.Minute),
+	}
+	require.NoError(t, repo.CreateTaterTTSRequest(ctx, ttsRequest))
+	claimed, err := repo.ClaimTaterTTSRequests(ctx, "core-1", 1, now)
+	require.NoError(t, err)
+	require.Len(t, claimed, 1)
+	require.Equal(t, "processing", claimed[0].Status)
+	require.Equal(t, "core-1", claimed[0].CoreID)
+	require.NoError(t, repo.CompleteTaterTTSRequest(
+		ctx, "tts-1", "core-1", "d2F2", "audio/wav", "", now.Add(time.Second),
+	))
+	completed, err := repo.GetTaterTTSRequest(ctx, "tts-1", "player-1")
+	require.NoError(t, err)
+	require.Equal(t, "ready", completed.Status)
+	require.Equal(t, "d2F2", completed.AudioBase64)
+	require.NoError(t, repo.CancelTaterTTSRequest(ctx, "tts-1", "player-1", now.Add(2*time.Second)))
+	canceled, err := repo.GetTaterTTSRequest(ctx, "tts-1", "player-1")
+	require.NoError(t, err)
+	require.Equal(t, "canceled", canceled.Status)
+	require.Empty(t, canceled.AudioBase64)
 }

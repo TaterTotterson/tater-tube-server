@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,9 @@ import (
 const (
 	taterCorePairingCodeTTL = 10 * time.Minute
 	taterDefaultProfileID   = "household"
+	taterTTSRequestTTL      = 10 * time.Minute
+	taterTTSMaxTextRunes    = 800
+	taterTTSMaxAudioBytes   = 8 * 1024 * 1024
 )
 
 type taterPairCoreRequest struct {
@@ -80,6 +84,17 @@ type taterRecommendationResponse struct {
 	Reason      string         `json:"reason"`
 	Feedback    string         `json:"feedback,omitempty"`
 	Launch      map[string]any `json:"launch"`
+}
+
+type taterTTSCreateRequest struct {
+	ProfileID        string `json:"profile_id"`
+	RecommendationID string `json:"recommendation_id"`
+}
+
+type taterTTSCompleteRequest struct {
+	AudioBase64 string `json:"audio_base64"`
+	ContentType string `json:"content_type"`
+	Error       string `json:"error"`
 }
 
 func (s *Server) handleTaterPairCore(c *fiber.Ctx) error {
@@ -405,6 +420,198 @@ func (s *Server) handleTaterRecommendationFeedback(c *fiber.Ctx) error {
 		return RespondNotFound(c, "Recommendation", c.Params("id"))
 	}
 	return RespondSuccess(c, fiber.Map{"id": c.Params("id"), "feedback": feedback})
+}
+
+func (s *Server) handleTaterPlayerCreateTTSRequest(c *fiber.Ctx) error {
+	cfg, token, ok := s.taterAuthorizedConfig(c)
+	if !ok {
+		return nil
+	}
+	if s.queueRepo == nil {
+		return RespondServiceUnavailable(c, "Database not available", "")
+	}
+	player, ok := findTaterPlayerByToken(cfg, token)
+	if !ok {
+		return RespondUnauthorized(c, "Invalid player token", "")
+	}
+	var req taterTTSCreateRequest
+	if err := c.BodyParser(&req); err != nil {
+		return RespondValidationError(c, "Invalid TTS request", err.Error())
+	}
+	recommendationID := strings.TrimSpace(req.RecommendationID)
+	if recommendationID == "" {
+		return RespondValidationError(c, "recommendation_id is required", "")
+	}
+	profileID := cleanTaterProfileID(req.ProfileID)
+	text, err := s.queueRepo.GetActiveTaterRecommendationReason(
+		c.Context(), recommendationID, profileID, time.Now().UTC(),
+	)
+	if err == sql.ErrNoRows {
+		return RespondNotFound(c, "Recommendation", recommendationID)
+	}
+	if err != nil {
+		return RespondInternalError(c, "Failed to load recommendation summary", err.Error())
+	}
+	text = cleanTaterText(text)
+	if text == "" {
+		return RespondValidationError(c, "Recommendation summary is empty", "")
+	}
+	runes := []rune(text)
+	if len(runes) > taterTTSMaxTextRunes {
+		text = strings.TrimSpace(string(runes[:taterTTSMaxTextRunes]))
+	}
+	id, err := randomHex(12)
+	if err != nil {
+		return RespondInternalError(c, "Failed to create TTS request", err.Error())
+	}
+	now := time.Now().UTC()
+	item := database.TaterTTSRequest{
+		ID: id, ProfileID: profileID, PlayerID: player.ID,
+		Text: text, Status: "pending", ContentType: "audio/wav",
+		CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(taterTTSRequestTTL),
+	}
+	if err := s.queueRepo.CreateTaterTTSRequest(c.Context(), item); err != nil {
+		return RespondInternalError(c, "Failed to queue TTS request", err.Error())
+	}
+	return RespondCreated(c, fiber.Map{
+		"id": item.ID, "status": item.Status, "expires_at": item.ExpiresAt,
+	})
+}
+
+func (s *Server) handleTaterPlayerTTSRequest(c *fiber.Ctx) error {
+	cfg, token, ok := s.taterAuthorizedConfig(c)
+	if !ok {
+		return nil
+	}
+	player, ok := findTaterPlayerByToken(cfg, token)
+	if !ok {
+		return RespondUnauthorized(c, "Invalid player token", "")
+	}
+	item, err := s.queueRepo.GetTaterTTSRequest(c.Context(), strings.TrimSpace(c.Params("id")), player.ID)
+	if err == sql.ErrNoRows {
+		return RespondNotFound(c, "TTS request", c.Params("id"))
+	}
+	if err != nil {
+		return RespondInternalError(c, "Failed to load TTS request", err.Error())
+	}
+	data := fiber.Map{
+		"id": item.ID, "status": item.Status, "content_type": item.ContentType,
+		"error": item.Error, "expires_at": item.ExpiresAt,
+	}
+	if item.Status == "ready" {
+		data["audio_url"] = fmt.Sprintf("/api/tater/tts/requests/%s/audio", item.ID)
+	}
+	return RespondSuccess(c, data)
+}
+
+func (s *Server) handleTaterPlayerTTSAudio(c *fiber.Ctx) error {
+	cfg, token, ok := s.taterAuthorizedConfig(c)
+	if !ok {
+		return nil
+	}
+	player, ok := findTaterPlayerByToken(cfg, token)
+	if !ok {
+		return RespondUnauthorized(c, "Invalid player token", "")
+	}
+	item, err := s.queueRepo.GetTaterTTSRequest(c.Context(), strings.TrimSpace(c.Params("id")), player.ID)
+	if err == sql.ErrNoRows {
+		return RespondNotFound(c, "TTS request", c.Params("id"))
+	}
+	if err != nil {
+		return RespondInternalError(c, "Failed to load TTS audio", err.Error())
+	}
+	if item.Status != "ready" || item.AudioBase64 == "" {
+		return RespondConflict(c, "TTS audio is not ready", "")
+	}
+	audio, err := base64.StdEncoding.DecodeString(item.AudioBase64)
+	if err != nil || len(audio) == 0 {
+		return RespondInternalError(c, "Stored TTS audio is invalid", "")
+	}
+	contentType := strings.TrimSpace(item.ContentType)
+	if contentType == "" {
+		contentType = "audio/wav"
+	}
+	c.Set(fiber.HeaderContentType, contentType)
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	return c.Send(audio)
+}
+
+func (s *Server) handleTaterPlayerCancelTTSRequest(c *fiber.Ctx) error {
+	cfg, token, ok := s.taterAuthorizedConfig(c)
+	if !ok {
+		return nil
+	}
+	player, ok := findTaterPlayerByToken(cfg, token)
+	if !ok {
+		return RespondUnauthorized(c, "Invalid player token", "")
+	}
+	id := strings.TrimSpace(c.Params("id"))
+	if _, err := s.queueRepo.GetTaterTTSRequest(c.Context(), id, player.ID); err == sql.ErrNoRows {
+		return RespondNotFound(c, "TTS request", id)
+	} else if err != nil {
+		return RespondInternalError(c, "Failed to load TTS request", err.Error())
+	}
+	_ = s.queueRepo.CancelTaterTTSRequest(c.Context(), id, player.ID, time.Now().UTC())
+	return RespondSuccess(c, fiber.Map{"id": id, "status": "canceled"})
+}
+
+func (s *Server) handleTaterCoreClaimTTSRequests(c *fiber.Ctx) error {
+	core, ok := s.taterCoreAuthorized(c)
+	if !ok {
+		return nil
+	}
+	limit := queryInt(c, "limit", 1, 1, 4)
+	items, err := s.queueRepo.ClaimTaterTTSRequests(c.Context(), core.ID, limit, time.Now().UTC())
+	if err != nil {
+		return RespondInternalError(c, "Failed to claim TTS requests", err.Error())
+	}
+	return RespondSuccess(c, fiber.Map{"requests": items})
+}
+
+func (s *Server) handleTaterCoreCompleteTTSRequest(c *fiber.Ctx) error {
+	core, ok := s.taterCoreAuthorized(c)
+	if !ok {
+		return nil
+	}
+	var req taterTTSCompleteRequest
+	if err := c.BodyParser(&req); err != nil {
+		return RespondValidationError(c, "Invalid TTS completion", err.Error())
+	}
+	errorMessage := cleanTaterText(req.Error)
+	contentType := strings.TrimSpace(req.ContentType)
+	if contentType == "" {
+		contentType = "audio/wav"
+	}
+	audioBase64 := strings.TrimSpace(req.AudioBase64)
+	if errorMessage == "" {
+		audio, err := base64.StdEncoding.DecodeString(audioBase64)
+		if err != nil || len(audio) == 0 {
+			return RespondValidationError(c, "Valid TTS audio is required", "")
+		}
+		if len(audio) > taterTTSMaxAudioBytes {
+			return RespondValidationError(c, "TTS audio is too large", "")
+		}
+		if len(audio) < 12 || string(audio[:4]) != "RIFF" || string(audio[8:12]) != "WAVE" {
+			return RespondValidationError(c, "TTS audio must be WAV", "")
+		}
+	}
+	err := s.queueRepo.CompleteTaterTTSRequest(
+		c.Context(), strings.TrimSpace(c.Params("id")), core.ID,
+		audioBase64, contentType, errorMessage, time.Now().UTC(),
+	)
+	if err == sql.ErrNoRows {
+		return RespondSuccess(c, fiber.Map{
+			"id": c.Params("id"), "discarded": true,
+		})
+	}
+	if err != nil {
+		return RespondInternalError(c, "Failed to complete TTS request", err.Error())
+	}
+	status := "ready"
+	if errorMessage != "" {
+		status = "failed"
+	}
+	return RespondSuccess(c, fiber.Map{"id": c.Params("id"), "status": status})
 }
 
 func (s *Server) handleTaterAdminState(c *fiber.Ctx) error {
