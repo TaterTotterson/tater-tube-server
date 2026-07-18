@@ -1,4 +1,14 @@
-import { Clock3, Eye, KeyRound, Plus, RefreshCw, ShieldOff, Sparkles, Trash2 } from "lucide-react";
+import {
+	CheckCircle2,
+	Clock3,
+	Eye,
+	KeyRound,
+	Plus,
+	RefreshCw,
+	ShieldOff,
+	Sparkles,
+	Trash2,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { apiClient } from "../../api/client";
 import { useConfirm } from "../../contexts/ModalContext";
@@ -56,6 +66,43 @@ export function TaterConfigSection() {
 	useEffect(() => {
 		void refresh();
 	}, [refresh]);
+
+	useEffect(() => {
+		if (!pairingCode) return;
+
+		let cancelled = false;
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		const poll = async () => {
+			try {
+				const nextState = await apiClient.getTaterAdminState();
+				if (cancelled) return;
+				setState(nextState);
+
+				const stillWaiting = nextState.pairing_codes.some((item) => item.id === pairingCode.id);
+				if (!stillWaiting) {
+					setPairingCode(null);
+					const expiresAt = new Date(pairingCode.expires_at).getTime();
+					if (!Number.isFinite(expiresAt) || expiresAt > Date.now()) {
+						showToast({
+							type: "success",
+							title: "Tater Connected",
+							message: `${pairingCode.name || "Tater Core"} is ready.`,
+						});
+					}
+					return;
+				}
+			} catch {
+				// Pairing can survive a brief network interruption; keep waiting quietly.
+			}
+			if (!cancelled) timeout = setTimeout(poll, 1250);
+		};
+
+		timeout = setTimeout(poll, 600);
+		return () => {
+			cancelled = true;
+			if (timeout) clearTimeout(timeout);
+		};
+	}, [pairingCode, showToast]);
 
 	const createCode = async () => {
 		setCreating(true);
@@ -120,43 +167,19 @@ export function TaterConfigSection() {
 
 	return (
 		<div className="min-w-0 space-y-8">
-			<div className="rounded-2xl border-2 border-primary/25 bg-primary/5 p-6">
-				<div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-					<div className="max-w-2xl">
-						<div className="mb-3 flex items-center gap-2">
-							<Sparkles className="h-5 w-5 text-primary" />
-							<h3 className="font-black text-lg">Connect Tater Core</h3>
+			{activeConnections.length > 0 ? (
+				<div className="rounded-2xl border-2 border-success/35 bg-success/10 p-6">
+					<div className="mb-5 flex items-start justify-between gap-4">
+						<div>
+							<div className="mb-2 flex items-center gap-2">
+								<CheckCircle2 className="h-5 w-5 text-success" />
+								<h3 className="font-black text-lg text-success">Tater Connected</h3>
+							</div>
+							<p className="text-base-content/65 text-sm leading-relaxed">
+								Tater Core is paired and ready to use viewing context, create recommendations, and
+								voice Tater&apos;s Picks.
+							</p>
 						</div>
-						<p className="text-base-content/65 text-sm leading-relaxed">
-							Create a short-lived PIN, then enter this server address and the PIN in the Tater Tube
-							Core settings. Core receives a dedicated token that can read viewing context and
-							publish recommendations, but cannot stream media or administer the server.
-						</p>
-						<div className="mt-3 rounded-lg bg-base-100/80 px-3 py-2 font-mono text-xs">
-							{window.location.origin}
-						</div>
-					</div>
-					<div className="flex flex-wrap gap-2">
-						<input
-							className="input input-bordered input-sm w-40"
-							value={coreName}
-							onChange={(event) => setCoreName(event.target.value)}
-							placeholder="Tater"
-							maxLength={48}
-						/>
-						<button
-							type="button"
-							className="btn btn-primary btn-sm"
-							onClick={createCode}
-							disabled={creating}
-						>
-							{creating ? (
-								<span className="loading loading-spinner loading-xs" />
-							) : (
-								<Plus className="h-4 w-4" />
-							)}
-							Add Tater
-						</button>
 						<button
 							type="button"
 							className="btn btn-outline btn-sm"
@@ -171,24 +194,105 @@ export function TaterConfigSection() {
 							Refresh
 						</button>
 					</div>
-				</div>
-
-				{pairingCode && (
-					<div className="mt-6 rounded-xl border border-primary/30 bg-base-100 p-5 shadow-sm">
-						<div className="mb-2 flex items-center gap-2 font-bold text-primary text-xs uppercase tracking-widest">
-							<KeyRound className="h-4 w-4" />
-							Tater Core Pairing PIN
-						</div>
-						<div className="font-black font-mono text-5xl text-primary tracking-[0.18em]">
-							{pairingCode.code}
-						</div>
-						<p className="mt-3 text-base-content/55 text-xs">
-							For {pairingCode.name || "Tater Tube Core"} · Expires{" "}
-							{formatDate(pairingCode.expires_at)}
-						</p>
+					<div className="space-y-3">
+						{activeConnections.map((item) => (
+							<div
+								key={item.id}
+								className="flex items-center justify-between gap-4 rounded-xl border border-success/25 bg-base-100/80 p-4"
+							>
+								<div className="min-w-0">
+									<div className="truncate font-bold">{item.name}</div>
+									<div className="mt-1 text-base-content/50 text-xs">
+										Last seen {formatDate(item.last_seen_at)} · Paired {formatDate(item.created_at)}
+									</div>
+								</div>
+								<button
+									type="button"
+									className="btn btn-error btn-outline btn-sm"
+									onClick={() => revoke(item.id, item.name)}
+								>
+									<ShieldOff className="h-4 w-4" />
+									Remove Tater
+								</button>
+							</div>
+						))}
 					</div>
-				)}
-			</div>
+				</div>
+			) : (
+				<div className="rounded-2xl border-2 border-primary/25 bg-primary/5 p-6">
+					<div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+						<div className="max-w-2xl">
+							<div className="mb-3 flex items-center gap-2">
+								<Sparkles className="h-5 w-5 text-primary" />
+								<h3 className="font-black text-lg">Connect Tater Core</h3>
+							</div>
+							<p className="text-base-content/65 text-sm leading-relaxed">
+								Create a short-lived PIN, then enter this server address and the PIN in the Tater
+								Tube Core settings. Core receives a dedicated token that can read viewing context
+								and publish recommendations, but cannot stream media or administer the server.
+							</p>
+							<div className="mt-3 rounded-lg bg-base-100/80 px-3 py-2 font-mono text-xs">
+								{window.location.origin}
+							</div>
+						</div>
+						<div className="flex flex-wrap gap-2">
+							<input
+								className="input input-bordered input-sm w-40"
+								value={coreName}
+								onChange={(event) => setCoreName(event.target.value)}
+								placeholder="Tater"
+								maxLength={48}
+							/>
+							<button
+								type="button"
+								className="btn btn-primary btn-sm"
+								onClick={createCode}
+								disabled={creating}
+							>
+								{creating ? (
+									<span className="loading loading-spinner loading-xs" />
+								) : (
+									<Plus className="h-4 w-4" />
+								)}
+								Add Tater
+							</button>
+							<button
+								type="button"
+								className="btn btn-outline btn-sm"
+								onClick={refresh}
+								disabled={loading}
+							>
+								{loading ? (
+									<span className="loading loading-spinner loading-xs" />
+								) : (
+									<RefreshCw className="h-4 w-4" />
+								)}
+								Refresh
+							</button>
+						</div>
+					</div>
+
+					{pairingCode && (
+						<div className="mt-6 rounded-xl border border-primary/30 bg-base-100 p-5 shadow-sm">
+							<div className="mb-2 flex items-center gap-2 font-bold text-primary text-xs uppercase tracking-widest">
+								<KeyRound className="h-4 w-4" />
+								Tater Core Pairing PIN
+							</div>
+							<div className="font-black font-mono text-5xl text-primary tracking-[0.18em]">
+								{pairingCode.code}
+							</div>
+							<p className="mt-3 text-base-content/55 text-xs">
+								For {pairingCode.name || "Tater Tube Core"} · Expires{" "}
+								{formatDate(pairingCode.expires_at)}
+							</p>
+							<div className="mt-3 flex items-center gap-2 text-primary text-xs">
+								<span className="loading loading-spinner loading-xs" />
+								Waiting for Tater Core to connect…
+							</div>
+						</div>
+					)}
+				</div>
+			)}
 
 			<div className="grid gap-4 md:grid-cols-3">
 				<div className="stat rounded-2xl border border-base-300 bg-base-200/50">
@@ -213,40 +317,6 @@ export function TaterConfigSection() {
 					<div className="stat-value text-accent">{recommendations.length}</div>
 				</div>
 			</div>
-
-			<section className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-				<h4 className="mb-4 font-bold text-base-content/45 text-xs uppercase tracking-widest">
-					Connected Taters
-				</h4>
-				<div className="space-y-3">
-					{activeConnections.length === 0 && (
-						<div className="rounded-xl border border-base-300 bg-base-100/70 p-4 text-base-content/55 text-sm">
-							No Tater Core is connected yet.
-						</div>
-					)}
-					{activeConnections.map((item) => (
-						<div
-							key={item.id}
-							className="flex items-center justify-between gap-4 rounded-xl border border-base-300 bg-base-100/80 p-4"
-						>
-							<div className="min-w-0">
-								<div className="truncate font-bold">{item.name}</div>
-								<div className="mt-1 text-base-content/50 text-xs">
-									Last seen {formatDate(item.last_seen_at)} · Paired {formatDate(item.created_at)}
-								</div>
-							</div>
-							<button
-								type="button"
-								className="btn btn-error btn-outline btn-sm"
-								onClick={() => revoke(item.id, item.name)}
-							>
-								<ShieldOff className="h-4 w-4" />
-								Disconnect
-							</button>
-						</div>
-					))}
-				</div>
-			</section>
 
 			<section className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 				<div className="mb-4 flex items-center justify-between gap-3">

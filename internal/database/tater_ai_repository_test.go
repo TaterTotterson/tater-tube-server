@@ -77,6 +77,9 @@ func TestTaterAIRepositoryLifecycle(t *testing.T) {
 	reason, err := repo.GetActiveTaterRecommendationReason(ctx, "pick-1", "household", now)
 	require.NoError(t, err)
 	require.Equal(t, "A good follow-up.", reason)
+	summary, err := repo.GetActiveTaterRecommendationSummary(ctx, "batch-1", "household", now)
+	require.NoError(t, err)
+	require.Equal(t, "Movie night", summary)
 	require.NoError(t, repo.SetTaterRecommendationFeedback(ctx, "pick-1", "played", now))
 
 	ttsRequest := TaterTTSRequest{

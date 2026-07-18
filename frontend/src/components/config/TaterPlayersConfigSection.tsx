@@ -39,6 +39,44 @@ export function TaterPlayersConfigSection({ config, onRefresh }: TaterPlayersCon
 		setPlayers(config.players ?? { players: [], pairing_codes: [] });
 	}, [config.players]);
 
+	useEffect(() => {
+		if (!pairingCode) return;
+
+		let cancelled = false;
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		const poll = async () => {
+			try {
+				const nextPlayers = await apiClient.getTaterPlayers();
+				if (cancelled) return;
+				setPlayers(nextPlayers);
+
+				const stillWaiting = nextPlayers.pairing_codes.some((item) => item.id === pairingCode.id);
+				if (!stillWaiting) {
+					setPairingCode(null);
+					const expiresAt = new Date(pairingCode.expires_at).getTime();
+					if (!Number.isFinite(expiresAt) || expiresAt > Date.now()) {
+						showToast({
+							type: "success",
+							title: "Player Connected",
+							message: `${pairingCode.name || "Tater Tube Player"} is ready.`,
+						});
+					}
+					await onRefresh?.();
+					return;
+				}
+			} catch {
+				// Pairing can survive a brief network interruption; keep waiting quietly.
+			}
+			if (!cancelled) timeout = setTimeout(poll, 1250);
+		};
+
+		timeout = setTimeout(poll, 600);
+		return () => {
+			cancelled = true;
+			if (timeout) clearTimeout(timeout);
+		};
+	}, [onRefresh, pairingCode, showToast]);
+
 	const refresh = async () => {
 		setIsLoading(true);
 		try {
@@ -210,6 +248,10 @@ export function TaterPlayersConfigSection({ config, onRefresh }: TaterPlayersCon
 						<p className="mt-3 text-base-content/60 text-xs">
 							Expires {formatDate(pairingCode.expires_at)}.
 						</p>
+						<div className="mt-3 flex items-center gap-2 text-primary text-xs">
+							<span className="loading loading-spinner loading-xs" />
+							Waiting for the player to connect…
+						</div>
 					</div>
 				)}
 			</div>
