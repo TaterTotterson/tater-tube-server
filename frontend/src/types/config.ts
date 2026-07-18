@@ -542,6 +542,7 @@ export interface TubeTVCustomChannel {
 	title: string;
 	channel_number?: string;
 	commercial_category?: string;
+	bumper_groups?: string[];
 	logo_path?: string;
 	logo_title?: string;
 	logo_position?: "top_left" | "top_right" | "bottom_right" | "bottom_left" | string;
@@ -593,6 +594,36 @@ export interface TubeTVCommercialLibrary {
 	categories: TubeTVCommercialCategory[];
 }
 
+export type TubeTVBumperPlacement = "before" | "after" | "both";
+
+export interface TubeTVBumperVideo {
+	title: string;
+	groupId: string;
+	group: string;
+	placement: TubeTVBumperPlacement;
+	placementLabel: string;
+	name: string;
+	url?: string;
+	kind: string;
+	local: boolean;
+	duration: number;
+	fullDuration: number;
+}
+
+export interface TubeTVBumperGroup {
+	id: string;
+	title: string;
+	placement: TubeTVBumperPlacement;
+	placementLabel: string;
+	count: number;
+	videos: TubeTVBumperVideo[];
+}
+
+export interface TubeTVBumperLibrary {
+	root: string;
+	groups: TubeTVBumperGroup[];
+}
+
 export interface TubeTVLocalLibraryRow {
 	id?: string;
 	title: string;
@@ -623,6 +654,10 @@ export interface TubeTVGuideScheduleItem {
 	mediaType?: string;
 	category?: string;
 	categoryId?: string;
+	group?: string;
+	groupId?: string;
+	placement?: TubeTVBumperPlacement;
+	placementLabel?: string;
 	path?: string;
 	start?: number;
 	end?: number;

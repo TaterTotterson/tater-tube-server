@@ -222,6 +222,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/tater/music/tracks", s.handleTaterMusicTracks)
 	api.Get("/tater/tv/lineup", s.handleTaterTVLineup)
 	api.Get("/tater/tv/commercials/file", s.handleTaterTVCommercialFile)
+	api.Get("/tater/tv/bumpers/file", s.handleTaterTVBumperFile)
 
 	cfg := s.configManager.GetConfig()
 
@@ -263,6 +264,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Patch("/tater/players/:id", s.handleTaterUpdatePlayer)
 	api.Delete("/tater/players/:id", s.handleTaterRevokePlayer)
 	api.Get("/tube-tv/commercials", s.handleTubeTVCommercialLibrary)
+	api.Get("/tube-tv/bumpers", s.handleTubeTVBumperLibrary)
 	api.Get("/tube-tv/local-library", s.handleTubeTVLocalLibrary)
 	api.Get("/tube-tv/logos/search", s.handleTubeTVLogoSearch)
 	api.Get("/tube-tv/guide", s.handleTubeTVGuide)
@@ -271,6 +273,10 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/tube-tv/commercials/upload", s.handleTubeTVUploadCommercials)
 	api.Delete("/tube-tv/commercials/file", s.handleTubeTVDeleteCommercialFile)
 	api.Delete("/tube-tv/commercials/category", s.handleTubeTVDeleteCommercialCategory)
+	api.Post("/tube-tv/bumpers/group", s.handleTubeTVCreateBumperGroup)
+	api.Post("/tube-tv/bumpers/upload", s.handleTubeTVUploadBumpers)
+	api.Delete("/tube-tv/bumpers/file", s.handleTubeTVDeleteBumperFile)
+	api.Delete("/tube-tv/bumpers/group", s.handleTubeTVDeleteBumperGroup)
 
 	// Queue endpoints
 	api.Get("/queue", s.handleListQueue)

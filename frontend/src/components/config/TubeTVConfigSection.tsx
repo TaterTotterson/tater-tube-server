@@ -3,6 +3,7 @@ import {
 	Check,
 	Clapperboard,
 	Film,
+	Flag,
 	Folder,
 	Image,
 	Layers,
@@ -21,6 +22,8 @@ import { useToast } from "../../contexts/ToastContext";
 import type {
 	ConfigResponse,
 	LocalMediaCategory,
+	TubeTVBumperLibrary,
+	TubeTVBumperPlacement,
 	TubeTVCommercialLibrary,
 	TubeTVConfig,
 	TubeTVCustomChannel,
@@ -38,7 +41,7 @@ interface TubeTVConfigSectionProps {
 	isUpdating?: boolean;
 }
 
-type TubeTVTab = "general" | "commercials" | "channels";
+type TubeTVTab = "general" | "commercials" | "bumpers" | "channels";
 
 const DEFAULT_TUBE_TV: TubeTVConfig = {
 	enabled: true,
@@ -135,6 +138,7 @@ function normalize(config: ConfigResponse): TubeTVConfig {
 			title: channel.title || "Custom Channel",
 			channel_number: formatChannelNumber(channel.channel_number || ""),
 			commercial_category: channel.commercial_category || "",
+			bumper_groups: channel.bumper_groups ?? [],
 			logo_path: channel.logo_path || "",
 			logo_title: channel.logo_title || "",
 			logo_position: normalizeLogoPosition(channel.logo_position),
@@ -192,10 +196,16 @@ export function TubeTVConfigSection({
 	const { confirmAction } = useConfirm();
 	const [formData, setFormData] = useState<TubeTVConfig>(() => normalize(config));
 	const [library, setLibrary] = useState<TubeTVCommercialLibrary | null>(null);
+	const [bumperLibrary, setBumperLibrary] = useState<TubeTVBumperLibrary | null>(null);
 	const [newCategory, setNewCategory] = useState("");
 	const [uploadCategory, setUploadCategory] = useState("");
 	const [isLibraryLoading, setIsLibraryLoading] = useState(false);
 	const [isUploading, setIsUploading] = useState(false);
+	const [newBumperGroup, setNewBumperGroup] = useState("");
+	const [newBumperPlacement, setNewBumperPlacement] = useState<TubeTVBumperPlacement>("before");
+	const [uploadBumperGroup, setUploadBumperGroup] = useState("");
+	const [isBumperLibraryLoading, setIsBumperLibraryLoading] = useState(false);
+	const [isBumperUploading, setIsBumperUploading] = useState(false);
 	const [browserChannelIndex, setBrowserChannelIndex] = useState<number | null>(null);
 	const [browserRequest, setBrowserRequest] = useState<LibraryRequest>({
 		categoryId: "",
@@ -240,9 +250,30 @@ export function TubeTVConfigSection({
 		}
 	}, [showToast]);
 
+	const refreshBumperLibrary = useCallback(async () => {
+		setIsBumperLibraryLoading(true);
+		try {
+			const data = await apiClient.getTubeTVBumpers();
+			setBumperLibrary(data);
+			setUploadBumperGroup((current) => current || data.groups[0]?.id || "");
+		} catch (error) {
+			showToast({
+				type: "error",
+				title: "Bumpers Failed",
+				message: error instanceof Error ? error.message : "Unable to load bumpers.",
+			});
+		} finally {
+			setIsBumperLibraryLoading(false);
+		}
+	}, [showToast]);
+
 	useEffect(() => {
 		void refreshLibrary();
 	}, [refreshLibrary]);
+
+	useEffect(() => {
+		void refreshBumperLibrary();
+	}, [refreshBumperLibrary]);
 
 	useEffect(() => {
 		if (browserChannelIndex === null) {
@@ -298,6 +329,7 @@ export function TubeTVConfigSection({
 					title: `Custom ${count}`,
 					channel_number: "",
 					commercial_category: "",
+					bumper_groups: [],
 					logo_path: "",
 					logo_title: "",
 					logo_position: "bottom_right",
@@ -437,6 +469,14 @@ export function TubeTVConfigSection({
 		update({ ...formData, commercial_categories: Array.from(set) });
 	};
 
+	const toggleChannelBumperGroup = (channelIndex: number, groupId: string) => {
+		const channel = formData.custom_channels[channelIndex];
+		const groups = new Set(channel.bumper_groups ?? []);
+		if (groups.has(groupId)) groups.delete(groupId);
+		else groups.add(groupId);
+		updateChannel(channelIndex, { bumper_groups: Array.from(groups) });
+	};
+
 	const save = async () => {
 		if (!onUpdate || !hasChanges) return;
 		await onUpdate("tube_tv", {
@@ -448,6 +488,7 @@ export function TubeTVConfigSection({
 					id: slug(channel.id || channel.title),
 					title: channel.title.trim(),
 					commercial_category: slug(channel.commercial_category || ""),
+					bumper_groups: (channel.bumper_groups ?? []).map(slug).filter(Boolean),
 					logo_path: (channel.logo_path || "").trim().replace(/^\/+/, ""),
 					logo_title: (channel.logo_title || "").trim(),
 					logo_position: normalizeLogoPosition(channel.logo_position),
@@ -518,6 +559,70 @@ export function TubeTVConfigSection({
 		setLibrary(data);
 	};
 
+	const createBumperGroup = async () => {
+		const name = newBumperGroup.trim();
+		if (!name) return;
+		try {
+			const data = await apiClient.createTubeTVBumperGroup(name, newBumperPlacement);
+			setBumperLibrary(data);
+			setUploadBumperGroup(slug(name));
+			setNewBumperGroup("");
+		} catch (error) {
+			showToast({
+				type: "error",
+				title: "Bumper Group Failed",
+				message: error instanceof Error ? error.message : "Unable to create bumper group.",
+			});
+		}
+	};
+
+	const uploadBumperFiles = async (files: FileList | null) => {
+		if (!files || files.length === 0 || !uploadBumperGroup) return;
+		const group = bumperLibrary?.groups.find((row) => row.id === uploadBumperGroup);
+		if (!group) return;
+		setIsBumperUploading(true);
+		try {
+			const data = await apiClient.uploadTubeTVBumpers(group.id, group.placement, files);
+			setBumperLibrary(data);
+			showToast({
+				type: "success",
+				title: "Bumpers Uploaded",
+				message: `${files.length} file${files.length === 1 ? "" : "s"} added.`,
+			});
+		} catch (error) {
+			showToast({
+				type: "error",
+				title: "Upload Failed",
+				message: error instanceof Error ? error.message : "Unable to upload bumpers.",
+			});
+		} finally {
+			setIsBumperUploading(false);
+		}
+	};
+
+	const deleteBumperGroup = async (
+		placement: TubeTVBumperPlacement,
+		groupId: string,
+		title: string,
+	) => {
+		const confirmed = await confirmAction(
+			"Delete Bumper Group",
+			`Delete ${title}? This removes every bumper video in the group.`,
+			{ type: "error", confirmText: "Delete", confirmButtonClass: "btn-error" },
+		);
+		if (!confirmed) return;
+		const data = await apiClient.deleteTubeTVBumperGroup(placement, groupId);
+		setBumperLibrary(data);
+		setUploadBumperGroup((current) => (current === groupId ? data.groups[0]?.id || "" : current));
+		update({
+			...formData,
+			custom_channels: formData.custom_channels.map((channel) => ({
+				...channel,
+				bumper_groups: (channel.bumper_groups ?? []).filter((id) => id !== groupId),
+			})),
+		});
+	};
+
 	const browserRows = (browserData?.rows ?? []).filter((row) => {
 		const query = browserSearch.trim().toLowerCase();
 		if (!query) return true;
@@ -531,6 +636,12 @@ export function TubeTVConfigSection({
 			label: "Commercials",
 			icon: <Upload className="h-4 w-4" />,
 			count: library?.categories.length ?? 0,
+		},
+		{
+			id: "bumpers" as const,
+			label: "Bumpers",
+			icon: <Flag className="h-4 w-4" />,
+			count: bumperLibrary?.groups.length ?? 0,
 		},
 		{
 			id: "channels" as const,
@@ -769,6 +880,160 @@ export function TubeTVConfigSection({
 				</div>
 			)}
 
+			{activeTab === "bumpers" && (
+				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+						<div>
+							<div className="mb-3 flex items-center gap-2">
+								<Flag className="h-4 w-4 text-base-content/60" />
+								<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
+									Bumper Library
+								</h4>
+							</div>
+							<p className="max-w-2xl text-base-content/60 text-sm">
+								Create station IDs and break bumpers, then choose which groups each custom channel
+								can use.
+							</p>
+						</div>
+						<button
+							type="button"
+							className="btn btn-outline btn-sm"
+							onClick={refreshBumperLibrary}
+							disabled={isBumperLibraryLoading}
+						>
+							{isBumperLibraryLoading ? (
+								<span className="loading loading-spinner loading-xs" />
+							) : (
+								<RefreshCw className="h-4 w-4" />
+							)}
+							Refresh
+						</button>
+					</div>
+
+					<div className="grid gap-3 lg:grid-cols-[1fr_16rem_auto] lg:items-end">
+						<label className="form-control">
+							<span className="label-text font-bold text-base-content text-sm">Group Name</span>
+							<input
+								type="text"
+								className="input input-bordered mt-2"
+								value={newBumperGroup}
+								onChange={(event) => setNewBumperGroup(event.target.value)}
+								placeholder="Saturday Morning Station IDs"
+							/>
+						</label>
+						<label className="form-control">
+							<span className="label-text font-bold text-base-content text-sm">Play Position</span>
+							<select
+								className="select select-bordered mt-2"
+								value={newBumperPlacement}
+								onChange={(event) =>
+									setNewBumperPlacement(event.target.value as TubeTVBumperPlacement)
+								}
+							>
+								<option value="before">Before commercials</option>
+								<option value="after">After commercials</option>
+								<option value="both">Before + after</option>
+							</select>
+						</label>
+						<button
+							type="button"
+							className="btn btn-outline"
+							onClick={createBumperGroup}
+							disabled={!newBumperGroup.trim() || isReadOnly}
+						>
+							<Plus className="h-4 w-4" />
+							Add Group
+						</button>
+					</div>
+
+					<div className="mt-4 grid gap-3 md:grid-cols-[18rem_1fr] md:items-end">
+						<label className="form-control">
+							<span className="label-text font-bold text-base-content text-sm">Upload To</span>
+							<select
+								className="select select-bordered mt-2"
+								value={uploadBumperGroup}
+								onChange={(event) => setUploadBumperGroup(event.target.value)}
+							>
+								<option value="">Select bumper group</option>
+								{(bumperLibrary?.groups ?? []).map((group) => (
+									<option key={`${group.placement}-${group.id}`} value={group.id}>
+										{group.title} - {group.placementLabel}
+									</option>
+								))}
+							</select>
+						</label>
+						<label
+							className={`btn btn-primary ${!uploadBumperGroup || isBumperUploading ? "btn-disabled" : ""}`}
+						>
+							{isBumperUploading ? (
+								<span className="loading loading-spinner loading-xs" />
+							) : (
+								<Upload className="h-4 w-4" />
+							)}
+							Upload Bumpers
+							<input
+								type="file"
+								className="hidden"
+								accept="video/*"
+								multiple
+								disabled={!uploadBumperGroup || isBumperUploading || isReadOnly}
+								onChange={(event) => void uploadBumperFiles(event.target.files)}
+							/>
+						</label>
+					</div>
+
+					<div className="mt-5 space-y-3">
+						{(bumperLibrary?.groups ?? []).length === 0 && (
+							<div className="rounded-xl border border-base-300 bg-base-100/70 p-4 text-base-content/60 text-sm">
+								No bumper groups yet.
+							</div>
+						)}
+						{(bumperLibrary?.groups ?? []).map((group) => (
+							<div
+								key={`${group.placement}-${group.id}`}
+								className="rounded-xl border border-base-300 bg-base-100/70 p-4"
+							>
+								<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+									<div className="flex flex-wrap items-center gap-3">
+										<span className="font-bold">{group.title}</span>
+										<span className="badge badge-primary badge-outline">
+											{group.placementLabel}
+										</span>
+										<span className="badge badge-ghost">{group.count} videos</span>
+									</div>
+									<button
+										type="button"
+										className="btn btn-error btn-outline btn-xs"
+										disabled={isReadOnly}
+										onClick={() => void deleteBumperGroup(group.placement, group.id, group.title)}
+									>
+										<Trash2 className="h-3 w-3" />
+										Delete
+									</button>
+								</div>
+								{group.videos.length > 0 && (
+									<div className="mt-3 grid gap-2 sm:grid-cols-2">
+										{group.videos.slice(0, 6).map((video) => (
+											<div
+												key={`${group.placement}-${group.id}-${video.name}`}
+												className="truncate rounded-lg bg-base-200 px-3 py-2 text-base-content/60 text-xs"
+											>
+												{video.title}
+											</div>
+										))}
+										{group.videos.length > 6 && (
+											<div className="rounded-lg bg-base-200 px-3 py-2 text-base-content/50 text-xs">
+												+{group.videos.length - 6} more
+											</div>
+										)}
+									</div>
+								)}
+							</div>
+						))}
+					</div>
+				</div>
+			)}
+
 			{activeTab === "channels" && (
 				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -876,6 +1141,49 @@ export function TubeTVConfigSection({
 										<Trash2 className="h-4 w-4" />
 										Remove
 									</button>
+								</div>
+
+								<div className="mt-4 rounded-xl border border-base-300 bg-base-200/60 p-4">
+									<div className="flex items-center gap-2 font-bold text-base-content/50 text-xs uppercase tracking-widest">
+										<Flag className="h-4 w-4" />
+										Bumper Groups
+									</div>
+									<p className="mt-1 text-base-content/60 text-xs">
+										Selected groups contribute one bumper at their labeled position in every
+										commercial break.
+									</p>
+									{(bumperLibrary?.groups ?? []).length === 0 ? (
+										<div className="mt-3 rounded-lg border border-base-300 border-dashed bg-base-100/60 p-3 text-base-content/50 text-xs">
+											Create bumper groups in the Bumpers tab first.
+										</div>
+									) : (
+										<div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+											{(bumperLibrary?.groups ?? []).map((group) => (
+												<label
+													key={`${channelIndex}-${group.placement}-${group.id}`}
+													className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition ${
+														(channel.bumper_groups ?? []).includes(group.id)
+															? "border-primary bg-primary/10"
+															: "border-base-300 bg-base-100/70 hover:border-primary/50"
+													}`}
+												>
+													<input
+														type="checkbox"
+														className="checkbox checkbox-primary checkbox-sm"
+														checked={(channel.bumper_groups ?? []).includes(group.id)}
+														disabled={isReadOnly}
+														onChange={() => toggleChannelBumperGroup(channelIndex, group.id)}
+													/>
+													<span className="min-w-0 flex-1">
+														<span className="block truncate font-bold text-sm">{group.title}</span>
+														<span className="block truncate text-base-content/50 text-xs">
+															{group.placementLabel} / {group.count} videos
+														</span>
+													</span>
+												</label>
+											))}
+										</div>
+									)}
 								</div>
 
 								<div className="mt-4 rounded-xl border border-base-300 bg-base-200/60 p-4">

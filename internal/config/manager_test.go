@@ -223,6 +223,18 @@ func TestConfig_Validate_TubeTVLogoPaths(t *testing.T) {
 	assert.Equal(t, "bottom_right", unknownPosition.TubeTV.CustomChannels[0].LogoPosition)
 }
 
+func TestConfig_Validate_TubeTVBumperGroups(t *testing.T) {
+	cfg := DefaultConfig(t.TempDir())
+	cfg.TubeTV.CustomChannels = []TubeTVCustomChannel{{
+		ID:           "cartoons",
+		Title:        "Cartoons",
+		BumperGroups: []string{" Network IDs ", "network-ids", "Back To Show", ""},
+	}}
+
+	assert.NoError(t, cfg.Validate())
+	assert.Equal(t, []string{"network-ids", "back-to-show"}, cfg.TubeTV.CustomChannels[0].BumperGroups)
+}
+
 func TestConfig_GetWebhookBaseURL(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -408,7 +408,7 @@ type taterTVStreamItem struct {
 }
 
 func taterTVLogoForItem(item taterTVStreamItem, logoFile string) string {
-	if strings.EqualFold(strings.TrimSpace(item.Kind), "commercial") {
+	if taterTVIsInterstitial(item.Kind) {
 		return ""
 	}
 	return logoFile
@@ -666,6 +666,31 @@ func taterTVResolveStreamItem(cfg *config.Config, row map[string]any, startOffse
 }
 
 func taterTVResolveSchedulePath(cfg *config.Config, row map[string]any) (string, error) {
+	if strings.EqualFold(rowString(row, "kind"), "bumper") {
+		placement := taterTVNormalizeBumperPlacement(rowString(row, "placement"))
+		groupID := taterTVCategoryID(rowString(row, "groupId"), "")
+		rawName := strings.TrimSpace(rowString(row, "name"))
+		name := taterTVSafeFileName(rawName)
+		if placement == "" || groupID == "" || rawName == "" {
+			if u, err := url.Parse(rowString(row, "url")); err == nil {
+				placement = taterTVNormalizeBumperPlacement(u.Query().Get("placement"))
+				groupID = taterTVCategoryID(u.Query().Get("group"), "")
+				rawName = strings.TrimSpace(u.Query().Get("name"))
+				name = taterTVSafeFileName(rawName)
+			}
+		}
+		if placement == "" || groupID == "" || rawName == "" {
+			return "", fmt.Errorf("bumper placement/group/name missing")
+		}
+		path := filepath.Join(taterTVBumperGroupPath(cfg, placement, groupID), name)
+		if !isMediaExtension(filepath.Ext(path)) {
+			return "", fmt.Errorf("unsupported bumper file type")
+		}
+		if stat, err := os.Stat(path); err != nil || stat.IsDir() {
+			return "", fmt.Errorf("bumper file not found")
+		}
+		return path, nil
+	}
 	if strings.EqualFold(rowString(row, "kind"), "commercial") {
 		category := taterTVCategoryID(rowString(row, "categoryId"), "")
 		name := taterTVSafeFileName(rowString(row, "name"))

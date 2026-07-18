@@ -15,6 +15,7 @@ import {
 import { useMemo, useState } from "react";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
+import { Pagination } from "../components/ui/Pagination";
 import { useStreamHistory } from "../hooks/useApi";
 import type { ActiveStream } from "../types/api";
 
@@ -181,6 +182,8 @@ function hardwareDetail(stream: ActiveStream) {
 export function QueuePage() {
 	const [search, setSearch] = useState("");
 	const [source, setSource] = useState<SourceFilter>("all");
+	const [page, setPage] = useState(1);
+	const [pageSize, setPageSize] = useState(25);
 	const { data, isLoading, isFetching, error, refetch } = useStreamHistory();
 	const history = useMemo(() => (Array.isArray(data) ? data : []), [data]);
 
@@ -201,10 +204,16 @@ export function QueuePage() {
 				.some((value) => String(value).toLowerCase().includes(needle));
 		});
 	}, [history, search, source]);
+	const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+	const currentPage = Math.min(page, totalPages);
+	const paged = useMemo(() => {
+		const start = (currentPage - 1) * pageSize;
+		return filtered.slice(start, start + pageSize);
+	}, [currentPage, filtered, pageSize]);
 
 	const grouped = useMemo(() => {
 		const rows: Array<{ label: string; records: ActiveStream[] }> = [];
-		for (const stream of filtered) {
+		for (const stream of paged) {
 			const label = dayLabel(activityDate(stream));
 			const current = rows.at(-1);
 			if (!current || current.label !== label) {
@@ -214,7 +223,7 @@ export function QueuePage() {
 			}
 		}
 		return rows;
-	}, [filtered]);
+	}, [paged]);
 
 	const uniquePlayers = useMemo(
 		() => new Set(history.map((stream) => playerLabel(stream).toLowerCase())).size,
@@ -309,13 +318,19 @@ export function QueuePage() {
 						className="min-w-0 grow"
 						placeholder="Search playback"
 						value={search}
-						onChange={(event) => setSearch(event.target.value)}
+						onChange={(event) => {
+							setSearch(event.target.value);
+							setPage(1);
+						}}
 					/>
 				</label>
 				<select
 					className="select select-bordered w-full sm:w-44"
 					value={source}
-					onChange={(event) => setSource(event.target.value as SourceFilter)}
+					onChange={(event) => {
+						setSource(event.target.value as SourceFilter);
+						setPage(1);
+					}}
 					aria-label="Filter playback source"
 				>
 					<option value="all">All Sources</option>
@@ -324,7 +339,30 @@ export function QueuePage() {
 					<option value="nzb">NZB Stream</option>
 					<option value="other">Other</option>
 				</select>
+				<select
+					className="select select-bordered w-full sm:w-36"
+					value={pageSize}
+					onChange={(event) => {
+						setPageSize(Number(event.target.value));
+						setPage(1);
+					}}
+					aria-label="Playback entries per page"
+				>
+					<option value={10}>10 per page</option>
+					<option value={25}>25 per page</option>
+					<option value={50}>50 per page</option>
+				</select>
 			</div>
+
+			{!isLoading && filtered.length > 0 && (
+				<Pagination
+					currentPage={currentPage}
+					totalPages={totalPages}
+					onPageChange={setPage}
+					totalItems={filtered.length}
+					itemsPerPage={pageSize}
+				/>
+			)}
 
 			{isLoading ? (
 				<div className="flex min-h-64 items-center justify-center">
@@ -459,6 +497,13 @@ export function QueuePage() {
 							</div>
 						</section>
 					))}
+					<Pagination
+						currentPage={currentPage}
+						totalPages={totalPages}
+						onPageChange={setPage}
+						totalItems={filtered.length}
+						itemsPerPage={pageSize}
+					/>
 				</div>
 			)}
 		</div>
