@@ -13,6 +13,7 @@ import {
 	Settings,
 	Shield,
 	ShieldAlert,
+	Sparkles,
 	Tv,
 	Wrench,
 } from "lucide-react";
@@ -29,6 +30,7 @@ import { ProvidersConfigSection } from "../components/config/ProvidersConfigSect
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
+import { TaterConfigSection } from "../components/config/TaterConfigSection";
 import { TaterPlayersConfigSection } from "../components/config/TaterPlayersConfigSection";
 import { TranscodingConfigSection } from "../components/config/TranscodingConfigSection";
 import { TubeTVConfigSection } from "../components/config/TubeTVConfigSection";
@@ -58,8 +60,8 @@ import type {
 	SABnzbdConfig,
 	SegmentCacheConfig,
 	StreamingConfig,
-	TubeTVConfig,
 	TranscodingConfig,
+	TubeTVConfig,
 } from "../types/config";
 import { CONFIG_SECTIONS } from "../types/config";
 
@@ -79,6 +81,7 @@ const getIconComponent = (iconName: string) => {
 		Server,
 		Tv,
 		Link,
+		Sparkles,
 	};
 	return iconMap[iconName as keyof typeof iconMap] || Settings;
 };
@@ -88,6 +91,10 @@ const SECTION_GROUPS = [
 	{
 		title: "Streamer",
 		sections: ["players", "tube_tv", "local_media", "newznab", "providers"],
+	},
+	{
+		title: "Tater",
+		sections: ["tater"],
 	},
 	{
 		title: "Processing",
@@ -547,6 +554,7 @@ export function ConfigurationPage() {
 										}}
 									/>
 								)}
+								{activeSection === "tater" && <TaterConfigSection />}
 								{![
 									"auth",
 									"import",
@@ -562,6 +570,7 @@ export function ConfigurationPage() {
 									"local_media",
 									"tube_tv",
 									"players",
+									"tater",
 								].includes(activeSection) && (
 									<ComingSoonSection
 										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}

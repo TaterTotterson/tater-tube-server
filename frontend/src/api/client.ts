@@ -37,6 +37,7 @@ import type {
 	ProviderTestRequest,
 	ProviderTestResponse,
 	ProviderUpdateRequest,
+	TaterAdminState,
 	TaterPairingCodeCreateResponse,
 	TaterPlayersConfig,
 	TranscodingHardwareDetection,
@@ -755,6 +756,30 @@ class APIClient {
 
 	async revokeTaterPlayer(id: string) {
 		return this.request<{ message: string }>(`/tater/players/${encodeURIComponent(id)}`, {
+			method: "DELETE",
+		});
+	}
+
+	async getTaterAdminState() {
+		return this.request<TaterAdminState>("/tater/core/admin");
+	}
+
+	async createTaterCorePairingCode(name?: string) {
+		return this.request<TaterPairingCodeCreateResponse>("/tater/core/codes", {
+			method: "POST",
+			body: JSON.stringify({ name: name ?? "" }),
+		});
+	}
+
+	async revokeTaterCore(id: string) {
+		return this.request<{ message: string }>(`/tater/core/connections/${encodeURIComponent(id)}`, {
+			method: "DELETE",
+		});
+	}
+
+	async clearTaterViewingHistory(profileId?: string) {
+		const query = profileId ? `?profile_id=${encodeURIComponent(profileId)}` : "";
+		return this.request<{ message: string }>(`/tater/viewing/history${query}`, {
 			method: "DELETE",
 		});
 	}

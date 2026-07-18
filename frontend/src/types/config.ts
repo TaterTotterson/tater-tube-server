@@ -415,6 +415,7 @@ export type ConfigSection =
 	| "local_media"
 	| "tube_tv"
 	| "players"
+	| "tater"
 	| "system";
 
 export interface ProviderFormData {
@@ -715,6 +716,61 @@ export interface TaterPairingCodeCreateResponse extends TaterPairingCode {
 	code: string;
 }
 
+export interface TaterCoreConnection {
+	id: string;
+	name: string;
+	created_at: string;
+	last_seen_at?: string;
+	revoked_at?: string;
+}
+
+export interface TaterViewingEvent {
+	event_id: string;
+	profile_id: string;
+	player_id: string;
+	source: string;
+	media_id: string;
+	media_type: string;
+	title: string;
+	series_title?: string;
+	season?: number;
+	episode?: number;
+	position_ms: number;
+	duration_ms: number;
+	state: string;
+	occurred_at: string;
+}
+
+export interface TaterRecommendationBatch {
+	id: string;
+	profile_id: string;
+	core_id: string;
+	summary: string;
+	generated_at: string;
+	expires_at: string;
+}
+
+export interface TaterRecommendation {
+	id: string;
+	rank: number;
+	title: string;
+	media_type: string;
+	source: string;
+	reason: string;
+	feedback?: string;
+}
+
+export interface TaterAdminState {
+	connections: TaterCoreConnection[];
+	pairing_codes: TaterPairingCode[];
+	viewing_events: TaterViewingEvent[];
+	recommendation_batches: TaterRecommendationBatch[];
+	active_recommendations: {
+		batch?: TaterRecommendationBatch;
+		items: TaterRecommendation[];
+	};
+}
+
 // Helper type for configuration sections
 interface ConfigSectionInfo {
 	title: string;
@@ -875,6 +931,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		title: "Tater Tube Players",
 		description: "Pair, view, and revoke Tater Tube player devices.",
 		icon: "Tv",
+		canEdit: true,
+	},
+	tater: {
+		title: "Tater",
+		description: "Connect Tater Core, review viewing context, and manage Tater's picks.",
+		icon: "Sparkles",
 		canEdit: true,
 	},
 	system: {
