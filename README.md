@@ -116,6 +116,18 @@ Library types:
 
 Use container paths, not host paths, inside the Tater Tube Server web UI.
 
+## Tube TV
+
+Tube TV builds shared server-side channels from the local movie and television
+libraries. Every paired player receives the same schedule, commercials, channel
+numbers, and optional logo overlays.
+
+The Bumpers tab supports named station-ID groups for `Before commercials`,
+`After commercials`, or `Before + after`. Select the groups on each custom
+channel and Tube TV inserts one eligible bumper at each configured position.
+Bumpers are shuffled without repeating until every video in that placement pool
+has played.
+
 ## Hardware Transcoding
 
 Transcoding is optional and lives under `Configuration -> Hardware Transcoding`.

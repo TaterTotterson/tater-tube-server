@@ -40,6 +40,7 @@ import type {
 	TaterPairingCodeCreateResponse,
 	TaterPlayersConfig,
 	TranscodingHardwareDetection,
+	TubeTVBumperLibrary,
 	TubeTVCommercialLibrary,
 	TubeTVGuideResponse,
 	TubeTVLocalLibraryResponse,
@@ -769,6 +770,10 @@ class APIClient {
 		return this.request<TubeTVCommercialLibrary>("/tube-tv/commercials");
 	}
 
+	async getTubeTVBumpers() {
+		return this.request<TubeTVBumperLibrary>("/tube-tv/bumpers");
+	}
+
 	async getTubeTVLocalLibrary(params?: {
 		categoryId?: string;
 		sourceIndex?: number;
@@ -832,6 +837,45 @@ class APIClient {
 	async deleteTubeTVCommercialCategory(category: string) {
 		const params = new URLSearchParams({ category });
 		return this.request<TubeTVCommercialLibrary>(`/tube-tv/commercials/category?${params}`, {
+			method: "DELETE",
+		});
+	}
+
+	async createTubeTVBumperGroup(name: string, placement: "before" | "after" | "both") {
+		return this.request<TubeTVBumperLibrary>("/tube-tv/bumpers/group", {
+			method: "POST",
+			body: JSON.stringify({ name, placement }),
+		});
+	}
+
+	async uploadTubeTVBumpers(
+		group: string,
+		placement: "before" | "after" | "both",
+		files: FileList | File[],
+	) {
+		const formData = new FormData();
+		formData.set("group", group);
+		formData.set("placement", placement);
+		for (const file of Array.from(files)) {
+			formData.append("files", file);
+		}
+		return this.request<TubeTVBumperLibrary>("/tube-tv/bumpers/upload", {
+			method: "POST",
+			headers: {},
+			body: formData,
+		});
+	}
+
+	async deleteTubeTVBumperFile(placement: string, group: string, name: string) {
+		const params = new URLSearchParams({ placement, group, name });
+		return this.request<TubeTVBumperLibrary>(`/tube-tv/bumpers/file?${params}`, {
+			method: "DELETE",
+		});
+	}
+
+	async deleteTubeTVBumperGroup(placement: string, group: string) {
+		const params = new URLSearchParams({ placement, group });
+		return this.request<TubeTVBumperLibrary>(`/tube-tv/bumpers/group?${params}`, {
 			method: "DELETE",
 		});
 	}

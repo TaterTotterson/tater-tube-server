@@ -694,6 +694,106 @@ func TestTaterTVCommercialCategoriesProbeDurations(t *testing.T) {
 	}
 }
 
+func TestTaterTVBumpersWrapCommercialBreaksAndDoNotRepeatEarly(t *testing.T) {
+	configDir := t.TempDir()
+	cfg := config.DefaultConfig(configDir)
+	cfg.Transcoding.FFmpegPath = fakeFFmpegWithProbe(t, configDir, "#!/bin/sh\nprintf '8.000\\n'\n")
+
+	files := map[string][]string{
+		"before/network-ids": {"Before One.mp4", "Before Two.mp4", "Before Three.mp4"},
+		"after/back-to-show": {"After One.mp4", "After Two.mp4"},
+		"both/station-ids":   {"Both One.mp4", "Both Two.mp4"},
+	}
+	for relDir, names := range files {
+		dir := filepath.Join(taterTVBumperRoot(cfg), relDir)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range names {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte("bumper"), 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	groups := taterTVBumperGroups(cfg, "http://server", "token")
+	if len(groups) != 3 {
+		t.Fatalf("expected three bumper groups, got %#v", groups)
+	}
+	before, after := taterTVBumperPools(groups, []string{"network-ids", "back-to-show", "station-ids"})
+	if len(before) != 5 || len(after) != 4 {
+		t.Fatalf("unexpected placement pools: before=%d after=%d", len(before), len(after))
+	}
+
+	rng := rand.New(rand.NewSource(12))
+	deck := []taterTVBumper{}
+	lastKey := ""
+	seen := map[string]bool{}
+	for i := 0; i < len(before); i++ {
+		bumper, ok := taterTVNextBumper(before, &deck, &lastKey, rng)
+		if !ok {
+			t.Fatal("expected bumper from non-empty pool")
+		}
+		key := taterTVBumperKey(bumper)
+		if seen[key] {
+			t.Fatalf("bumper repeated before the deck was exhausted: %s", key)
+		}
+		seen[key] = true
+	}
+
+	cfg.TubeTV.CommercialsEnabled = boolPtr(true)
+	source := taterTVSource{
+		Title:        "Bumper Channel",
+		BumperGroups: []string{"network-ids", "back-to-show", "station-ids"},
+		Programs: []taterUsenetItem{{
+			Title:           "Feature",
+			StreamURL:       "http://server/feature",
+			DurationSeconds: 600,
+		}},
+	}
+	commercials := []taterTVCommercialCategory{{
+		ID: "ads",
+		Videos: []taterTVCommercial{{
+			Title:         "Ad",
+			CategoryID:    "ads",
+			Name:          "ad.mp4",
+			Duration:      15,
+			FullDuration:  15,
+			DurationKnown: true,
+		}},
+	}}
+	schedule, _ := taterTVBuildSchedule(cfg, source, commercials, rand.New(rand.NewSource(3)))
+	if len(schedule) < 5 {
+		t.Fatalf("expected program, two bumpers, and commercials: %#v", schedule)
+	}
+	if rowString(schedule[0], "kind") != "movie" || rowString(schedule[1], "kind") != "bumper" {
+		t.Fatalf("expected a bumper immediately before commercials: %#v", schedule)
+	}
+	if placement := rowString(schedule[1], "placement"); placement != "before" && placement != "both" {
+		t.Fatalf("unexpected pre-commercial bumper placement %q", placement)
+	}
+	last := schedule[len(schedule)-1]
+	if rowString(last, "kind") != "bumper" {
+		t.Fatalf("expected a bumper after commercials: %#v", schedule)
+	}
+	if placement := rowString(last, "placement"); placement != "after" && placement != "both" {
+		t.Fatalf("unexpected post-commercial bumper placement %q", placement)
+	}
+	for _, row := range schedule[2 : len(schedule)-1] {
+		if rowString(row, "kind") != "commercial" {
+			t.Fatalf("expected only commercials between bumpers: %#v", schedule)
+		}
+	}
+
+	path, err := taterTVResolveSchedulePath(cfg, schedule[1])
+	if err != nil {
+		t.Fatalf("expected bumper schedule path to resolve: %v", err)
+	}
+	if filepath.Base(path) != rowString(schedule[1], "name") {
+		t.Fatalf("resolved unexpected bumper path %q", path)
+	}
+}
+
 func TestTaterTVUnknownDurationsAreNotScheduled(t *testing.T) {
 	configDir := t.TempDir()
 	mediaRoot := filepath.Join(configDir, "movies")
@@ -1249,7 +1349,7 @@ func TestTaterTVChannelLogoOverlayPositions(t *testing.T) {
 	}
 }
 
-func TestTaterTVChannelLogoIsHiddenForCommercials(t *testing.T) {
+func TestTaterTVChannelLogoIsHiddenForInterstitials(t *testing.T) {
 	logo := "/tmp/channel-logo.png"
 	if got := taterTVLogoForItem(taterTVStreamItem{Kind: "movie"}, logo); got != logo {
 		t.Fatalf("movie should retain channel logo, got %q", got)
@@ -1259,6 +1359,9 @@ func TestTaterTVChannelLogoIsHiddenForCommercials(t *testing.T) {
 	}
 	if got := taterTVLogoForItem(taterTVStreamItem{Kind: "commercial"}, logo); got != "" {
 		t.Fatalf("commercial should not receive channel logo, got %q", got)
+	}
+	if got := taterTVLogoForItem(taterTVStreamItem{Kind: "bumper"}, logo); got != "" {
+		t.Fatalf("bumper should not receive channel logo, got %q", got)
 	}
 }
 

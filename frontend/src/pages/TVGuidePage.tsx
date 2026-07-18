@@ -86,6 +86,7 @@ function currentScheduleItem(channel: TubeTVGuideChannel, elapsed: number) {
 function itemKindLabel(row?: TubeTVGuideScheduleItem) {
 	const kind = String(row?.kind || row?.mediaType || row?.type || "media").toLowerCase();
 	if (kind === "commercial") return "Commercial";
+	if (kind === "bumper") return row?.placementLabel || "Bumper";
 	if (kind === "episode") return "Episode";
 	if (kind === "movie") return "Movie";
 	return kind.replace(/\b\w/g, (char) => char.toUpperCase());
@@ -148,12 +149,14 @@ function guideBlocks(channel: TubeTVGuideChannel, elapsed: number): GuideBlock[]
 
 function blockClasses(row: TubeTVGuideScheduleItem, isCurrent: boolean, isCompact: boolean) {
 	const kind = String(row.kind || row.mediaType || row.type || "media").toLowerCase();
-	const base =
-		"absolute top-2 bottom-2 overflow-hidden rounded-md border shadow-inner";
+	const base = "absolute top-2 bottom-2 overflow-hidden rounded-md border shadow-inner";
 	const padding = isCompact ? " px-0 py-0" : " px-3 py-2";
 	const current = isCurrent ? " ring-2 ring-primary/80" : "";
 	if (kind === "commercial") {
 		return `${base}${padding} border-primary/25 bg-primary/12 text-primary${current}`;
+	}
+	if (kind === "bumper") {
+		return `${base}${padding} border-accent/40 bg-accent/15 text-accent-content${current}`;
 	}
 	if (kind === "episode") {
 		return `${base}${padding} border-secondary/35 bg-secondary/12 text-secondary-content${current}`;
@@ -313,7 +316,9 @@ export function TVGuidePage() {
 								</div>
 								<div
 									className="grid"
-									style={{ gridTemplateColumns: `repeat(${GUIDE_SLOT_COUNT}, ${GUIDE_SLOT_WIDTH}px)` }}
+									style={{
+										gridTemplateColumns: `repeat(${GUIDE_SLOT_COUNT}, ${GUIDE_SLOT_WIDTH}px)`,
+									}}
 								>
 									{slotLabels.map((label, index) => (
 										<div
@@ -338,7 +343,7 @@ export function TVGuidePage() {
 										}}
 									>
 										<div className="border-primary/20 border-r bg-base-300/60 px-4 py-3">
-											<div className="font-vcr text-primary text-2xl leading-none">
+											<div className="font-vcr text-2xl text-primary leading-none">
 												CH {channel.number}
 											</div>
 											<div className="mt-2 line-clamp-2 font-bold text-neutral-content text-sm">
@@ -372,7 +377,9 @@ export function TVGuidePage() {
 													>
 														{!isCompact && (
 															<>
-																<div className="truncate font-bold text-sm">{scheduleTitle(block.row)}</div>
+																<div className="truncate font-bold text-sm">
+																	{scheduleTitle(block.row)}
+																</div>
 																<div className="mt-1 truncate font-mono text-[11px] opacity-70">
 																	{scheduleDetail(block.row)}
 																</div>

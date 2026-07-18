@@ -34,6 +34,7 @@ type taterTVSource struct {
 	SourceType         string
 	ChannelNumber      string
 	CommercialCategory string
+	BumperGroups       []string
 	LogoPath           string
 	LogoTitle          string
 	LogoPosition       string
@@ -124,7 +125,7 @@ const (
 	taterTVGuideHorizon         = 12 * time.Hour
 	taterTVGuideRefillThreshold = 2 * time.Hour
 	taterTVGuidePlannerInterval = 5 * time.Minute
-	taterTVGuideCacheVersion    = 2
+	taterTVGuideCacheVersion    = 3
 	taterTVGuideCacheFile       = "tube-tv-guide-cache.json"
 )
 
@@ -403,6 +404,7 @@ func taterBuildTVLineupUntil(cfg *config.Config, baseURL, playerToken string, mi
 	}
 
 	commercials := taterTVCommercialCategories(cfg, baseURL, playerToken)
+	bumpers := taterTVBumperGroups(cfg, baseURL, playerToken)
 	channels := []taterTVChannel{}
 	existingByNumber := make(map[string]taterTVChannel, len(existing))
 	for _, channel := range existing {
@@ -418,7 +420,7 @@ func taterBuildTVLineupUntil(cfg *config.Config, baseURL, playerToken string, mi
 			schedule = append(schedule, existingChannel.Schedule...)
 			total = existingChannel.TotalDuration
 		}
-		added, nextTotal := taterTVBuildScheduleUntil(cfg, source, commercials, rng, total, minDurationSeconds)
+		added, nextTotal := taterTVBuildScheduleUntilWithBumpers(cfg, source, commercials, bumpers, rng, total, minDurationSeconds)
 		schedule = append(schedule, added...)
 		total = nextTotal
 		if len(schedule) == 0 || total <= 0 {
@@ -559,6 +561,7 @@ func taterTVCustomSources(cfg *config.Config, baseURL, playerToken string) ([]ta
 			SourceType:         "custom",
 			ChannelNumber:      channel.ChannelNumber,
 			CommercialCategory: channel.CommercialCategory,
+			BumperGroups:       append([]string{}, channel.BumperGroups...),
 			LogoPath:           config.SanitizeTubeTVLogoPath(channel.LogoPath),
 			LogoTitle:          cleanTaterText(channel.LogoTitle),
 			LogoPosition:       config.NormalizeTubeTVLogoPosition(channel.LogoPosition),
@@ -785,54 +788,80 @@ func taterTVBuildSchedule(cfg *config.Config, source taterTVSource, commercialCa
 }
 
 func taterTVBuildScheduleUntil(cfg *config.Config, source taterTVSource, commercialCategories []taterTVCommercialCategory, rng *rand.Rand, start, minEnd float64) ([]map[string]any, float64) {
+	return taterTVBuildScheduleUntilWithBumpers(cfg, source, commercialCategories, taterTVBumperGroups(cfg, "", ""), rng, start, minEnd)
+}
+
+func taterTVBuildScheduleUntilWithBumpers(cfg *config.Config, source taterTVSource, commercialCategories []taterTVCommercialCategory, bumperGroups []taterTVBumperGroup, rng *rand.Rand, start, minEnd float64) ([]map[string]any, float64) {
 	schedule := []map[string]any{}
 	total := start
+	decks := taterTVNewScheduleDecks(cfg, source, commercialCategories, bumperGroups)
 	for total < minEnd {
 		before := total
 		var added []map[string]any
-		added, total = taterTVBuildSchedulePass(cfg, source, commercialCategories, rng, total, minEnd)
+		added, total = taterTVBuildSchedulePassWithDecks(cfg, source, decks, rng, total, minEnd)
 		schedule = append(schedule, added...)
 		if total <= before {
 			break
 		}
 	}
 	if len(schedule) == 0 && start <= 0 {
-		return taterTVBuildSchedulePass(cfg, source, commercialCategories, rng, 0, minEnd)
+		return taterTVBuildSchedulePassWithDecks(cfg, source, decks, rng, 0, minEnd)
 	}
 	return schedule, total
 }
 
 func taterTVBuildSchedulePass(cfg *config.Config, source taterTVSource, commercialCategories []taterTVCommercialCategory, rng *rand.Rand, start, maxEnd float64) ([]map[string]any, float64) {
-	commercials := taterTVCommercialPool(cfg, commercialCategories, source.CommercialCategory)
-	deck := []taterTVCommercial{}
+	return taterTVBuildSchedulePassWithDecks(cfg, source, taterTVNewScheduleDecks(cfg, source, commercialCategories, taterTVBumperGroups(cfg, "", "")), rng, start, maxEnd)
+}
+
+type taterTVScheduleDecks struct {
+	commercials      []taterTVCommercial
+	commercialDeck   []taterTVCommercial
+	beforeBumpers    []taterTVBumper
+	afterBumpers     []taterTVBumper
+	beforeBumperDeck []taterTVBumper
+	afterBumperDeck  []taterTVBumper
+	lastBumperKey    string
+}
+
+func taterTVNewScheduleDecks(cfg *config.Config, source taterTVSource, commercialCategories []taterTVCommercialCategory, bumperGroups []taterTVBumperGroup) *taterTVScheduleDecks {
+	beforeBumpers, afterBumpers := taterTVBumperPools(bumperGroups, source.BumperGroups)
+	return &taterTVScheduleDecks{
+		commercials:   taterTVCommercialPool(cfg, commercialCategories, source.CommercialCategory),
+		beforeBumpers: beforeBumpers,
+		afterBumpers:  afterBumpers,
+	}
+}
+
+func taterTVBuildSchedulePassWithDecks(cfg *config.Config, source taterTVSource, decks *taterTVScheduleDecks, rng *rand.Rand, start, maxEnd float64) ([]map[string]any, float64) {
 	schedule := []map[string]any{}
 	total := start
 	if len(source.Groups) > 0 && len(source.Programs) == 0 {
-		total = taterTVAppendEpisodeSchedule(cfg, schedule, &schedule, total, maxEnd, source.Groups, commercials, &deck, rng)
+		total = taterTVAppendEpisodeSchedule(cfg, schedule, &schedule, total, maxEnd, source.Groups, decks, rng)
 	} else if len(source.Groups) > 0 {
-		total = taterTVAppendMixedSchedule(cfg, schedule, &schedule, total, maxEnd, source.Programs, source.Groups, commercials, &deck, rng)
+		total = taterTVAppendMixedSchedule(cfg, schedule, &schedule, total, maxEnd, source.Programs, source.Groups, decks, rng)
 	} else {
-		total = taterTVAppendMovieSchedule(cfg, schedule, &schedule, total, maxEnd, source.Programs, commercials, &deck, rng)
+		total = taterTVAppendMovieSchedule(cfg, schedule, &schedule, total, maxEnd, source.Programs, decks, rng)
 	}
 	return schedule, total
 }
 
-func taterTVAppendMovieSchedule(cfg *config.Config, _ []map[string]any, schedule *[]map[string]any, start, maxEnd float64, programs []taterUsenetItem, commercials []taterTVCommercial, deck *[]taterTVCommercial, rng *rand.Rand) float64 {
+func taterTVAppendMovieSchedule(cfg *config.Config, _ []map[string]any, schedule *[]map[string]any, start, maxEnd float64, programs []taterUsenetItem, decks *taterTVScheduleDecks, rng *rand.Rand) float64 {
 	total := start
 	for _, item := range taterTVShuffleItems(programs, rng) {
 		if total >= maxEnd {
 			break
 		}
 		before := total
-		total = taterTVAppendProgram(cfg, schedule, total, item, "movie", commercials, deck, rng)
+		total = taterTVAppendProgram(cfg, schedule, total, item, "movie", decks, rng)
 		if total > before {
-			total = taterTVAppendCommercialBreak(cfg, schedule, total, commercials, deck, rng)
+			total = taterTVAppendCommercialBreak(cfg, schedule, total, decks, rng)
 		}
 	}
 	return total
 }
 
-func taterTVAppendEpisodeSchedule(cfg *config.Config, _ []map[string]any, schedule *[]map[string]any, start, maxEnd float64, groups []taterTVEpisodeGroup, commercials []taterTVCommercial, deck *[]taterTVCommercial, rng *rand.Rand) float64 {
+func taterTVAppendEpisodeSchedule(cfg *config.Config, _ []map[string]any, schedule *[]map[string]any, start, maxEnd float64, groups []taterTVEpisodeGroup, decks *taterTVScheduleDecks, rng *rand.Rand) float64 {
 	total := start
 	states := make([][]taterUsenetItem, 0, len(groups))
 	totalEpisodes := 0
@@ -865,29 +894,29 @@ func taterTVAppendEpisodeSchedule(cfg *config.Config, _ []map[string]any, schedu
 		}
 		lastKey = taterTVMediaKey(episode)
 		before := total
-		total = taterTVAppendProgram(cfg, schedule, total, episode, "episode", commercials, deck, rng)
+		total = taterTVAppendProgram(cfg, schedule, total, episode, "episode", decks, rng)
 		if total > before {
-			total = taterTVAppendCommercialBreak(cfg, schedule, total, commercials, deck, rng)
+			total = taterTVAppendCommercialBreak(cfg, schedule, total, decks, rng)
 		}
 	}
 	return total
 }
 
-func taterTVAppendMixedSchedule(cfg *config.Config, _ []map[string]any, schedule *[]map[string]any, start, maxEnd float64, programs []taterUsenetItem, groups []taterTVEpisodeGroup, commercials []taterTVCommercial, deck *[]taterTVCommercial, rng *rand.Rand) float64 {
+func taterTVAppendMixedSchedule(cfg *config.Config, _ []map[string]any, schedule *[]map[string]any, start, maxEnd float64, programs []taterUsenetItem, groups []taterTVEpisodeGroup, decks *taterTVScheduleDecks, rng *rand.Rand) float64 {
 	total := start
 	movies := taterTVShuffleItems(programs, rng)
 	movieIndex := 0
 	for (movieIndex < len(movies) || len(groups) > 0) && total < maxEnd {
 		if len(groups) > 0 && (movieIndex >= len(movies) || rng.Float64() < 0.55) {
-			total = taterTVAppendEpisodeSchedule(cfg, nil, schedule, total, maxEnd, groups, commercials, deck, rng)
+			total = taterTVAppendEpisodeSchedule(cfg, nil, schedule, total, maxEnd, groups, decks, rng)
 			groups = nil
 			continue
 		}
 		if movieIndex < len(movies) {
 			before := total
-			total = taterTVAppendProgram(cfg, schedule, total, movies[movieIndex], "movie", commercials, deck, rng)
+			total = taterTVAppendProgram(cfg, schedule, total, movies[movieIndex], "movie", decks, rng)
 			if total > before {
-				total = taterTVAppendCommercialBreak(cfg, schedule, total, commercials, deck, rng)
+				total = taterTVAppendCommercialBreak(cfg, schedule, total, decks, rng)
 			}
 			movieIndex++
 		}
@@ -895,7 +924,7 @@ func taterTVAppendMixedSchedule(cfg *config.Config, _ []map[string]any, schedule
 	return total
 }
 
-func taterTVAppendProgram(cfg *config.Config, schedule *[]map[string]any, start float64, item taterUsenetItem, kind string, commercials []taterTVCommercial, deck *[]taterTVCommercial, rng *rand.Rand) float64 {
+func taterTVAppendProgram(cfg *config.Config, schedule *[]map[string]any, start float64, item taterUsenetItem, kind string, decks *taterTVScheduleDecks, rng *rand.Rand) float64 {
 	duration := taterTVDuration(item, kind)
 	if duration <= 0 {
 		slog.Warn("Skipping Tube TV media with unknown duration",
@@ -905,7 +934,7 @@ func taterTVAppendProgram(cfg *config.Config, schedule *[]map[string]any, start 
 			"category_id", item.CategoryID)
 		return start
 	}
-	if cfg.TubeTV.MidrollCommercials == nil || !*cfg.TubeTV.MidrollCommercials || len(commercials) == 0 || duration < 1200 {
+	if cfg.TubeTV.MidrollCommercials == nil || !*cfg.TubeTV.MidrollCommercials || len(decks.commercials) == 0 || duration < 1200 {
 		return taterTVAppendScheduleItem(schedule, item, kind, start, duration, 0, false)
 	}
 	count := 1
@@ -920,7 +949,7 @@ func taterTVAppendProgram(cfg *config.Config, schedule *[]map[string]any, start 
 		offset := duration * float64(i) / float64(count+1)
 		segment := math.Max(5, offset-cursor)
 		total = taterTVAppendScheduleItem(schedule, item, kind, total, segment, cursor, true)
-		total = taterTVAppendCommercialBreak(cfg, schedule, total, commercials, deck, rng)
+		total = taterTVAppendCommercialBreak(cfg, schedule, total, decks, rng)
 		cursor = offset
 	}
 	if duration-cursor >= 5 {
@@ -946,17 +975,20 @@ func taterTVAppendScheduleItem(schedule *[]map[string]any, item taterUsenetItem,
 	return start + duration
 }
 
-func taterTVAppendCommercialBreak(cfg *config.Config, schedule *[]map[string]any, start float64, commercials []taterTVCommercial, deck *[]taterTVCommercial, rng *rand.Rand) float64 {
+func taterTVAppendCommercialBreak(cfg *config.Config, schedule *[]map[string]any, start float64, decks *taterTVScheduleDecks, rng *rand.Rand) float64 {
 	if cfg.TubeTV.CommercialsEnabled != nil && !*cfg.TubeTV.CommercialsEnabled {
 		return start
 	}
-	if len(commercials) == 0 {
+	if len(decks.commercials) == 0 {
 		return start
 	}
 	total := start
+	if bumper, ok := taterTVNextBumper(decks.beforeBumpers, &decks.beforeBumperDeck, &decks.lastBumperKey, rng); ok {
+		total = taterTVAppendBumper(schedule, total, bumper)
+	}
 	count := 2 + rng.Intn(3)
 	for i := 0; i < count; i++ {
-		commercial := taterTVNextCommercial(commercials, deck, rng)
+		commercial := taterTVNextCommercial(decks.commercials, &decks.commercialDeck, rng)
 		if commercial.Duration <= 0 || math.IsNaN(commercial.Duration) || math.IsInf(commercial.Duration, 0) {
 			slog.Warn("Skipping Tube TV commercial with invalid duration",
 				"title", commercial.Title,
@@ -983,7 +1015,86 @@ func taterTVAppendCommercialBreak(cfg *config.Config, schedule *[]map[string]any
 		*schedule = append(*schedule, row)
 		total += commercial.Duration
 	}
+	if bumper, ok := taterTVNextBumper(decks.afterBumpers, &decks.afterBumperDeck, &decks.lastBumperKey, rng); ok {
+		total = taterTVAppendBumper(schedule, total, bumper)
+	}
 	return total
+}
+
+func taterTVAppendBumper(schedule *[]map[string]any, start float64, bumper taterTVBumper) float64 {
+	if bumper.Duration <= 0 || math.IsNaN(bumper.Duration) || math.IsInf(bumper.Duration, 0) {
+		return start
+	}
+	row := map[string]any{
+		"title":          bumper.Title,
+		"kind":           "bumper",
+		"groupId":        bumper.GroupID,
+		"group":          bumper.Group,
+		"placement":      bumper.Placement,
+		"placementLabel": bumper.PlacementLabel,
+		"name":           bumper.Name,
+		"url":            bumper.URL,
+		"local":          true,
+		"duration":       bumper.Duration,
+		"durationKnown":  bumper.DurationKnown,
+		"fullDuration":   bumper.FullDuration,
+		"mediaOffset":    0,
+		"forceAdvance":   false,
+		"start":          start,
+		"end":            start + bumper.Duration,
+	}
+	*schedule = append(*schedule, row)
+	return start + bumper.Duration
+}
+
+func taterTVBumperPools(groups []taterTVBumperGroup, selectedGroups []string) ([]taterTVBumper, []taterTVBumper) {
+	selected := make(map[string]bool, len(selectedGroups))
+	for _, rawGroup := range selectedGroups {
+		groupID := taterTVCategoryID(rawGroup, "")
+		if groupID != "" {
+			selected[groupID] = true
+		}
+	}
+	before := []taterTVBumper{}
+	after := []taterTVBumper{}
+	for _, group := range groups {
+		if !selected[group.ID] {
+			continue
+		}
+		switch taterTVNormalizeBumperPlacement(group.Placement) {
+		case taterTVBumperBefore:
+			before = append(before, group.Videos...)
+		case taterTVBumperAfter:
+			after = append(after, group.Videos...)
+		case taterTVBumperBoth:
+			before = append(before, group.Videos...)
+			after = append(after, group.Videos...)
+		}
+	}
+	return before, after
+}
+
+func taterTVNextBumper(pool []taterTVBumper, deck *[]taterTVBumper, lastKey *string, rng *rand.Rand) (taterTVBumper, bool) {
+	if len(pool) == 0 {
+		return taterTVBumper{}, false
+	}
+	if len(*deck) == 0 {
+		*deck = append([]taterTVBumper{}, pool...)
+		rng.Shuffle(len(*deck), func(i, j int) {
+			(*deck)[i], (*deck)[j] = (*deck)[j], (*deck)[i]
+		})
+	}
+	if len(*deck) > 1 && taterTVBumperKey((*deck)[0]) == *lastKey {
+		(*deck)[0], (*deck)[1] = (*deck)[1], (*deck)[0]
+	}
+	next := (*deck)[0]
+	*deck = (*deck)[1:]
+	*lastKey = taterTVBumperKey(next)
+	return next, true
+}
+
+func taterTVBumperKey(bumper taterTVBumper) string {
+	return bumper.GroupID + "/" + bumper.Name
 }
 
 func taterTVCommercialCategories(cfg *config.Config, baseURL, playerToken string) []taterTVCommercialCategory {
@@ -1460,7 +1571,7 @@ func taterTVPersonalizeChannels(channels []taterTVChannel, baseURL, playerToken 
 				delete(next.Schedule[index], "url")
 				continue
 			}
-			if strings.EqualFold(rowString(next.Schedule[index], "kind"), "commercial") {
+			if taterTVIsInterstitial(rowString(next.Schedule[index], "kind")) {
 				next.Schedule[index]["url"] = itemURL
 				delete(next.Schedule[index], "streamUrl")
 			} else {
@@ -1473,6 +1584,15 @@ func taterTVPersonalizeChannels(channels []taterTVChannel, baseURL, playerToken 
 		out = append(out, next)
 	}
 	return out
+}
+
+func taterTVIsInterstitial(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "commercial", "bumper":
+		return true
+	default:
+		return false
+	}
 }
 
 func taterTVCloneGuide(entry taterTVGuideCacheEntry) taterTVGuideCacheEntry {

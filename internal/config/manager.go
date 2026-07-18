@@ -191,6 +191,7 @@ type TubeTVCustomChannel struct {
 	Title              string               `yaml:"title" mapstructure:"title" json:"title"`
 	ChannelNumber      string               `yaml:"channel_number,omitempty" mapstructure:"channel_number" json:"channel_number,omitempty"`
 	CommercialCategory string               `yaml:"commercial_category,omitempty" mapstructure:"commercial_category" json:"commercial_category,omitempty"`
+	BumperGroups       []string             `yaml:"bumper_groups,omitempty" mapstructure:"bumper_groups" json:"bumper_groups,omitempty"`
 	LogoPath           string               `yaml:"logo_path,omitempty" mapstructure:"logo_path" json:"logo_path,omitempty"`
 	LogoTitle          string               `yaml:"logo_title,omitempty" mapstructure:"logo_title" json:"logo_title,omitempty"`
 	LogoPosition       string               `yaml:"logo_position,omitempty" mapstructure:"logo_position" json:"logo_position,omitempty"`
@@ -938,6 +939,17 @@ func (c *Config) Validate() error {
 		}
 		channel.ChannelNumber = normalizedChannelNumber
 		channel.CommercialCategory = sanitizeLocalMediaID(channel.CommercialCategory)
+		cleanBumperGroups := make([]string, 0, len(channel.BumperGroups))
+		seenBumperGroups := make(map[string]bool, len(channel.BumperGroups))
+		for _, rawGroup := range channel.BumperGroups {
+			group := sanitizeLocalMediaID(rawGroup)
+			if group == "" || seenBumperGroups[group] {
+				continue
+			}
+			seenBumperGroups[group] = true
+			cleanBumperGroups = append(cleanBumperGroups, group)
+		}
+		channel.BumperGroups = cleanBumperGroups
 		rawLogoPath := strings.TrimSpace(channel.LogoPath)
 		channel.LogoPath = SanitizeTubeTVLogoPath(rawLogoPath)
 		if rawLogoPath != "" && channel.LogoPath == "" {
