@@ -381,6 +381,23 @@ func (r *Repository) GetActiveTaterRecommendationReason(
 	return reason, err
 }
 
+func (r *Repository) GetActiveTaterRecommendationSummary(
+	ctx context.Context,
+	batchID, profileID string,
+	now time.Time,
+) (string, error) {
+	var summary string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT summary
+		FROM tater_recommendation_batches
+		WHERE id = ?
+			AND profile_id = ?
+			AND expires_at > ?
+		LIMIT 1
+	`, batchID, profileID, now).Scan(&summary)
+	return summary, err
+}
+
 func (r *Repository) CreateTaterTTSRequest(ctx context.Context, item TaterTTSRequest) error {
 	if _, err := r.db.ExecContext(ctx, `
 		DELETE FROM tater_tts_requests WHERE expires_at <= ?

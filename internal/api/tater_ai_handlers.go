@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -89,6 +91,8 @@ type taterRecommendationResponse struct {
 type taterTTSCreateRequest struct {
 	ProfileID        string `json:"profile_id"`
 	RecommendationID string `json:"recommendation_id"`
+	BatchID          string `json:"batch_id"`
+	LocalHour        int    `json:"local_hour"`
 }
 
 type taterTTSCompleteRequest struct {
@@ -283,7 +287,10 @@ func (s *Server) handleTaterCoreCandidates(c *fiber.Ctx) error {
 	if cfg == nil {
 		return RespondServiceUnavailable(c, "Configuration not available", "")
 	}
-	candidates := s.taterRecommendationCandidates(cfg, resolveBaseURL(c, ""))
+	profileID := cleanTaterProfileID(c.Query("profile_id"))
+	candidates := s.taterRecommendationCandidates(
+		c.Context(), cfg, resolveBaseURL(c, ""), profileID,
+	)
 	limit := queryInt(c, "limit", 200, 1, 500)
 	if len(candidates) > limit {
 		candidates = candidates[:limit]
@@ -307,7 +314,10 @@ func (s *Server) handleTaterCoreSaveRecommendations(c *fiber.Ctx) error {
 	if cfg == nil {
 		return RespondServiceUnavailable(c, "Configuration not available", "")
 	}
-	available := s.taterRecommendationCandidates(cfg, resolveBaseURL(c, ""))
+	profileID := cleanTaterProfileID(req.ProfileID)
+	available := s.taterRecommendationCandidates(
+		c.Context(), cfg, resolveBaseURL(c, ""), profileID,
+	)
 	byID := make(map[string]taterCandidate, len(available))
 	for _, candidate := range available {
 		byID[candidate.ID] = candidate
@@ -322,7 +332,7 @@ func (s *Server) handleTaterCoreSaveRecommendations(c *fiber.Ctx) error {
 		hours = 24
 	}
 	batch := database.TaterRecommendationBatch{
-		ID: batchID, ProfileID: cleanTaterProfileID(req.ProfileID), CoreID: core.ID,
+		ID: batchID, ProfileID: profileID, CoreID: core.ID,
 		Summary: cleanTaterText(req.Summary), GeneratedAt: now,
 		ExpiresAt: now.Add(time.Duration(hours) * time.Hour),
 	}
@@ -438,23 +448,39 @@ func (s *Server) handleTaterPlayerCreateTTSRequest(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return RespondValidationError(c, "Invalid TTS request", err.Error())
 	}
-	recommendationID := strings.TrimSpace(req.RecommendationID)
-	if recommendationID == "" {
-		return RespondValidationError(c, "recommendation_id is required", "")
-	}
 	profileID := cleanTaterProfileID(req.ProfileID)
-	text, err := s.queueRepo.GetActiveTaterRecommendationReason(
-		c.Context(), recommendationID, profileID, time.Now().UTC(),
-	)
+	recommendationID := strings.TrimSpace(req.RecommendationID)
+	batchID := strings.TrimSpace(req.BatchID)
+	var text string
+	var err error
+	if batchID != "" {
+		text, err = s.queueRepo.GetActiveTaterRecommendationSummary(
+			c.Context(), batchID, profileID, time.Now().UTC(),
+		)
+	} else if recommendationID != "" {
+		// Compatibility with players released before batch briefings.
+		text, err = s.queueRepo.GetActiveTaterRecommendationReason(
+			c.Context(), recommendationID, profileID, time.Now().UTC(),
+		)
+	} else {
+		return RespondValidationError(c, "batch_id is required", "")
+	}
 	if err == sql.ErrNoRows {
-		return RespondNotFound(c, "Recommendation", recommendationID)
+		lookupID := batchID
+		if lookupID == "" {
+			lookupID = recommendationID
+		}
+		return RespondNotFound(c, "Recommendation briefing", lookupID)
 	}
 	if err != nil {
-		return RespondInternalError(c, "Failed to load recommendation summary", err.Error())
+		return RespondInternalError(c, "Failed to load recommendation briefing", err.Error())
 	}
 	text = cleanTaterText(text)
 	if text == "" {
-		return RespondValidationError(c, "Recommendation summary is empty", "")
+		return RespondValidationError(c, "Recommendation briefing is empty", "")
+	}
+	if batchID != "" {
+		text = taterGreetingForHour(req.LocalHour) + ". " + text
 	}
 	runes := []rune(text)
 	if len(runes) > taterTTSMaxTextRunes {
@@ -686,13 +712,26 @@ func (s *Server) handleTaterClearViewingHistory(c *fiber.Ctx) error {
 	return RespondSuccess(c, fiber.Map{"message": "Viewing history cleared"})
 }
 
-func (s *Server) taterRecommendationCandidates(cfg *config.Config, baseURL string) []taterCandidate {
+func (s *Server) taterRecommendationCandidates(
+	ctx context.Context,
+	cfg *config.Config,
+	baseURL string,
+	profileID string,
+) []taterCandidate {
 	items, err := taterLocalDiscoverLibraryItems(cfg, baseURL, "")
 	if err != nil {
-		return []taterCandidate{}
+		items = []taterUsenetItem{}
 	}
-	result := make([]taterCandidate, 0, len(items))
+	historyCandidates := s.taterHistoryRecommendationCandidates(ctx, profileID)
+	result := make([]taterCandidate, 0, len(items)+len(historyCandidates))
 	seen := map[string]bool{}
+	for _, candidate := range historyCandidates {
+		if seen[candidate.ID] {
+			continue
+		}
+		seen[candidate.ID] = true
+		result = append(result, candidate)
+	}
 	for _, item := range items {
 		if item.Type != "localFile" && item.Type != "localFolder" {
 			continue
@@ -715,6 +754,123 @@ func (s *Server) taterRecommendationCandidates(cfg *config.Config, baseURL strin
 		})
 	}
 	return result
+}
+
+func (s *Server) taterHistoryRecommendationCandidates(
+	ctx context.Context,
+	profileID string,
+) []taterCandidate {
+	if s.queueRepo == nil {
+		return []taterCandidate{}
+	}
+	events, err := s.queueRepo.ListTaterViewingEvents(ctx, profileID, 200)
+	if err != nil {
+		return []taterCandidate{}
+	}
+	return taterOTACandidates(events)
+}
+
+func taterOTACandidates(events []database.TaterViewingEvent) []taterCandidate {
+	type channelHistory struct {
+		title         string
+		number        string
+		name          string
+		mediaID       string
+		watchCount    int
+		lastWatchedAt time.Time
+	}
+	byChannel := map[string]*channelHistory{}
+	for _, event := range events {
+		if event.Source != "over_the_air" || event.MediaType != "live" {
+			continue
+		}
+		metadata := map[string]any{}
+		if err := json.Unmarshal([]byte(event.MetadataJSON), &metadata); err != nil {
+			continue
+		}
+		moduleID, _ := metadata["module_id"].(string)
+		number, _ := metadata["channel_number"].(string)
+		name, _ := metadata["channel_name"].(string)
+		moduleID = strings.TrimSpace(moduleID)
+		number = cleanTaterText(number)
+		name = cleanTaterText(name)
+		if moduleID != "com.240mp.ota" || (number == "" && name == "") {
+			continue
+		}
+		key := strings.ToLower(number + "\x00" + name)
+		row := byChannel[key]
+		if row == nil {
+			row = &channelHistory{
+				title:   cleanTaterText(event.Title),
+				number:  number,
+				name:    name,
+				mediaID: strings.TrimSpace(event.MediaID),
+			}
+			byChannel[key] = row
+		}
+		row.watchCount++
+		if event.OccurredAt.After(row.lastWatchedAt) {
+			row.lastWatchedAt = event.OccurredAt
+			if title := cleanTaterText(event.Title); title != "" {
+				row.title = title
+			}
+		}
+	}
+
+	rows := make([]*channelHistory, 0, len(byChannel))
+	for _, row := range byChannel {
+		rows = append(rows, row)
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].watchCount != rows[j].watchCount {
+			return rows[i].watchCount > rows[j].watchCount
+		}
+		return rows[i].lastWatchedAt.After(rows[j].lastWatchedAt)
+	})
+
+	result := make([]taterCandidate, 0, len(rows))
+	for _, row := range rows {
+		title := row.title
+		if title == "" {
+			title = strings.TrimSpace(strings.Join([]string{row.number, row.name}, " "))
+		}
+		identity := row.mediaID
+		if identity == "" {
+			identity = row.number + "\x00" + row.name
+		}
+		sum := sha256.Sum256([]byte("com.240mp.ota\x00" + identity))
+		watchLabel := "session"
+		if row.watchCount != 1 {
+			watchLabel = "sessions"
+		}
+		result = append(result, taterCandidate{
+			ID:          "ota-" + hex.EncodeToString(sum[:12]),
+			Title:       title,
+			MediaType:   "live",
+			Source:      "over_the_air",
+			Description: fmt.Sprintf("Live channel watched in %d recent %s.", row.watchCount, watchLabel),
+			Launch: taterUsenetItem{
+				Title:         title,
+				Type:          "module",
+				MediaType:     "live",
+				ModuleID:      "com.240mp.ota",
+				ChannelNumber: row.number,
+				ChannelName:   row.name,
+			},
+		})
+	}
+	return result
+}
+
+func taterGreetingForHour(hour int) string {
+	switch {
+	case hour >= 5 && hour < 12:
+		return "Good morning"
+	case hour >= 12 && hour < 17:
+		return "Good afternoon"
+	default:
+		return "Good evening"
+	}
 }
 
 func cleanTaterProfileID(value string) string {

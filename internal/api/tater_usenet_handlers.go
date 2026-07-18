@@ -82,6 +82,9 @@ type taterUsenetItem struct {
 	SizeBytes       int64   `json:"sizeBytes,omitempty"`
 	SizeText        string  `json:"sizeText,omitempty"`
 	DurationDisplay string  `json:"durationDisplay,omitempty"`
+	ModuleID        string  `json:"moduleId,omitempty"`
+	ChannelNumber   string  `json:"channelNumber,omitempty"`
+	ChannelName     string  `json:"channelName,omitempty"`
 }
 
 type taterUsenetPlayRequest struct {
