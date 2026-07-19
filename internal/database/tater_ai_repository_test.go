@@ -27,14 +27,16 @@ func TestTaterAIRepositoryLifecycle(t *testing.T) {
 		CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute),
 	}))
 	matched, err := repo.PairTaterCore(ctx, "wrong-hash", now, TaterCoreConnection{
-		ID: "core-1", Name: "Tater", TokenHash: "token-hash", CreatedAt: now,
+		ID: "core-1", Name: "Tater", AssistantName: "Totty",
+		TokenHash: "token-hash", CreatedAt: now,
 		LastSeenAt: sql.NullTime{Time: now, Valid: true},
 	})
 	require.NoError(t, err)
 	require.False(t, matched)
 
 	matched, err = repo.PairTaterCore(ctx, "pin-hash", now, TaterCoreConnection{
-		ID: "core-1", Name: "Tater", TokenHash: "token-hash", CreatedAt: now,
+		ID: "core-1", Name: "Tater", AssistantName: "Totty",
+		TokenHash: "token-hash", CreatedAt: now,
 		LastSeenAt: sql.NullTime{Time: now, Valid: true},
 	})
 	require.NoError(t, err)
@@ -42,6 +44,7 @@ func TestTaterAIRepositoryLifecycle(t *testing.T) {
 	core, err := repo.FindTaterCoreByTokenHash(ctx, "token-hash")
 	require.NoError(t, err)
 	require.Equal(t, "core-1", core.ID)
+	require.Equal(t, "Totty", core.AssistantName)
 
 	event := TaterViewingEvent{
 		EventID: "watch-1", ProfileID: "household", PlayerID: "player-1",
@@ -72,8 +75,13 @@ func TestTaterAIRepositoryLifecycle(t *testing.T) {
 	activeBatch, picks, err := repo.GetActiveTaterRecommendations(ctx, "household", now)
 	require.NoError(t, err)
 	require.Equal(t, batch.ID, activeBatch.ID)
+	require.Equal(t, "Totty", activeBatch.AssistantName)
 	require.Len(t, picks, 1)
 	require.Equal(t, "pick-1", picks[0].ID)
+	require.NoError(t, repo.TouchTaterCore(ctx, "core-1", "Spud", now.Add(time.Minute)))
+	activeBatch, _, err = repo.GetActiveTaterRecommendations(ctx, "household", now)
+	require.NoError(t, err)
+	require.Equal(t, "Spud", activeBatch.AssistantName)
 	reason, err := repo.GetActiveTaterRecommendationReason(ctx, "pick-1", "household", now)
 	require.NoError(t, err)
 	require.Equal(t, "A good follow-up.", reason)

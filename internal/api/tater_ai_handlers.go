@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,14 +28,16 @@ const (
 )
 
 type taterPairCoreRequest struct {
-	PIN  string `json:"pin"`
-	Name string `json:"name"`
+	PIN           string `json:"pin"`
+	Name          string `json:"name"`
+	AssistantName string `json:"assistant_name"`
 }
 
 type taterCorePairResponse struct {
-	CoreID   string `json:"core_id"`
-	CoreName string `json:"core_name"`
-	Token    string `json:"token"`
+	CoreID        string `json:"core_id"`
+	CoreName      string `json:"core_name"`
+	AssistantName string `json:"assistant_name"`
+	Token         string `json:"token"`
 }
 
 type taterViewingEventRequest struct {
@@ -71,6 +74,7 @@ type taterRecommendationSelection struct {
 
 type taterRecommendationRequest struct {
 	ProfileID      string                         `json:"profile_id"`
+	AssistantName  string                         `json:"assistant_name"`
 	Summary        string                         `json:"summary"`
 	ExpiresInHours int                            `json:"expires_in_hours"`
 	Items          []taterRecommendationSelection `json:"items"`
@@ -126,12 +130,17 @@ func (s *Server) handleTaterPairCore(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to create Tater Core connection", err.Error())
 	}
 	now := time.Now().UTC()
+	assistantName := cleanTaterAssistantFirstName(req.AssistantName)
+	if assistantName == "" {
+		assistantName = "Tater"
+	}
 	ok, err := s.queueRepo.PairTaterCore(c.Context(), hashTaterSecret(pin), now, database.TaterCoreConnection{
-		ID:         id,
-		Name:       name,
-		TokenHash:  hashTaterSecret(token),
-		CreatedAt:  now,
-		LastSeenAt: sql.NullTime{Time: now, Valid: true},
+		ID:            id,
+		Name:          name,
+		AssistantName: assistantName,
+		TokenHash:     hashTaterSecret(token),
+		CreatedAt:     now,
+		LastSeenAt:    sql.NullTime{Time: now, Valid: true},
 	})
 	if err != nil {
 		return RespondInternalError(c, "Failed to pair Tater Core", err.Error())
@@ -139,7 +148,9 @@ func (s *Server) handleTaterPairCore(c *fiber.Ctx) error {
 	if !ok {
 		return RespondUnauthorized(c, "Invalid or expired pairing PIN", "")
 	}
-	return RespondSuccess(c, taterCorePairResponse{CoreID: id, CoreName: name, Token: token})
+	return RespondSuccess(c, taterCorePairResponse{
+		CoreID: id, CoreName: name, AssistantName: assistantName, Token: token,
+	})
 }
 
 func (s *Server) handleTaterCreateCorePairingCode(c *fiber.Ctx) error {
@@ -195,7 +206,14 @@ func (s *Server) taterCoreAuthorized(c *fiber.Ctx) (*database.TaterCoreConnectio
 		RespondUnauthorized(c, "Invalid Tater Core token", "")
 		return nil, false
 	}
-	_ = s.queueRepo.TouchTaterCore(c.Context(), core.ID, time.Now().UTC())
+	reportedName := taterAssistantNameFromHeader(c.Get("X-Tater-Assistant-Name"))
+	if reportedName != "" {
+		core.AssistantName = reportedName
+	}
+	if core.AssistantName == "" {
+		core.AssistantName = "Tater"
+	}
+	_ = s.queueRepo.TouchTaterCore(c.Context(), core.ID, reportedName, time.Now().UTC())
 	return core, true
 }
 
@@ -307,6 +325,10 @@ func (s *Server) handleTaterCoreSaveRecommendations(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return RespondValidationError(c, "Invalid recommendations", err.Error())
 	}
+	if assistantName := cleanTaterAssistantFirstName(req.AssistantName); assistantName != "" {
+		core.AssistantName = assistantName
+		_ = s.queueRepo.TouchTaterCore(c.Context(), core.ID, assistantName, time.Now().UTC())
+	}
 	if len(req.Items) == 0 {
 		return RespondValidationError(c, "At least one recommendation is required", "")
 	}
@@ -365,7 +387,10 @@ func (s *Server) handleTaterCoreSaveRecommendations(c *fiber.Ctx) error {
 	if err := s.queueRepo.SaveTaterRecommendations(c.Context(), batch, items); err != nil {
 		return RespondInternalError(c, "Failed to save recommendations", err.Error())
 	}
-	return RespondSuccess(c, fiber.Map{"batch_id": batch.ID, "count": len(items), "expires_at": batch.ExpiresAt})
+	return RespondSuccess(c, fiber.Map{
+		"batch_id": batch.ID, "count": len(items), "expires_at": batch.ExpiresAt,
+		"assistant_name": core.AssistantName,
+	})
 }
 
 func (s *Server) handleTaterPlayerRecommendations(c *fiber.Ctx) error {
@@ -660,7 +685,10 @@ func (s *Server) handleTaterAdminState(c *fiber.Ctx) error {
 	}
 	connectionRows := make([]fiber.Map, 0, len(connections))
 	for _, item := range connections {
-		row := fiber.Map{"id": item.ID, "name": item.Name, "created_at": item.CreatedAt}
+		row := fiber.Map{
+			"id": item.ID, "name": item.Name, "assistant_name": item.AssistantName,
+			"created_at": item.CreatedAt,
+		}
 		if item.LastSeenAt.Valid {
 			row["last_seen_at"] = item.LastSeenAt.Time
 		}
@@ -875,6 +903,26 @@ func taterGreetingForHour(hour int) string {
 
 func cleanTaterProfileID(value string) string {
 	return cleanTaterSlug(value, taterDefaultProfileID)
+}
+
+func cleanTaterAssistantFirstName(value string) string {
+	fields := strings.Fields(cleanTaterText(value))
+	if len(fields) == 0 {
+		return ""
+	}
+	runes := []rune(fields[0])
+	if len(runes) > 48 {
+		runes = runes[:48]
+	}
+	return string(runes)
+}
+
+func taterAssistantNameFromHeader(value string) string {
+	raw := strings.TrimSpace(value)
+	if decoded, err := url.QueryUnescape(raw); err == nil {
+		raw = decoded
+	}
+	return cleanTaterAssistantFirstName(raw)
 }
 
 func cleanTaterSlug(value, fallback string) string {

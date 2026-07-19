@@ -39,6 +39,13 @@ function formatProgress(event: TaterViewingEvent) {
 	return `${event.state} · ${percent}%`;
 }
 
+function picksLabel(value?: string) {
+	const firstName = String(value || "Tater")
+		.trim()
+		.split(/\s+/)[0];
+	return `${firstName || "Tater"}'s Picks`;
+}
+
 export function TaterConfigSection() {
 	const { showToast } = useToast();
 	const { confirmAction } = useConfirm();
@@ -202,6 +209,9 @@ export function TaterConfigSection() {
 							>
 								<div className="min-w-0">
 									<div className="truncate font-bold">{item.name}</div>
+									<div className="mt-1 text-base-content/65 text-sm">
+										Assistant: {item.assistant_name || "Tater"}
+									</div>
 									<div className="mt-1 text-base-content/50 text-xs">
 										Last seen {formatDate(item.last_seen_at)} · Paired {formatDate(item.created_at)}
 									</div>
@@ -322,7 +332,7 @@ export function TaterConfigSection() {
 				<div className="mb-4 flex items-center justify-between gap-3">
 					<div>
 						<h4 className="font-bold text-base-content/45 text-xs uppercase tracking-widest">
-							Tater&apos;s Picks
+							{picksLabel(batch?.assistant_name)}
 						</h4>
 						{batch && (
 							<p className="mt-2 text-base-content/55 text-xs">

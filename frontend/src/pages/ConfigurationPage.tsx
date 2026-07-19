@@ -30,6 +30,7 @@ import { ProvidersConfigSection } from "../components/config/ProvidersConfigSect
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
+import { TaterBumpersConfigSection } from "../components/config/TaterBumpersConfigSection";
 import { TaterConfigSection } from "../components/config/TaterConfigSection";
 import { TaterPlayersConfigSection } from "../components/config/TaterPlayersConfigSection";
 import { TranscodingConfigSection } from "../components/config/TranscodingConfigSection";
@@ -60,6 +61,7 @@ import type {
 	SABnzbdConfig,
 	SegmentCacheConfig,
 	StreamingConfig,
+	TaterBumpersConfig,
 	TranscodingConfig,
 	TubeTVConfig,
 } from "../types/config";
@@ -90,7 +92,7 @@ const getIconComponent = (iconName: string) => {
 const SECTION_GROUPS = [
 	{
 		title: "Streamer",
-		sections: ["players", "tube_tv", "local_media", "newznab", "providers"],
+		sections: ["players", "tube_tv", "local_media", "newznab", "providers", "tater_bumpers"],
 	},
 	{
 		title: "Tater",
@@ -269,6 +271,11 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "tube_tv",
 					config: { tube_tv: data as unknown as TubeTVConfig },
+				});
+			} else if (section === "tater_bumpers") {
+				await updateConfigSection.mutateAsync({
+					section: "tater_bumpers",
+					config: { tater_bumpers: data as unknown as TaterBumpersConfig },
 				});
 			} else if (section === "providers") {
 				await updateConfigSection.mutateAsync({
@@ -546,6 +553,13 @@ export function ConfigurationPage() {
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
+								{activeSection === "tater_bumpers" && (
+									<TaterBumpersConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
 								{activeSection === "players" && (
 									<TaterPlayersConfigSection
 										config={config}
@@ -569,6 +583,7 @@ export function ConfigurationPage() {
 									"newznab",
 									"local_media",
 									"tube_tv",
+									"tater_bumpers",
 									"players",
 									"tater",
 								].includes(activeSection) && (

@@ -53,6 +53,7 @@ type Config struct {
 	Newznab         NewznabConfig      `yaml:"newznab" mapstructure:"newznab" json:"newznab"`
 	LocalMedia      LocalMediaConfig   `yaml:"local_media" mapstructure:"local_media" json:"local_media"`
 	TubeTV          TubeTVConfig       `yaml:"tube_tv" mapstructure:"tube_tv" json:"tube_tv"`
+	TaterBumpers    TaterBumpersConfig `yaml:"tater_bumpers" mapstructure:"tater_bumpers" json:"tater_bumpers"`
 	Players         PlayersConfig      `yaml:"players" mapstructure:"players" json:"players"`
 	Fuse            FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"-"`
 	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
@@ -183,6 +184,15 @@ type TubeTVConfig struct {
 	ChannelLogosEnabled  *bool                 `yaml:"channel_logos_enabled" mapstructure:"channel_logos_enabled" json:"channel_logos_enabled"`
 	CommercialCategories []string              `yaml:"commercial_categories" mapstructure:"commercial_categories" json:"commercial_categories"`
 	CustomChannels       []TubeTVCustomChannel `yaml:"custom_channels" mapstructure:"custom_channels" json:"custom_channels"`
+}
+
+// TaterBumpersConfig controls where the built-in Tater Tube bumpers may play.
+// Pointers preserve the default-on behavior for existing configuration files.
+type TaterBumpersConfig struct {
+	LiveTV      *bool `yaml:"live_tv" mapstructure:"live_tv" json:"live_tv"`
+	LocalMovies *bool `yaml:"local_movies" mapstructure:"local_movies" json:"local_movies"`
+	LocalSeries *bool `yaml:"local_series" mapstructure:"local_series" json:"local_series"`
+	NZBMovies   *bool `yaml:"nzb_movies" mapstructure:"nzb_movies" json:"nzb_movies"`
 }
 
 // TubeTVCustomChannel stores a user-created The Tube TV channel.
@@ -877,6 +887,22 @@ func (c *Config) Validate() error {
 	if c.LocalMedia.Enabled == nil {
 		enabled := false
 		c.LocalMedia.Enabled = &enabled
+	}
+	if c.TaterBumpers.LiveTV == nil {
+		enabled := true
+		c.TaterBumpers.LiveTV = &enabled
+	}
+	if c.TaterBumpers.LocalMovies == nil {
+		enabled := true
+		c.TaterBumpers.LocalMovies = &enabled
+	}
+	if c.TaterBumpers.LocalSeries == nil {
+		enabled := true
+		c.TaterBumpers.LocalSeries = &enabled
+	}
+	if c.TaterBumpers.NZBMovies == nil {
+		enabled := true
+		c.TaterBumpers.NZBMovies = &enabled
 	}
 	if c.TubeTV.Enabled == nil {
 		enabled := true
@@ -1838,16 +1864,20 @@ func DefaultConfig(configDir ...string) *Config {
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 	fuseEnabled := false
-	loginRequired := false          // Login disabled by default for local appliance-style setup
-	stremioEnabled := false         // Stremio endpoint disabled by default
-	segmentCacheEnabled := true     // Persist decoded Usenet segments by default
-	transcodingEnabled := false     // Direct play by default; FFmpeg transcode is opt-in
-	newznabEnabled := false         // Player-facing Stream catalog disabled by default
-	localMediaEnabled := false      // Server-local media catalog disabled by default
-	tubeTVEnabled := true           // Tube TV is available when local media is configured
-	tubeTVAutoChannels := true      // Tube TV auto-generates channels by default
-	tubeTVCommercials := true       // Commercial breaks enabled when commercials exist
-	tubeTVMidroll := false          // Mid-roll breaks opt-in by default
+	loginRequired := false      // Login disabled by default for local appliance-style setup
+	stremioEnabled := false     // Stremio endpoint disabled by default
+	segmentCacheEnabled := true // Persist decoded Usenet segments by default
+	transcodingEnabled := false // Direct play by default; FFmpeg transcode is opt-in
+	newznabEnabled := false     // Player-facing Stream catalog disabled by default
+	localMediaEnabled := false  // Server-local media catalog disabled by default
+	tubeTVEnabled := true       // Tube TV is available when local media is configured
+	tubeTVAutoChannels := true  // Tube TV auto-generates channels by default
+	tubeTVCommercials := true   // Commercial breaks enabled when commercials exist
+	tubeTVMidroll := false      // Mid-roll breaks opt-in by default
+	taterBumpersLiveTV := true  // Built-in Tater Tube bumpers enabled by default
+	taterBumpersLocalMovies := true
+	taterBumpersLocalSeries := true
+	taterBumpersNZBMovies := true
 	prowlarrEnabled := false        // Prowlarr integration disabled by default
 	watchIntervalSeconds := 10      // Default watch interval
 	failedItemRetentionHours := 24  // Default: auto-remove failed items after 24 hours
@@ -1925,6 +1955,12 @@ func DefaultConfig(configDir ...string) *Config {
 			ChannelLogosEnabled:  &tubeTVEnabled,
 			CommercialCategories: []string{},
 			CustomChannels:       []TubeTVCustomChannel{},
+		},
+		TaterBumpers: TaterBumpersConfig{
+			LiveTV:      &taterBumpersLiveTV,
+			LocalMovies: &taterBumpersLocalMovies,
+			LocalSeries: &taterBumpersLocalSeries,
+			NZBMovies:   &taterBumpersNZBMovies,
 		},
 		Players: PlayersConfig{
 			Paired:       []PlayerConfig{},

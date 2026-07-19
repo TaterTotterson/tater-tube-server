@@ -79,3 +79,15 @@ func TestTaterGreetingForHour(t *testing.T) {
 		}
 	}
 }
+
+func TestTaterAssistantFirstName(t *testing.T) {
+	if got := cleanTaterAssistantFirstName("  Totty   Totterson "); got != "Totty" {
+		t.Fatalf("got %q, want Totty", got)
+	}
+	if got := taterAssistantNameFromHeader("Jos%C3%A9%20Totterson"); got != "José" {
+		t.Fatalf("got %q, want José", got)
+	}
+	if got := taterAssistantNameFromHeader(""); got != "" {
+		t.Fatalf("empty header should not replace a stored name, got %q", got)
+	}
+}

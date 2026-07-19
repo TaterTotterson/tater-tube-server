@@ -16,12 +16,13 @@ type TaterCorePairingCode struct {
 }
 
 type TaterCoreConnection struct {
-	ID         string       `json:"id"`
-	Name       string       `json:"name"`
-	TokenHash  string       `json:"-"`
-	CreatedAt  time.Time    `json:"created_at"`
-	LastSeenAt sql.NullTime `json:"-"`
-	RevokedAt  sql.NullTime `json:"-"`
+	ID            string       `json:"id"`
+	Name          string       `json:"name"`
+	AssistantName string       `json:"assistant_name"`
+	TokenHash     string       `json:"-"`
+	CreatedAt     time.Time    `json:"created_at"`
+	LastSeenAt    sql.NullTime `json:"-"`
+	RevokedAt     sql.NullTime `json:"-"`
 }
 
 type TaterViewingEvent struct {
@@ -44,12 +45,13 @@ type TaterViewingEvent struct {
 }
 
 type TaterRecommendationBatch struct {
-	ID          string    `json:"id"`
-	ProfileID   string    `json:"profile_id"`
-	CoreID      string    `json:"core_id"`
-	Summary     string    `json:"summary"`
-	GeneratedAt time.Time `json:"generated_at"`
-	ExpiresAt   time.Time `json:"expires_at"`
+	ID            string    `json:"id"`
+	ProfileID     string    `json:"profile_id"`
+	CoreID        string    `json:"core_id"`
+	AssistantName string    `json:"assistant_name"`
+	Summary       string    `json:"summary"`
+	GeneratedAt   time.Time `json:"generated_at"`
+	ExpiresAt     time.Time `json:"expires_at"`
 }
 
 type TaterRecommendation struct {
@@ -114,6 +116,9 @@ func (r *Repository) ListTaterCorePairingCodes(ctx context.Context, now time.Tim
 }
 
 func (r *Repository) PairTaterCore(ctx context.Context, codeHash string, now time.Time, connection TaterCoreConnection) (bool, error) {
+	if connection.AssistantName == "" {
+		connection.AssistantName = "Tater"
+	}
 	matched := false
 	err := r.WithTransaction(ctx, func(tx *Repository) error {
 		if _, err := tx.db.ExecContext(ctx, `DELETE FROM tater_core_pairing_codes WHERE expires_at <= ?`, now); err != nil {
@@ -132,9 +137,10 @@ func (r *Repository) PairTaterCore(ctx context.Context, codeHash string, now tim
 		}
 		if _, err := tx.db.ExecContext(ctx, `
 			INSERT INTO tater_core_connections
-				(id, name, token_hash, created_at, last_seen_at)
-			VALUES (?, ?, ?, ?, ?)
-		`, connection.ID, connection.Name, connection.TokenHash, connection.CreatedAt, connection.LastSeenAt); err != nil {
+				(id, name, assistant_name, token_hash, created_at, last_seen_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, connection.ID, connection.Name, connection.AssistantName, connection.TokenHash,
+			connection.CreatedAt, connection.LastSeenAt); err != nil {
 			return err
 		}
 		_ = codeID
@@ -146,7 +152,7 @@ func (r *Repository) PairTaterCore(ctx context.Context, codeHash string, now tim
 
 func (r *Repository) ListTaterCoreConnections(ctx context.Context) ([]TaterCoreConnection, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, token_hash, created_at, last_seen_at, revoked_at
+		SELECT id, name, assistant_name, token_hash, created_at, last_seen_at, revoked_at
 		FROM tater_core_connections ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -156,7 +162,8 @@ func (r *Repository) ListTaterCoreConnections(ctx context.Context) ([]TaterCoreC
 	result := []TaterCoreConnection{}
 	for rows.Next() {
 		var item TaterCoreConnection
-		if err := rows.Scan(&item.ID, &item.Name, &item.TokenHash, &item.CreatedAt, &item.LastSeenAt, &item.RevokedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.AssistantName, &item.TokenHash,
+			&item.CreatedAt, &item.LastSeenAt, &item.RevokedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -167,18 +174,29 @@ func (r *Repository) ListTaterCoreConnections(ctx context.Context) ([]TaterCoreC
 func (r *Repository) FindTaterCoreByTokenHash(ctx context.Context, tokenHash string) (*TaterCoreConnection, error) {
 	var item TaterCoreConnection
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, name, token_hash, created_at, last_seen_at, revoked_at
+		SELECT id, name, assistant_name, token_hash, created_at, last_seen_at, revoked_at
 		FROM tater_core_connections
 		WHERE token_hash = ? AND revoked_at IS NULL
-	`, tokenHash).Scan(&item.ID, &item.Name, &item.TokenHash, &item.CreatedAt, &item.LastSeenAt, &item.RevokedAt)
+	`, tokenHash).Scan(&item.ID, &item.Name, &item.AssistantName, &item.TokenHash,
+		&item.CreatedAt, &item.LastSeenAt, &item.RevokedAt)
 	if err != nil {
 		return nil, err
 	}
 	return &item, nil
 }
 
-func (r *Repository) TouchTaterCore(ctx context.Context, id string, now time.Time) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE tater_core_connections SET last_seen_at = ? WHERE id = ?`, now, id)
+func (r *Repository) TouchTaterCore(ctx context.Context, id, assistantName string, now time.Time) error {
+	if assistantName == "" {
+		_, err := r.db.ExecContext(ctx,
+			`UPDATE tater_core_connections SET last_seen_at = ? WHERE id = ?`,
+			now, id)
+		return err
+	}
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE tater_core_connections
+		SET assistant_name = ?, last_seen_at = ?
+		WHERE id = ?
+	`, assistantName, now, id)
 	return err
 }
 
@@ -292,11 +310,17 @@ func (r *Repository) SaveTaterRecommendations(ctx context.Context, batch TaterRe
 func (r *Repository) GetActiveTaterRecommendations(ctx context.Context, profileID string, now time.Time) (*TaterRecommendationBatch, []TaterRecommendation, error) {
 	var batch TaterRecommendationBatch
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, profile_id, core_id, summary, generated_at, expires_at
-		FROM tater_recommendation_batches
-		WHERE profile_id = ? AND expires_at > ?
-		ORDER BY generated_at DESC LIMIT 1
-	`, profileID, now).Scan(&batch.ID, &batch.ProfileID, &batch.CoreID, &batch.Summary, &batch.GeneratedAt, &batch.ExpiresAt)
+		SELECT batch.id, batch.profile_id, batch.core_id, batch.summary,
+			batch.generated_at, batch.expires_at,
+			COALESCE(NULLIF(core.assistant_name, ''), 'Tater')
+		FROM tater_recommendation_batches AS batch
+		LEFT JOIN tater_core_connections AS core ON core.id = batch.core_id
+		WHERE batch.profile_id = ? AND batch.expires_at > ?
+		ORDER BY batch.generated_at DESC LIMIT 1
+	`, profileID, now).Scan(
+		&batch.ID, &batch.ProfileID, &batch.CoreID, &batch.Summary,
+		&batch.GeneratedAt, &batch.ExpiresAt, &batch.AssistantName,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -327,10 +351,13 @@ func (r *Repository) ListTaterRecommendationBatches(ctx context.Context, profile
 		limit = 20
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, profile_id, core_id, summary, generated_at, expires_at
-		FROM tater_recommendation_batches
-		WHERE (? = '' OR profile_id = ?)
-		ORDER BY generated_at DESC LIMIT ?
+		SELECT batch.id, batch.profile_id, batch.core_id, batch.summary,
+			batch.generated_at, batch.expires_at,
+			COALESCE(NULLIF(core.assistant_name, ''), 'Tater')
+		FROM tater_recommendation_batches AS batch
+		LEFT JOIN tater_core_connections AS core ON core.id = batch.core_id
+		WHERE (? = '' OR batch.profile_id = ?)
+		ORDER BY batch.generated_at DESC LIMIT ?
 	`, profileID, profileID, limit)
 	if err != nil {
 		return nil, err
@@ -339,7 +366,10 @@ func (r *Repository) ListTaterRecommendationBatches(ctx context.Context, profile
 	result := []TaterRecommendationBatch{}
 	for rows.Next() {
 		var item TaterRecommendationBatch
-		if err := rows.Scan(&item.ID, &item.ProfileID, &item.CoreID, &item.Summary, &item.GeneratedAt, &item.ExpiresAt); err != nil {
+		if err := rows.Scan(
+			&item.ID, &item.ProfileID, &item.CoreID, &item.Summary,
+			&item.GeneratedAt, &item.ExpiresAt, &item.AssistantName,
+		); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
