@@ -95,7 +95,7 @@ func taterNzbWatchAgainRows(cfg *config.Config) ([]taterUsenetItem, error) {
 			RatingKey:  entry.ID,
 			NzbURL:     entry.NzbURL,
 			Type:       "watchAgain",
-			MediaType:  "nzb",
+			MediaType:  taterNzbMediaType("", entry.Category),
 			Category:   entry.Category,
 			CategoryID: "watch-again",
 			Index:      i + 1,

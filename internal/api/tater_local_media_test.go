@@ -1,9 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -12,6 +16,7 @@ import (
 	"time"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/gofiber/fiber/v2"
 )
 
 func TestTaterLocalMovieItemsScansCleanMovieRows(t *testing.T) {
@@ -200,6 +205,84 @@ func TestTaterContinueDisplayStateAdvancesCompletedEpisode(t *testing.T) {
 	}
 	if !strings.Contains(next.Path, "S01E02") || next.PositionMS != 0 || next.Completed {
 		t.Fatalf("expected next episode at start, got %#v", next)
+	}
+}
+
+func TestTaterPlayStateNextReturnsStreamableEpisode(t *testing.T) {
+	root := t.TempDir()
+	seasonDir := filepath.Join(root, "Some.Show.2020", "Season 01")
+	if err := os.MkdirAll(seasonDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"Some.Show.S01E01.Pilot.mkv",
+		"Some.Show.S01E02.Next.mkv",
+	} {
+		if err := os.WriteFile(filepath.Join(seasonDir, name), []byte("media"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := &config.Config{
+		LocalMedia: config.LocalMediaConfig{
+			Enabled: boolPtr(true),
+			Categories: []config.LocalMediaCategory{{
+				ID:          "tv",
+				Name:        "TV",
+				LibraryType: "tv",
+				Paths:       []string{root},
+				Enabled:     boolPtr(true),
+			}},
+		},
+		Players: config.PlayersConfig{
+			Paired: []config.PlayerConfig{{
+				ID:        "local-player",
+				Name:      "Local Player",
+				TokenHash: hashTaterSecret("next-token"),
+			}},
+		},
+	}
+	manager := &mockConfigManager{cfg: cfg}
+	server := &Server{configManager: manager}
+	app := fiber.New()
+	app.Post("/next", server.handleTaterPlayStateNext)
+
+	body, err := json.Marshal(taterPlayState{
+		Title:       "S01E01 Pilot",
+		SeriesTitle: "Some Show",
+		MediaType:   "episode",
+		CategoryID:  "local:tv",
+		SourceIndex: 0,
+		Path:        "Some.Show.2020/Season 01/Some.Show.S01E01.Pilot.mkv",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/next", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer next-token")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected next episode request to succeed, got %d", resp.StatusCode)
+	}
+	var envelope struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Item taterUsenetItem `json:"item"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if !envelope.Success || !strings.Contains(envelope.Data.Item.Path, "S01E02") {
+		t.Fatalf("expected the second episode, got %#v", envelope)
+	}
+	if !strings.Contains(envelope.Data.Item.StreamURL, "/api/tater/local/stream") ||
+		!strings.Contains(envelope.Data.Item.StreamURL, "player_token=next-token") {
+		t.Fatalf("expected an authenticated next-episode stream URL, got %q", envelope.Data.Item.StreamURL)
 	}
 }
 
@@ -779,9 +862,24 @@ func TestTaterTVBumpersWrapCommercialBreaksAndDoNotRepeatEarly(t *testing.T) {
 	if placement := rowString(last, "placement"); placement != "after" && placement != "both" {
 		t.Fatalf("unexpected post-commercial bumper placement %q", placement)
 	}
-	for _, row := range schedule[2 : len(schedule)-1] {
+	taterBumperIndex := -1
+	for index, row := range schedule {
+		if rowString(row, "kind") == taterTVBrandBumperKind {
+			taterBumperIndex = index
+			break
+		}
+	}
+	if taterBumperIndex < 3 || taterBumperIndex >= len(schedule)-2 {
+		t.Fatalf("expected the Tater Tube bumper between commercials: %#v", schedule)
+	}
+	for _, row := range schedule[2:taterBumperIndex] {
 		if rowString(row, "kind") != "commercial" {
-			t.Fatalf("expected only commercials between bumpers: %#v", schedule)
+			t.Fatalf("expected a commercial before the Tater Tube bumper: %#v", schedule)
+		}
+	}
+	for _, row := range schedule[taterBumperIndex+1 : len(schedule)-1] {
+		if rowString(row, "kind") != "commercial" {
+			t.Fatalf("expected remaining commercials after the Tater Tube bumper: %#v", schedule)
 		}
 	}
 
@@ -791,6 +889,111 @@ func TestTaterTVBumpersWrapCommercialBreaksAndDoNotRepeatEarly(t *testing.T) {
 	}
 	if filepath.Base(path) != rowString(schedule[1], "name") {
 		t.Fatalf("resolved unexpected bumper path %q", path)
+	}
+	taterPath, err := taterTVResolveSchedulePath(cfg, schedule[taterBumperIndex])
+	if err != nil {
+		t.Fatalf("expected built-in Tater Tube bumper path to resolve: %v", err)
+	}
+	if filepath.Base(taterPath) != rowString(schedule[taterBumperIndex], "name") {
+		t.Fatalf("resolved unexpected built-in bumper path %q", taterPath)
+	}
+}
+
+func TestTaterTVBuiltInBumpersPlayWithoutCommercials(t *testing.T) {
+	cfg := config.DefaultConfig(t.TempDir())
+	cfg.TubeTV.CommercialsEnabled = boolPtr(false)
+	source := taterTVSource{
+		Title: "Tater Tube Channel",
+		Programs: []taterUsenetItem{
+			{Title: "Feature One", StreamURL: "http://server/feature-1", DurationSeconds: 600},
+			{Title: "Feature Two", StreamURL: "http://server/feature-2", DurationSeconds: 600},
+			{Title: "Feature Three", StreamURL: "http://server/feature-3", DurationSeconds: 600},
+		},
+	}
+
+	schedule, _ := taterTVBuildSchedule(cfg, source, nil, rand.New(rand.NewSource(9)))
+	if len(schedule) != 6 {
+		t.Fatalf("expected each program to be followed by one built-in bumper: %#v", schedule)
+	}
+	seen := map[string]bool{}
+	for index := 0; index < len(schedule); index += 2 {
+		if rowString(schedule[index], "kind") != "movie" {
+			t.Fatalf("expected a program before each built-in bumper: %#v", schedule)
+		}
+		bumper := schedule[index+1]
+		if rowString(bumper, "kind") != taterTVBrandBumperKind {
+			t.Fatalf("expected a built-in Tater Tube bumper with commercials disabled: %#v", schedule)
+		}
+		name := rowString(bumper, "name")
+		if seen[name] {
+			t.Fatalf("built-in bumper repeated before all three played: %q", name)
+		}
+		seen[name] = true
+	}
+}
+
+func TestTaterTVBuiltInBumperDeckExhaustsEveryCycle(t *testing.T) {
+	cfg := config.DefaultConfig(t.TempDir())
+	pool := taterTVBuiltInBumpers(cfg)
+	if len(pool) != len(taterTVBrandBumperDefinitions) {
+		t.Fatalf("expected all built-in bumpers, got %#v", pool)
+	}
+
+	rng := rand.New(rand.NewSource(21))
+	deck := []taterTVBumper{}
+	lastKey := ""
+	previousKey := ""
+	for cycle := 0; cycle < 3; cycle++ {
+		seen := map[string]bool{}
+		for range pool {
+			bumper, ok := taterTVNextBumper(pool, &deck, &lastKey, rng)
+			if !ok {
+				t.Fatal("expected a built-in bumper")
+			}
+			key := taterTVBumperKey(bumper)
+			if seen[key] {
+				t.Fatalf("cycle %d repeated %q before exhausting the deck", cycle, key)
+			}
+			if previousKey != "" && key == previousKey {
+				t.Fatalf("cycle %d repeated %q back-to-back", cycle, key)
+			}
+			seen[key] = true
+			previousKey = key
+		}
+		if len(seen) != len(pool) {
+			t.Fatalf("cycle %d did not play every bumper: %#v", cycle, seen)
+		}
+	}
+}
+
+func TestTaterTVBuiltInBumperCatalogHasUniqueCleanAssets(t *testing.T) {
+	if len(taterTVBrandBumperDefinitions) != 16 {
+		t.Fatalf("expected 16 unique built-in bumpers, got %d", len(taterTVBrandBumperDefinitions))
+	}
+
+	names := map[string]bool{}
+	hashes := map[[sha256.Size]byte]string{}
+	for _, definition := range taterTVBrandBumperDefinitions {
+		if strings.Contains(strings.ToLower(definition.Name), "chip-x") {
+			t.Fatalf("bumper name still contains Chip-X: %q", definition.Name)
+		}
+		if names[definition.Name] {
+			t.Fatalf("duplicate bumper name %q", definition.Name)
+		}
+		names[definition.Name] = true
+		if definition.Duration <= 0 {
+			t.Fatalf("bumper %q has invalid duration %.3f", definition.Name, definition.Duration)
+		}
+
+		data, err := taterTVBrandBumperAssets.ReadFile("assets/tater-bumpers/" + definition.Name)
+		if err != nil {
+			t.Fatalf("bumper %q is missing from embedded assets: %v", definition.Name, err)
+		}
+		sum := sha256.Sum256(data)
+		if duplicate, ok := hashes[sum]; ok {
+			t.Fatalf("bumper %q duplicates %q", definition.Name, duplicate)
+		}
+		hashes[sum] = definition.Name
 	}
 }
 
@@ -934,7 +1137,7 @@ func TestTaterTVGuideCapsLargeSeriesWhileBuilding(t *testing.T) {
 	if total < taterTVGuideHorizon.Seconds() || total > taterTVGuideHorizon.Seconds()+10*60 {
 		t.Fatalf("expected schedule to stop at the guide horizon, got %.0f seconds", total)
 	}
-	if len(schedule) > 73 {
+	if len(schedule) > 145 {
 		t.Fatalf("expected a bounded guide schedule, got %d rows", len(schedule))
 	}
 }

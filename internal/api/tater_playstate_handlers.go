@@ -145,6 +145,33 @@ func (s *Server) handleTaterPlayStateSave(c *fiber.Ctx) error {
 	return RespondSuccess(c, fiber.Map{"saved": true})
 }
 
+func (s *Server) handleTaterPlayStateNext(c *fiber.Ctx) error {
+	cfg, playerToken, ok := s.taterAuthorizedConfig(c)
+	if !ok {
+		return nil
+	}
+
+	var current taterPlayState
+	if err := c.BodyParser(&current); err != nil {
+		return RespondValidationError(c, "Invalid current episode", err.Error())
+	}
+	current.CategoryID = "local:" + taterRawLocalCategoryID(current.CategoryID)
+	current.Path = cleanLocalRelativePath(current.Path)
+	current.MediaType = strings.TrimSpace(current.MediaType)
+	current.SeriesTitle = cleanTaterText(current.SeriesTitle)
+	if !strings.EqualFold(current.MediaType, "episode") || current.Path == "" {
+		return RespondSuccess(c, fiber.Map{"item": nil})
+	}
+
+	next, found := taterNextEpisodePlayState(cfg, current)
+	if !found {
+		return RespondSuccess(c, fiber.Map{"item": nil})
+	}
+	return RespondSuccess(c, fiber.Map{
+		"item": taterPlayStateToItem(next, resolveBaseURL(c, ""), playerToken),
+	})
+}
+
 func taterAttachLocalPlayStates(cfg *config.Config, items []taterUsenetItem) []taterUsenetItem {
 	if len(items) == 0 {
 		return items

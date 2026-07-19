@@ -235,6 +235,21 @@ func TestConfig_Validate_TubeTVBumperGroups(t *testing.T) {
 	assert.Equal(t, []string{"network-ids", "back-to-show"}, cfg.TubeTV.CustomChannels[0].BumperGroups)
 }
 
+func TestConfig_Validate_TaterBumpersDefaultOn(t *testing.T) {
+	cfg := DefaultConfig(t.TempDir())
+	cfg.TaterBumpers = TaterBumpersConfig{}
+
+	assert.NoError(t, cfg.Validate())
+	assert.NotNil(t, cfg.TaterBumpers.LiveTV)
+	assert.NotNil(t, cfg.TaterBumpers.LocalMovies)
+	assert.NotNil(t, cfg.TaterBumpers.LocalSeries)
+	assert.NotNil(t, cfg.TaterBumpers.NZBMovies)
+	assert.True(t, *cfg.TaterBumpers.LiveTV)
+	assert.True(t, *cfg.TaterBumpers.LocalMovies)
+	assert.True(t, *cfg.TaterBumpers.LocalSeries)
+	assert.True(t, *cfg.TaterBumpers.NZBMovies)
+}
+
 func TestConfig_GetWebhookBaseURL(t *testing.T) {
 	tests := []struct {
 		name     string

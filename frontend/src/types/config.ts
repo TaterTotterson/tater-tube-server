@@ -19,6 +19,7 @@ export interface ConfigResponse {
 	newznab: NewznabConfig;
 	local_media: LocalMediaConfig;
 	tube_tv: TubeTVConfig;
+	tater_bumpers: TaterBumpersConfig;
 	players: TaterPlayersConfig;
 	providers: ProviderConfig[];
 	api_key?: string;
@@ -277,6 +278,7 @@ export interface ConfigUpdateRequest {
 	newznab?: Partial<NewznabConfig>;
 	local_media?: Partial<LocalMediaConfig>;
 	tube_tv?: Partial<TubeTVConfig>;
+	tater_bumpers?: Partial<TaterBumpersConfig>;
 	providers?: ProviderUpdateRequest[];
 	profiler_enabled?: boolean;
 }
@@ -414,6 +416,7 @@ export type ConfigSection =
 	| "newznab"
 	| "local_media"
 	| "tube_tv"
+	| "tater_bumpers"
 	| "players"
 	| "tater"
 	| "system";
@@ -558,6 +561,13 @@ export interface TubeTVConfig {
 	channel_logos_enabled: boolean;
 	commercial_categories: string[];
 	custom_channels: TubeTVCustomChannel[];
+}
+
+export interface TaterBumpersConfig {
+	live_tv: boolean;
+	local_movies: boolean;
+	local_series: boolean;
+	nzb_movies: boolean;
 }
 
 export interface TubeTVLogoResult {
@@ -719,6 +729,7 @@ export interface TaterPairingCodeCreateResponse extends TaterPairingCode {
 export interface TaterCoreConnection {
 	id: string;
 	name: string;
+	assistant_name: string;
 	created_at: string;
 	last_seen_at?: string;
 	revoked_at?: string;
@@ -745,6 +756,7 @@ export interface TaterRecommendationBatch {
 	id: string;
 	profile_id: string;
 	core_id: string;
+	assistant_name: string;
 	summary: string;
 	generated_at: string;
 	expires_at: string;
@@ -925,6 +937,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		title: "Tube TV",
 		description: "Server-side The Tube channels, custom lineups, and commercial breaks.",
 		icon: "Tv",
+		canEdit: true,
+	},
+	tater_bumpers: {
+		title: "Tater Bumpers",
+		description: "Choose where paired players may use the built-in Tater Tube bumpers.",
+		icon: "Sparkles",
 		canEdit: true,
 	},
 	players: {

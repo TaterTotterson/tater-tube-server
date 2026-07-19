@@ -222,7 +222,8 @@ func (s *Server) handleTaterUsenetCatalog(c *fiber.Ctx) error {
 	}
 
 	return RespondSuccess(c, fiber.Map{
-		"categories": categories,
+		"categories":    categories,
+		"tater_bumpers": taterBumperSettingsMap(cfg),
 	})
 }
 
@@ -296,6 +297,7 @@ func (s *Server) handleTaterUsenetItems(c *fiber.Ctx) error {
 	if err != nil {
 		return RespondServiceUnavailable(c, "Failed to parse Newznab items", err.Error())
 	}
+	taterAnnotateNzbMediaTypes(items, categoryID, "")
 	return RespondSuccess(c, fiber.Map{"title": title, "items": items})
 }
 
@@ -327,6 +329,7 @@ func (s *Server) handleTaterUsenetSearch(c *fiber.Ctx) error {
 	if err != nil {
 		return RespondServiceUnavailable(c, "Failed to parse search results", err.Error())
 	}
+	taterAnnotateNzbMediaTypes(items, "", "")
 	return RespondSuccess(c, fiber.Map{
 		"title": "Search: " + query,
 		"items": items,
@@ -395,6 +398,7 @@ func (s *Server) handleTaterUsenetTrending(c *fiber.Ctx) error {
 	if err != nil {
 		return RespondServiceUnavailable(c, "Failed to parse trending feed", err.Error())
 	}
+	taterAnnotateNzbMediaTypes(items, "", category)
 	return RespondSuccess(c, fiber.Map{
 		"title": fmt.Sprintf("%s %s", strings.ToUpper(category), strings.ToUpper(period)),
 		"items": items,
@@ -2145,6 +2149,48 @@ func parseTaterNewznabItems(data []byte, cfg *config.Config) ([]taterUsenetItem,
 		}
 	}
 	return rows, nil
+}
+
+func taterAnnotateNzbMediaTypes(items []taterUsenetItem, categoryID, category string) {
+	for i := range items {
+		if items[i].MediaType != "" && items[i].MediaType != "nzb" {
+			continue
+		}
+		itemCategory := strings.TrimSpace(items[i].Category + " " + category)
+		items[i].MediaType = taterNzbMediaType(categoryID, itemCategory)
+	}
+}
+
+func taterNzbMediaType(categoryID, category string) string {
+	normalizedCategory := strings.ToLower(cleanTaterText(category))
+	switch {
+	case strings.Contains(normalizedCategory, "movie") ||
+		strings.Contains(normalizedCategory, "film"):
+		return "movie"
+	case strings.Contains(normalizedCategory, "television") ||
+		strings.Contains(normalizedCategory, "series") ||
+		strings.Contains(normalizedCategory, "tv"):
+		return "episode"
+	case strings.Contains(normalizedCategory, "audio") ||
+		strings.Contains(normalizedCategory, "music"):
+		return "audio"
+	}
+
+	for _, rawID := range strings.Split(categoryID, ",") {
+		id, err := strconv.Atoi(strings.TrimSpace(rawID))
+		if err != nil {
+			continue
+		}
+		switch {
+		case id >= 2000 && id < 3000:
+			return "movie"
+		case id >= 3000 && id < 4000:
+			return "audio"
+		case id >= 5000 && id < 6000:
+			return "episode"
+		}
+	}
+	return "nzb"
 }
 
 func taterResolveNzbURL(rawURL, guid string, cfg *config.Config) string {

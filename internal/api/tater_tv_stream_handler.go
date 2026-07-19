@@ -666,6 +666,17 @@ func taterTVResolveStreamItem(cfg *config.Config, row map[string]any, startOffse
 }
 
 func taterTVResolveSchedulePath(cfg *config.Config, row map[string]any) (string, error) {
+	if strings.EqualFold(rowString(row, "kind"), taterTVBrandBumperKind) {
+		rawName := strings.TrimSpace(rowString(row, "name"))
+		if rawName == "" {
+			return "", fmt.Errorf("built-in Tater Tube bumper name missing")
+		}
+		path, err := taterTVEnsureBuiltInBumperFile(cfg, rawName)
+		if err != nil {
+			return "", fmt.Errorf("built-in Tater Tube bumper unavailable: %w", err)
+		}
+		return path, nil
+	}
 	if strings.EqualFold(rowString(row, "kind"), "bumper") {
 		placement := taterTVNormalizeBumperPlacement(rowString(row, "placement"))
 		groupID := taterTVCategoryID(rowString(row, "groupId"), "")

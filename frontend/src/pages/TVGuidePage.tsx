@@ -87,6 +87,7 @@ function itemKindLabel(row?: TubeTVGuideScheduleItem) {
 	const kind = String(row?.kind || row?.mediaType || row?.type || "media").toLowerCase();
 	if (kind === "commercial") return "Commercial";
 	if (kind === "bumper") return row?.placementLabel || "Bumper";
+	if (kind === "tater_bumper") return "Tater Tube Bumper";
 	if (kind === "episode") return "Episode";
 	if (kind === "movie") return "Movie";
 	return kind.replace(/\b\w/g, (char) => char.toUpperCase());
@@ -157,6 +158,9 @@ function blockClasses(row: TubeTVGuideScheduleItem, isCurrent: boolean, isCompac
 	}
 	if (kind === "bumper") {
 		return `${base}${padding} border-accent/40 bg-accent/15 text-accent-content${current}`;
+	}
+	if (kind === "tater_bumper") {
+		return `${base}${padding} border-warning/45 bg-warning/15 text-warning${current}`;
 	}
 	if (kind === "episode") {
 		return `${base}${padding} border-secondary/35 bg-secondary/12 text-secondary-content${current}`;
