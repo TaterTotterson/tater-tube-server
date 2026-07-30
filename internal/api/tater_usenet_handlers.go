@@ -48,43 +48,47 @@ type taterUsenetCategory struct {
 }
 
 type taterUsenetItem struct {
-	Title           string  `json:"title"`
-	Key             string  `json:"key,omitempty"`
-	RatingKey       string  `json:"ratingKey,omitempty"`
-	PartKey         string  `json:"partKey,omitempty"`
-	NzbURL          string  `json:"nzbUrl"`
-	Type            string  `json:"type,omitempty"`
-	MediaType       string  `json:"mediaType,omitempty"`
-	Artist          string  `json:"artist,omitempty"`
-	Album           string  `json:"album,omitempty"`
-	SearchQuery     string  `json:"searchQuery,omitempty"`
-	CategoryID      string  `json:"categoryId,omitempty"`
-	SourceIndex     int     `json:"sourceIndex,omitempty"`
-	Path            string  `json:"path,omitempty"`
-	StreamURL       string  `json:"streamUrl,omitempty"`
-	SeekMode        string  `json:"seekMode,omitempty"`
-	GUID            string  `json:"guid,omitempty"`
-	Date            string  `json:"date,omitempty"`
-	Description     string  `json:"description,omitempty"`
-	Category        string  `json:"category,omitempty"`
-	Poster          string  `json:"poster,omitempty"`
-	Files           string  `json:"files,omitempty"`
-	Grabs           string  `json:"grabs,omitempty"`
-	Index           int     `json:"index,omitempty"`
-	Duration        int64   `json:"duration,omitempty"`
-	DurationSeconds float64 `json:"durationSeconds,omitempty"`
-	PlayStateID     string  `json:"playStateId,omitempty"`
-	SeriesStateID   string  `json:"seriesStateId,omitempty"`
-	ViewOffset      int64   `json:"viewOffset,omitempty"`
-	ViewOffsetSec   float64 `json:"viewOffsetSeconds,omitempty"`
-	ProgressPercent float64 `json:"progressPercent,omitempty"`
-	LeafCount       int     `json:"leafCount,omitempty"`
-	SizeBytes       int64   `json:"sizeBytes,omitempty"`
-	SizeText        string  `json:"sizeText,omitempty"`
-	DurationDisplay string  `json:"durationDisplay,omitempty"`
-	ModuleID        string  `json:"moduleId,omitempty"`
-	ChannelNumber   string  `json:"channelNumber,omitempty"`
-	ChannelName     string  `json:"channelName,omitempty"`
+	Title           string   `json:"title"`
+	Key             string   `json:"key,omitempty"`
+	RatingKey       string   `json:"ratingKey,omitempty"`
+	PartKey         string   `json:"partKey,omitempty"`
+	NzbURL          string   `json:"nzbUrl"`
+	Type            string   `json:"type,omitempty"`
+	MediaType       string   `json:"mediaType,omitempty"`
+	Artist          string   `json:"artist,omitempty"`
+	AlbumArtist     string   `json:"albumArtist,omitempty"`
+	Album           string   `json:"album,omitempty"`
+	Genre           string   `json:"genre,omitempty"`
+	Genres          []string `json:"genres,omitempty"`
+	SearchQuery     string   `json:"searchQuery,omitempty"`
+	CategoryID      string   `json:"categoryId,omitempty"`
+	SourceIndex     int      `json:"sourceIndex,omitempty"`
+	Path            string   `json:"path,omitempty"`
+	StreamURL       string   `json:"streamUrl,omitempty"`
+	SeekMode        string   `json:"seekMode,omitempty"`
+	GUID            string   `json:"guid,omitempty"`
+	Date            string   `json:"date,omitempty"`
+	Description     string   `json:"description,omitempty"`
+	Category        string   `json:"category,omitempty"`
+	Poster          string   `json:"poster,omitempty"`
+	Files           string   `json:"files,omitempty"`
+	Grabs           string   `json:"grabs,omitempty"`
+	Index           int      `json:"index,omitempty"`
+	Duration        int64    `json:"duration,omitempty"`
+	DurationSeconds float64  `json:"durationSeconds,omitempty"`
+	PlayStateID     string   `json:"playStateId,omitempty"`
+	SeriesStateID   string   `json:"seriesStateId,omitempty"`
+	ViewOffset      int64    `json:"viewOffset,omitempty"`
+	ViewOffsetSec   float64  `json:"viewOffsetSeconds,omitempty"`
+	ProgressPercent float64  `json:"progressPercent,omitempty"`
+	LeafCount       int      `json:"leafCount,omitempty"`
+	SizeBytes       int64    `json:"sizeBytes,omitempty"`
+	SizeText        string   `json:"sizeText,omitempty"`
+	DurationDisplay string   `json:"durationDisplay,omitempty"`
+	ModifiedUnix    int64    `json:"modifiedUnix,omitempty"`
+	ModuleID        string   `json:"moduleId,omitempty"`
+	ChannelNumber   string   `json:"channelNumber,omitempty"`
+	ChannelName     string   `json:"channelName,omitempty"`
 }
 
 type taterUsenetPlayRequest struct {
@@ -1410,14 +1414,17 @@ func taterLocalMusicLibraries(cfg *config.Config) []taterUsenetItem {
 }
 
 type taterMusicAlbumScan struct {
-	ID          string
-	CategoryID  string
-	SourceIndex int
-	RelPath     string
-	Title       string
-	Artist      string
-	LeafCount   int
-	SizeBytes   int64
+	ID           string
+	CategoryID   string
+	SourceIndex  int
+	RelPath      string
+	Title        string
+	Artist       string
+	AlbumArtist  string
+	Genres       []string
+	LeafCount    int
+	SizeBytes    int64
+	ModifiedUnix int64
 }
 
 func taterLocalMusicAlbums(cfg *config.Config, baseURL, playerToken, categoryID string) ([]taterUsenetItem, error) {
@@ -1471,7 +1478,21 @@ func taterLocalMusicAlbums(cfg *config.Config, baseURL, playerToken, categoryID 
 			}
 			if info, statErr := entry.Info(); statErr == nil && info != nil {
 				album.SizeBytes += info.Size()
+				if modified := info.ModTime().Unix(); modified > album.ModifiedUnix {
+					album.ModifiedUnix = modified
+				}
 			}
+			metadata := taterLocalMusicMetadataForPath(cfg, path)
+			if metadata.Album != "" {
+				album.Title = metadata.Album
+			}
+			if metadata.AlbumArtist != "" {
+				album.AlbumArtist = metadata.AlbumArtist
+				album.Artist = metadata.AlbumArtist
+			} else if metadata.Artist != "" {
+				album.Artist = metadata.Artist
+			}
+			album.Genres = mergeTaterMusicGenres(album.Genres, metadata.Genres)
 			album.LeafCount++
 			return nil
 		})
@@ -1483,18 +1504,22 @@ func taterLocalMusicAlbums(cfg *config.Config, baseURL, playerToken, categoryID 
 	items := make([]taterUsenetItem, 0, len(albums))
 	for _, album := range albums {
 		items = append(items, taterUsenetItem{
-			Title:       album.Title,
-			Key:         album.ID,
-			RatingKey:   album.ID,
-			Type:        "album",
-			MediaType:   "album",
-			Artist:      album.Artist,
-			CategoryID:  "local:" + album.CategoryID,
-			SourceIndex: album.SourceIndex,
-			Path:        album.RelPath,
-			LeafCount:   album.LeafCount,
-			SizeBytes:   album.SizeBytes,
-			SizeText:    musicAlbumDetail(album.LeafCount),
+			Title:        album.Title,
+			Key:          album.ID,
+			RatingKey:    album.ID,
+			Type:         "album",
+			MediaType:    "album",
+			Artist:       album.Artist,
+			AlbumArtist:  album.AlbumArtist,
+			Genre:        strings.Join(album.Genres, ", "),
+			Genres:       append([]string(nil), album.Genres...),
+			CategoryID:   "local:" + album.CategoryID,
+			SourceIndex:  album.SourceIndex,
+			Path:         album.RelPath,
+			LeafCount:    album.LeafCount,
+			SizeBytes:    album.SizeBytes,
+			SizeText:     musicAlbumDetail(album.LeafCount),
+			ModifiedUnix: album.ModifiedUnix,
 		})
 	}
 	sort.SliceStable(items, func(i, j int) bool {
@@ -1571,10 +1596,13 @@ func taterLocalMusicTracks(cfg *config.Config, baseURL, playerToken, albumID str
 			Index:       index,
 			SizeBytes:   size,
 		}
+		if info != nil {
+			item.ModifiedUnix = info.ModTime().Unix()
+		}
+		applyTaterLocalMusicMetadata(&item, taterLocalMusicMetadataForPath(cfg, path))
 		if size > 0 {
 			item.SizeText = formatTaterBytes(size)
 		}
-		attachTaterLocalDuration(cfg, path, &item)
 		tracks = append(tracks, item)
 		return nil
 	})

@@ -235,6 +235,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/tater/music/libraries", s.handleTaterMusicLibraries)
 	api.Get("/tater/music/albums", s.handleTaterMusicAlbums)
 	api.Get("/tater/music/tracks", s.handleTaterMusicTracks)
+	api.Get("/tater/music/catalog", s.handleTaterMusicCatalog)
 	api.Get("/tater/tv/lineup", s.handleTaterTVLineup)
 	api.Get("/tater/tv/commercials/file", s.handleTaterTVCommercialFile)
 	api.Get("/tater/tv/bumpers/file", s.handleTaterTVBumperFile)
