@@ -42,6 +42,7 @@ func (s *Server) handleTaterServerInfo(c *fiber.Ctx) error {
 			"music_libraries":      "/api/tater/music/libraries",
 			"music_albums":         "/api/tater/music/albums",
 			"music_tracks":         "/api/tater/music/tracks",
+			"music_catalog":        "/api/tater/music/catalog",
 			"local_stream":         "/api/tater/local/stream",
 			"tv_lineup":            "/api/tater/tv/lineup",
 			"tv_commercial_file":   "/api/tater/tv/commercials/file",
