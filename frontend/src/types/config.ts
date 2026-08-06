@@ -523,7 +523,7 @@ export interface NewznabConfig {
 export interface LocalMediaCategory {
 	id: string;
 	name: string;
-	library_type?: "movies" | "tv" | "music" | "folders" | string;
+	library_type?: LocalMediaLibraryType | string;
 	paths: string[];
 	enabled?: boolean;
 }
@@ -531,6 +531,79 @@ export interface LocalMediaCategory {
 export interface LocalMediaConfig {
 	enabled: boolean;
 	categories: LocalMediaCategory[];
+}
+
+export type LocalMediaLibraryType = "movies" | "tv" | "music" | "folders";
+
+export interface LocalMediaLibraryStats {
+	files: number;
+	movies: number;
+	shows: number;
+	episodes: number;
+	artists: number;
+	albums: number;
+	songs: number;
+	artwork: number;
+	missing_artwork: number;
+	errors: number;
+	size_bytes: number;
+}
+
+export interface LocalMediaIndexedCategory {
+	id: string;
+	name: string;
+	library_type: LocalMediaLibraryType | string;
+	paths: string[];
+	enabled: boolean;
+	stats: LocalMediaLibraryStats;
+	errors?: string[];
+}
+
+export interface LocalMediaMusicAlbum {
+	id: string;
+	category_id: string;
+	category_name: string;
+	source_index: number;
+	path: string;
+	title: string;
+	artist: string;
+	album_artist?: string;
+	genres?: string[];
+	year?: string;
+	track_count: number;
+	disc_count: number;
+	size_bytes: number;
+	modified_unix: number;
+	has_artwork: boolean;
+	artwork_source?: "embedded" | "local" | "scraped" | "manual" | string;
+	artwork_url?: string;
+	artwork_locked: boolean;
+	musicbrainz_id?: string;
+	artwork_updated?: number;
+}
+
+export interface LocalMediaScanStatus {
+	running: boolean;
+	phase: "" | "scanning" | "artwork" | "complete" | "error" | string;
+	message?: string;
+	started_at?: string;
+	finished_at?: string;
+	files_scanned: number;
+	albums_processed: number;
+	artwork_found: number;
+	error?: string;
+}
+
+export interface LocalMediaLibraryResponse {
+	generated_at?: string;
+	stale: boolean;
+	categories: LocalMediaIndexedCategory[];
+	stats: LocalMediaLibraryStats;
+	albums: LocalMediaMusicAlbum[];
+	total_albums: number;
+	offset: number;
+	limit: number;
+	scan: LocalMediaScanStatus;
 }
 
 export interface TubeTVCustomSource {

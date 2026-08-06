@@ -25,6 +25,7 @@ type taterLocalMusicMetadata struct {
 	Disc        int
 	Year        string
 	Duration    float64
+	HasArtwork  bool
 }
 
 type taterLocalMusicMetadataCacheEntry struct {
@@ -46,8 +47,12 @@ type taterFFProbeMusicPayload struct {
 		Tags     map[string]string `json:"tags"`
 	} `json:"format"`
 	Streams []struct {
-		Duration string            `json:"duration"`
-		Tags     map[string]string `json:"tags"`
+		CodecType   string            `json:"codec_type"`
+		Duration    string            `json:"duration"`
+		Tags        map[string]string `json:"tags"`
+		Disposition struct {
+			AttachedPic int `json:"attached_pic"`
+		} `json:"disposition"`
 	} `json:"streams"`
 }
 
@@ -111,7 +116,8 @@ func probeTaterLocalMusicMetadata(
 		"-v", "error",
 		"-show_entries",
 		"format=duration:format_tags=title,artist,album_artist,albumartist,album,genre,track,tracknumber,disc,discnumber,date,year:"+
-			"stream=duration:stream_tags=title,artist,album_artist,albumartist,album,genre,track,tracknumber,disc,discnumber,date,year",
+			"stream=codec_type,duration:stream_disposition=attached_pic:"+
+			"stream_tags=title,artist,album_artist,albumartist,album,genre,track,tracknumber,disc,discnumber,date,year",
 		"-of", "json",
 		path,
 	)
@@ -138,9 +144,13 @@ func probeTaterLocalMusicMetadata(
 	}
 
 	duration := parseTaterMusicDuration(payload.Format.Duration)
+	hasArtwork := false
 	for _, stream := range payload.Streams {
 		if candidate := parseTaterMusicDuration(stream.Duration); candidate > duration {
 			duration = candidate
+		}
+		if strings.EqualFold(strings.TrimSpace(stream.CodecType), "video") || stream.Disposition.AttachedPic > 0 {
+			hasArtwork = true
 		}
 	}
 	date := firstTaterMusicTag(tags, "date", "year")
@@ -158,6 +168,7 @@ func probeTaterLocalMusicMetadata(
 		Disc:        parseTaterMusicNumber(firstTaterMusicTag(tags, "disc", "discnumber")),
 		Year:        year,
 		Duration:    duration,
+		HasArtwork:  hasArtwork,
 	}, nil
 }
 

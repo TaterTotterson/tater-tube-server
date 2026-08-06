@@ -30,6 +30,9 @@ import type {
 	ConfigResponse,
 	ConfigSection,
 	ConfigUpdateRequest,
+	LocalMediaLibraryResponse,
+	LocalMediaMusicAlbum,
+	LocalMediaScanStatus,
 	PipelineTuneResponse,
 	ProviderConfig,
 	ProviderCreateRequest,
@@ -908,6 +911,50 @@ class APIClient {
 	async reloadConfig() {
 		return this.request<ConfigResponse>("/config/reload", {
 			method: "POST",
+		});
+	}
+
+	async getLocalMediaLibrary(params?: {
+		type?: string;
+		category_id?: string;
+		q?: string;
+		limit?: number;
+		offset?: number;
+	}) {
+		const searchParams = new URLSearchParams();
+		if (params?.type) searchParams.set("type", params.type);
+		if (params?.category_id) searchParams.set("category_id", params.category_id);
+		if (params?.q) searchParams.set("q", params.q);
+		if (params?.limit !== undefined) searchParams.set("limit", String(params.limit));
+		if (params?.offset !== undefined) searchParams.set("offset", String(params.offset));
+		const query = searchParams.toString();
+		return this.request<LocalMediaLibraryResponse>(
+			`/local-media/library${query ? `?${query}` : ""}`,
+		);
+	}
+
+	async getLocalMediaScanStatus() {
+		return this.request<LocalMediaScanStatus>("/local-media/scan");
+	}
+
+	async startLocalMediaScan(scrapeMissingArtwork = false) {
+		return this.request<LocalMediaScanStatus>("/local-media/scan", {
+			method: "POST",
+			body: JSON.stringify({ scrape_missing_artwork: scrapeMissingArtwork }),
+		});
+	}
+
+	async refreshLocalMediaAlbumArtwork(albumId: string, force = false) {
+		return this.request<LocalMediaMusicAlbum>("/local-media/music/artwork/refresh", {
+			method: "POST",
+			body: JSON.stringify({ album_id: albumId, force }),
+		});
+	}
+
+	async updateLocalMediaAlbumArtwork(albumId: string, locked: boolean) {
+		return this.request<LocalMediaMusicAlbum>("/local-media/music/artwork", {
+			method: "PATCH",
+			body: JSON.stringify({ album_id: albumId, locked }),
 		});
 	}
 

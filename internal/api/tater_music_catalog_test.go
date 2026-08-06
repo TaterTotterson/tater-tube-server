@@ -2,8 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,7 +39,7 @@ func TestTaterLocalMusicMetadataUsesEmbeddedTags(t *testing.T) {
 	      "date": "1977"
 	    }
 	  },
-	  "streams": []
+	  "streams": [{"codec_type":"video","disposition":{"attached_pic":1}}]
 	}`
 	probeScript := "#!/bin/sh\ncat <<'EOF'\n" + probePayload + "\nEOF\n"
 	if err := os.WriteFile(ffprobePath, []byte(probeScript), 0755); err != nil {
@@ -62,6 +64,89 @@ func TestTaterLocalMusicMetadataUsesEmbeddedTags(t *testing.T) {
 	}
 	if metadata.Duration != 245.75 {
 		t.Fatalf("unexpected duration: %f", metadata.Duration)
+	}
+	if !metadata.HasArtwork {
+		t.Fatal("expected embedded artwork to be detected")
+	}
+}
+
+func TestTaterMusicCatalogPublishesAndServesEmbeddedArtwork(t *testing.T) {
+	root := t.TempDir()
+	binDir := filepath.Join(root, "bin")
+	albumDir := filepath.Join(root, "Artist", "Album")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(albumDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegPath := filepath.Join(binDir, "ffmpeg")
+	ffprobePath := filepath.Join(binDir, "ffprobe")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf '\\377\\330cover\\377\\331'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	probePayload := `{"format":{"duration":"180","tags":{"title":"Covered Song","artist":"Artist","album":"Album"}},"streams":[{"codec_type":"video","disposition":{"attached_pic":1}}]}`
+	probeScript := "#!/bin/sh\ncat <<'EOF'\n" + probePayload + "\nEOF\n"
+	if err := os.WriteFile(ffprobePath, []byte(probeScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+	trackPath := filepath.Join(albumDir, "01 Covered Song.flac")
+	if err := os.WriteFile(trackPath, []byte("audio"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	enabled := true
+	const playerToken = "artwork-player-token"
+	cfg := &config.Config{
+		LocalMedia: config.LocalMediaConfig{
+			Enabled: &enabled,
+			Categories: []config.LocalMediaCategory{{
+				ID: "music", Name: "Music", LibraryType: "music", Paths: []string{root}, Enabled: &enabled,
+			}},
+		},
+		Players: config.PlayersConfig{Paired: []config.PlayerConfig{{
+			ID: "music-core", Name: "Tater Music Core", TokenHash: hashTaterSecret(playerToken), LastSeenAt: "2099-01-01T00:00:00Z",
+		}}},
+		Transcoding: config.TranscodingConfig{FFmpegPath: ffmpegPath},
+	}
+	app := fiber.New()
+	server := &Server{configManager: &mockConfigManager{cfg: cfg}}
+	app.Get("/catalog", server.handleTaterMusicCatalog)
+	app.Get("/artwork", server.handleTaterMusicArtwork)
+
+	catalogRequest := httptest.NewRequest(http.MethodGet, "/catalog", nil)
+	catalogRequest.Header.Set("Authorization", "Bearer "+playerToken)
+	catalogResponse, err := app.Test(catalogRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope testAPIResponse[struct {
+		Tracks []taterUsenetItem `json:"tracks"`
+	}]
+	if err := json.NewDecoder(catalogResponse.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Data.Tracks) != 1 || !envelope.Data.Tracks[0].HasArtwork || envelope.Data.Tracks[0].Poster == "" {
+		t.Fatalf("catalog did not expose artwork: %#v", envelope.Data.Tracks)
+	}
+	posterURL, err := url.Parse(envelope.Data.Tracks[0].Poster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artworkRequest := httptest.NewRequest(http.MethodGet, "/artwork?"+posterURL.RawQuery, nil)
+	artworkResponse, err := app.Test(artworkRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artworkResponse.StatusCode != http.StatusOK || artworkResponse.Header.Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("unexpected artwork response: status=%d type=%q", artworkResponse.StatusCode, artworkResponse.Header.Get("Content-Type"))
+	}
+	body, err := io.ReadAll(artworkResponse.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "\xff\xd8cover\xff\xd9" {
+		t.Fatalf("unexpected artwork body: %q", body)
 	}
 }
 
