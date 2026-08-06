@@ -42,19 +42,7 @@ func (s *Server) handleTaterMusicCatalog(c *fiber.Ctx) error {
 				continue
 			}
 			for i := range albumTracks {
-				if albumTracks[i].Album == "" {
-					albumTracks[i].Album = album.Title
-				}
-				if albumTracks[i].AlbumArtist == "" {
-					albumTracks[i].AlbumArtist = album.AlbumArtist
-				}
-				if albumTracks[i].Artist == "" {
-					albumTracks[i].Artist = album.Artist
-				}
-				if len(albumTracks[i].Genres) == 0 && len(album.Genres) > 0 {
-					albumTracks[i].Genres = append([]string(nil), album.Genres...)
-					albumTracks[i].Genre = strings.Join(album.Genres, ", ")
-				}
+				applyTaterMusicAlbumCatalogDetails(&albumTracks[i], album)
 				tracks = append(tracks, albumTracks[i])
 			}
 		}
@@ -127,6 +115,29 @@ func (s *Server) handleTaterMusicCatalog(c *fiber.Ctx) error {
 		"libraries":    libraryNames,
 		"generated_at": time.Now().UTC(),
 	})
+}
+
+func applyTaterMusicAlbumCatalogDetails(track *taterUsenetItem, album taterUsenetItem) {
+	if track.Album == "" {
+		track.Album = album.Title
+	}
+	if track.AlbumArtist == "" {
+		track.AlbumArtist = album.AlbumArtist
+	}
+	if track.Artist == "" {
+		track.Artist = album.Artist
+	}
+	if len(track.Genres) == 0 && len(album.Genres) > 0 {
+		track.Genres = append([]string(nil), album.Genres...)
+		track.Genre = strings.Join(album.Genres, ", ")
+	}
+	if strings.TrimSpace(album.Poster) != "" && album.HasArtwork {
+		// The album index resolves manual, embedded, local, and scraped artwork in
+		// priority order. Publish that one resolved image for every track so all
+		// downstream clients display a consistent album cover.
+		track.Poster = album.Poster
+		track.HasArtwork = true
+	}
 }
 
 func taterMusicTrackContains(track taterUsenetItem, query string) bool {
