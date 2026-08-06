@@ -125,7 +125,7 @@ const (
 	taterTVGuideHorizon         = 12 * time.Hour
 	taterTVGuideRefillThreshold = 2 * time.Hour
 	taterTVGuidePlannerInterval = 5 * time.Minute
-	taterTVGuideCacheVersion    = 5
+	taterTVGuideCacheVersion    = 6
 	taterTVGuideCacheFile       = "tube-tv-guide-cache.json"
 )
 
@@ -815,29 +815,36 @@ func taterTVBuildSchedulePass(cfg *config.Config, source taterTVSource, commerci
 }
 
 type taterTVScheduleDecks struct {
-	commercials        []taterTVCommercial
-	commercialDeck     []taterTVCommercial
-	beforeBumpers      []taterTVBumper
-	afterBumpers       []taterTVBumper
-	beforeBumperDeck   []taterTVBumper
-	afterBumperDeck    []taterTVBumper
-	lastBumperKey      string
-	taterBumpers       []taterTVBumper
-	taterBumperDeck    []taterTVBumper
-	lastTaterBumperKey string
+	commercials              []taterTVCommercial
+	commercialDeck           []taterTVCommercial
+	beforeBumpers            []taterTVBumper
+	afterBumpers             []taterTVBumper
+	beforeBumperDeck         []taterTVBumper
+	afterBumperDeck          []taterTVBumper
+	lastBumperKey            string
+	taterBumpers             []taterTVBumper
+	taterBumperDeck          []taterTVBumper
+	lastTaterBumperKey       string
+	sparseTaterBumperCadence bool
+	programsUntilTaterBumper int
 }
 
 func taterTVNewScheduleDecks(cfg *config.Config, source taterTVSource, commercialCategories []taterTVCommercialCategory, bumperGroups []taterTVBumperGroup) *taterTVScheduleDecks {
 	beforeBumpers, afterBumpers := taterTVBumperPools(bumperGroups, source.BumperGroups)
+	commercials := taterTVCommercialPool(cfg, commercialCategories, source.CommercialCategory)
 	taterBumpers := []taterTVBumper{}
 	if cfg != nil && taterBumperSettingEnabled(cfg.TaterBumpers.LiveTV) {
 		taterBumpers = taterTVBuiltInBumpers(cfg)
 	}
+	commercialsEnabled := cfg != nil &&
+		(cfg.TubeTV.CommercialsEnabled == nil || *cfg.TubeTV.CommercialsEnabled)
 	return &taterTVScheduleDecks{
-		commercials:   taterTVCommercialPool(cfg, commercialCategories, source.CommercialCategory),
+		commercials:   commercials,
 		beforeBumpers: beforeBumpers,
 		afterBumpers:  afterBumpers,
 		taterBumpers:  taterBumpers,
+		sparseTaterBumperCadence: (!commercialsEnabled || len(commercials) == 0) &&
+			len(beforeBumpers) == 0 && len(afterBumpers) == 0,
 	}
 }
 
@@ -994,7 +1001,7 @@ func taterTVAppendMidrollCommercialBreak(cfg *config.Config, schedule *[]map[str
 func taterTVAppendBreak(cfg *config.Config, schedule *[]map[string]any, start float64, decks *taterTVScheduleDecks, rng *rand.Rand, includeTaterBumper bool) float64 {
 	commercialsEnabled := cfg.TubeTV.CommercialsEnabled == nil || *cfg.TubeTV.CommercialsEnabled
 	if !commercialsEnabled || len(decks.commercials) == 0 {
-		if includeTaterBumper {
+		if includeTaterBumper && taterTVShouldAppendBrandBumper(decks, rng) {
 			return taterTVAppendNextBrandBumper(schedule, start, decks, rng)
 		}
 		return start
@@ -1007,10 +1014,10 @@ func taterTVAppendBreak(cfg *config.Config, schedule *[]map[string]any, start fl
 	count := 2 + rng.Intn(3)
 	beforeCount := count
 	if includeTaterBumper {
-		beforeCount = 1
+		beforeCount = taterTVCommercialsBeforeBrandBumper(count, rng)
 	}
 	total, addedBefore := taterTVAppendCommercials(schedule, total, beforeCount, decks, rng)
-	if includeTaterBumper {
+	if includeTaterBumper && addedBefore > 0 {
 		total = taterTVAppendNextBrandBumper(schedule, total, decks, rng)
 		total, _ = taterTVAppendCommercials(schedule, total, count-addedBefore, decks, rng)
 	}
@@ -1056,6 +1063,28 @@ func taterTVAppendCommercials(schedule *[]map[string]any, start float64, count i
 		added++
 	}
 	return total, added
+}
+
+func taterTVCommercialsBeforeBrandBumper(count int, rng *rand.Rand) int {
+	if count <= 1 {
+		return max(0, count)
+	}
+	return 1 + rng.Intn(count)
+}
+
+func taterTVShouldAppendBrandBumper(decks *taterTVScheduleDecks, rng *rand.Rand) bool {
+	if decks == nil || !decks.sparseTaterBumperCadence {
+		return true
+	}
+	if decks.programsUntilTaterBumper <= 0 {
+		decks.programsUntilTaterBumper = 2 + rng.Intn(3)
+	}
+	decks.programsUntilTaterBumper--
+	if decks.programsUntilTaterBumper > 0 {
+		return false
+	}
+	decks.programsUntilTaterBumper = 2 + rng.Intn(3)
+	return true
 }
 
 func taterTVAppendNextBrandBumper(schedule *[]map[string]any, start float64, decks *taterTVScheduleDecks, rng *rand.Rand) float64 {

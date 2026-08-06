@@ -869,7 +869,7 @@ func TestTaterTVBumpersWrapCommercialBreaksAndDoNotRepeatEarly(t *testing.T) {
 			break
 		}
 	}
-	if taterBumperIndex < 3 || taterBumperIndex >= len(schedule)-2 {
+	if taterBumperIndex < 3 || taterBumperIndex >= len(schedule)-1 {
 		t.Fatalf("expected the Tater Tube bumper between commercials: %#v", schedule)
 	}
 	for _, row := range schedule[2:taterBumperIndex] {
@@ -899,36 +899,69 @@ func TestTaterTVBumpersWrapCommercialBreaksAndDoNotRepeatEarly(t *testing.T) {
 	}
 }
 
+func TestTaterTVBrandBumperMovesWithinCommercialBreak(t *testing.T) {
+	seen := map[int]bool{}
+	for seed := int64(0); seed < 100; seed++ {
+		before := taterTVCommercialsBeforeBrandBumper(4, rand.New(rand.NewSource(seed)))
+		if before < 1 || before > 4 {
+			t.Fatalf("expected 1-4 commercials before the Tater bumper, got %d", before)
+		}
+		seen[before] = true
+	}
+	if len(seen) != 4 {
+		t.Fatalf("expected the Tater bumper to use every valid position, got %#v", seen)
+	}
+}
+
 func TestTaterTVBuiltInBumpersPlayWithoutCommercials(t *testing.T) {
 	cfg := config.DefaultConfig(t.TempDir())
 	cfg.TubeTV.CommercialsEnabled = boolPtr(false)
+	programs := make([]taterUsenetItem, 12)
+	for index := range programs {
+		programs[index] = taterUsenetItem{
+			Title:           fmt.Sprintf("Feature %02d", index+1),
+			StreamURL:       fmt.Sprintf("http://server/feature-%02d", index+1),
+			DurationSeconds: 600,
+		}
+	}
 	source := taterTVSource{
-		Title: "Tater Tube Channel",
-		Programs: []taterUsenetItem{
-			{Title: "Feature One", StreamURL: "http://server/feature-1", DurationSeconds: 600},
-			{Title: "Feature Two", StreamURL: "http://server/feature-2", DurationSeconds: 600},
-			{Title: "Feature Three", StreamURL: "http://server/feature-3", DurationSeconds: 600},
-		},
+		Title:    "Tater Tube Channel",
+		Programs: programs,
 	}
 
 	schedule, _ := taterTVBuildSchedule(cfg, source, nil, rand.New(rand.NewSource(9)))
-	if len(schedule) != 6 {
-		t.Fatalf("expected each program to be followed by one built-in bumper: %#v", schedule)
-	}
 	seen := map[string]bool{}
-	for index := 0; index < len(schedule); index += 2 {
-		if rowString(schedule[index], "kind") != "movie" {
-			t.Fatalf("expected a program before each built-in bumper: %#v", schedule)
+	programCount := 0
+	programsSinceBumper := 0
+	bumperCount := 0
+	for _, row := range schedule {
+		switch rowString(row, "kind") {
+		case "movie":
+			programCount++
+			programsSinceBumper++
+		case taterTVBrandBumperKind:
+			if programsSinceBumper < 2 || programsSinceBumper > 4 {
+				t.Fatalf("expected a built-in bumper after 2-4 programs, got %d: %#v", programsSinceBumper, schedule)
+			}
+			name := rowString(row, "name")
+			if seen[name] {
+				t.Fatalf("built-in bumper repeated before the deck was exhausted: %q", name)
+			}
+			seen[name] = true
+			programsSinceBumper = 0
+			bumperCount++
+		default:
+			t.Fatalf("unexpected clean-channel schedule entry: %#v", row)
 		}
-		bumper := schedule[index+1]
-		if rowString(bumper, "kind") != taterTVBrandBumperKind {
-			t.Fatalf("expected a built-in Tater Tube bumper with commercials disabled: %#v", schedule)
-		}
-		name := rowString(bumper, "name")
-		if seen[name] {
-			t.Fatalf("built-in bumper repeated before all three played: %q", name)
-		}
-		seen[name] = true
+	}
+	if programCount != len(programs) {
+		t.Fatalf("expected all %d programs, got %d: %#v", len(programs), programCount, schedule)
+	}
+	if bumperCount < 3 || bumperCount > 6 {
+		t.Fatalf("expected sparse built-in bumpers every 2-4 programs, got %d: %#v", bumperCount, schedule)
+	}
+	if programsSinceBumper >= 4 {
+		t.Fatalf("expected the next bumper before four trailing programs, got %d: %#v", programsSinceBumper, schedule)
 	}
 }
 

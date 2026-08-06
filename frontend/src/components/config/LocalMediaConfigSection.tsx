@@ -1,6 +1,44 @@
-import { Folder, Plus, Save, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
-import type { ConfigResponse, LocalMediaCategory, LocalMediaConfig } from "../../types/config";
+import {
+	AlertTriangle,
+	Disc3,
+	Film,
+	Folder,
+	FolderOpen,
+	HardDrive,
+	Image,
+	ImageOff,
+	Library,
+	ListMusic,
+	Lock,
+	LockOpen,
+	Music2,
+	Plus,
+	RefreshCw,
+	Save,
+	Search,
+	Trash2,
+	Tv,
+	WandSparkles,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useToast } from "../../contexts/ToastContext";
+import {
+	useLocalMediaLibrary,
+	useLocalMediaScanStatus,
+	useRefreshLocalMediaAlbumArtwork,
+	useStartLocalMediaScan,
+	useUpdateLocalMediaAlbumArtwork,
+} from "../../hooks/useApi";
+import type {
+	ConfigResponse,
+	LocalMediaCategory,
+	LocalMediaConfig,
+	LocalMediaLibraryStats,
+	LocalMediaLibraryType,
+} from "../../types/config";
+import { BytesDisplay } from "../ui/BytesDisplay";
+import { ConfigMiniTabs } from "./ConfigMiniTabs";
+import { FolderPickerModal } from "./FolderPickerModal";
 
 interface LocalMediaConfigSectionProps {
 	config: ConfigResponse;
@@ -14,6 +52,47 @@ const DEFAULT_LOCAL_MEDIA: LocalMediaConfig = {
 	categories: [],
 };
 
+const LIBRARY_TABS: Array<{
+	id: LocalMediaLibraryType;
+	label: string;
+	description: string;
+	defaultName: string;
+}> = [
+	{ id: "movies", label: "Movies", description: "Feature films and videos", defaultName: "Movies" },
+	{
+		id: "tv",
+		label: "TV Shows",
+		description: "Series, seasons, and episodes",
+		defaultName: "TV Shows",
+	},
+	{
+		id: "music",
+		label: "Music",
+		description: "Artists, albums, songs, and artwork",
+		defaultName: "Music",
+	},
+	{
+		id: "folders",
+		label: "Folders",
+		description: "Browse media using its folder structure",
+		defaultName: "Folders",
+	},
+];
+
+const EMPTY_STATS: LocalMediaLibraryStats = {
+	files: 0,
+	movies: 0,
+	shows: 0,
+	episodes: 0,
+	artists: 0,
+	albums: 0,
+	songs: 0,
+	artwork: 0,
+	missing_artwork: 0,
+	errors: 0,
+	size_bytes: 0,
+};
+
 function slug(value: string) {
 	return value
 		.toLowerCase()
@@ -23,6 +102,10 @@ function slug(value: string) {
 		.slice(0, 64);
 }
 
+function libraryType(value?: string): LocalMediaLibraryType {
+	return value === "tv" || value === "music" || value === "folders" ? value : "movies";
+}
+
 function normalize(config: ConfigResponse): LocalMediaConfig {
 	const source = config.local_media ?? DEFAULT_LOCAL_MEDIA;
 	return {
@@ -30,11 +113,97 @@ function normalize(config: ConfigResponse): LocalMediaConfig {
 		categories: (source.categories ?? []).map((category) => ({
 			id: category.id || slug(category.name || "local"),
 			name: category.name || "Local",
-			library_type: category.library_type || "movies",
+			library_type: libraryType(category.library_type),
 			paths: category.paths ?? [],
 			enabled: category.enabled ?? true,
 		})),
 	};
+}
+
+function libraryIcon(type: LocalMediaLibraryType) {
+	switch (type) {
+		case "movies":
+			return <Film className="h-4 w-4" />;
+		case "tv":
+			return <Tv className="h-4 w-4" />;
+		case "music":
+			return <Music2 className="h-4 w-4" />;
+		default:
+			return <Folder className="h-4 w-4" />;
+	}
+}
+
+function statCards(type: LocalMediaLibraryType, stats: LocalMediaLibraryStats) {
+	const size = {
+		label: "Storage",
+		value: <BytesDisplay bytes={stats.size_bytes} />,
+		icon: <HardDrive className="h-4 w-4" />,
+	};
+	if (type === "music") {
+		return [
+			{
+				label: "Artists",
+				value: stats.artists.toLocaleString(),
+				icon: <Music2 className="h-4 w-4" />,
+			},
+			{
+				label: "Albums",
+				value: stats.albums.toLocaleString(),
+				icon: <Disc3 className="h-4 w-4" />,
+			},
+			{
+				label: "Songs",
+				value: stats.songs.toLocaleString(),
+				icon: <ListMusic className="h-4 w-4" />,
+			},
+			{
+				label: "With Art",
+				value: stats.artwork.toLocaleString(),
+				icon: <Image className="h-4 w-4" />,
+			},
+			{
+				label: "Missing Art",
+				value: stats.missing_artwork.toLocaleString(),
+				icon: <ImageOff className="h-4 w-4" />,
+			},
+			size,
+		];
+	}
+	if (type === "tv") {
+		return [
+			{ label: "Shows", value: stats.shows.toLocaleString(), icon: <Tv className="h-4 w-4" /> },
+			{
+				label: "Episodes",
+				value: stats.episodes.toLocaleString(),
+				icon: <Film className="h-4 w-4" />,
+			},
+			{
+				label: "Files",
+				value: stats.files.toLocaleString(),
+				icon: <Library className="h-4 w-4" />,
+			},
+			size,
+		];
+	}
+	if (type === "movies") {
+		return [
+			{ label: "Movies", value: stats.movies.toLocaleString(), icon: <Film className="h-4 w-4" /> },
+			{
+				label: "Files",
+				value: stats.files.toLocaleString(),
+				icon: <Library className="h-4 w-4" />,
+			},
+			size,
+		];
+	}
+	return [
+		{
+			label: "Media Files",
+			value: stats.files.toLocaleString(),
+			icon: <Folder className="h-4 w-4" />,
+		},
+		size,
+	];
 }
 
 export function LocalMediaConfigSection({
@@ -43,13 +212,38 @@ export function LocalMediaConfigSection({
 	isReadOnly = false,
 	isUpdating = false,
 }: LocalMediaConfigSectionProps) {
+	const { showToast } = useToast();
 	const [formData, setFormData] = useState<LocalMediaConfig>(() => normalize(config));
 	const [hasChanges, setHasChanges] = useState(false);
+	const [activeTab, setActiveTab] = useState<LocalMediaLibraryType>("music");
+	const [search, setSearch] = useState("");
+	const [missingOnly, setMissingOnly] = useState(false);
+	const [albumOffset, setAlbumOffset] = useState(0);
+	const [folderPicker, setFolderPicker] = useState<{
+		categoryIndex: number;
+		pathIndex: number;
+		initialPath: string;
+	} | null>(null);
+
+	const library = useLocalMediaLibrary({
+		type: activeTab,
+		q: activeTab === "music" ? search.trim() : undefined,
+		limit: 120,
+		offset: activeTab === "music" ? albumOffset : 0,
+	});
+	const scan = useLocalMediaScanStatus();
+	const startScan = useStartLocalMediaScan();
+	const refreshArtwork = useRefreshLocalMediaAlbumArtwork();
+	const updateArtwork = useUpdateLocalMediaAlbumArtwork();
 
 	useEffect(() => {
 		setFormData(normalize(config));
 		setHasChanges(false);
 	}, [config]);
+
+	useEffect(() => {
+		setAlbumOffset(0);
+	}, []);
 
 	const update = (next: LocalMediaConfig) => {
 		setFormData(next);
@@ -69,17 +263,22 @@ export function LocalMediaConfigSection({
 	};
 
 	const addCategory = () => {
-		const count = formData.categories.length + 1;
+		const tab = LIBRARY_TABS.find((row) => row.id === activeTab) ?? LIBRARY_TABS[0];
+		const matching = formData.categories.filter(
+			(category) => libraryType(category.library_type) === activeTab,
+		).length;
+		const name = matching === 0 ? tab.defaultName : `${tab.defaultName} ${matching + 1}`;
+		const usedIDs = new Set(formData.categories.map((category) => category.id));
+		let id = slug(name) || activeTab;
+		let suffix = 2;
+		while (usedIDs.has(id)) {
+			id = `${slug(name) || activeTab}-${suffix}`;
+			suffix++;
+		}
 		update({
 			...formData,
 			categories: formData.categories.concat([
-				{
-					id: `local-${count}`,
-					name: `Local ${count}`,
-					library_type: "movies",
-					paths: [""],
-					enabled: true,
-				},
+				{ id, name, library_type: activeTab, paths: [""], enabled: true },
 			]),
 		});
 	};
@@ -88,9 +287,11 @@ export function LocalMediaConfigSection({
 		update({ ...formData, categories: formData.categories.filter((_, i) => i !== index) });
 	};
 
-	const addPath = (index: number) => {
-		const category = formData.categories[index];
-		updateCategory(index, { paths: (category.paths ?? []).concat([""]) });
+	const addPath = (categoryIndex: number) => {
+		const category = formData.categories[categoryIndex];
+		const pathIndex = (category.paths ?? []).length;
+		updateCategory(categoryIndex, { paths: (category.paths ?? []).concat([""]) });
+		setFolderPicker({ categoryIndex, pathIndex, initialPath: "/" });
 	};
 
 	const updatePath = (categoryIndex: number, pathIndex: number, value: string) => {
@@ -107,107 +308,237 @@ export function LocalMediaConfigSection({
 
 	const handleSave = async () => {
 		if (!onUpdate || !hasChanges) return;
-		await onUpdate("local_media", {
+		const next = {
 			enabled: formData.enabled,
 			categories: formData.categories.map((category) => ({
 				...category,
 				id: slug(category.id || category.name),
 				name: category.name.trim(),
-				library_type: category.library_type || "movies",
+				library_type: libraryType(category.library_type),
 				paths: (category.paths ?? []).map((path) => path.trim()).filter(Boolean),
 				enabled: category.enabled ?? true,
 			})),
-		});
-		setHasChanges(false);
+		};
+		try {
+			await onUpdate("local_media", next);
+			setFormData(next);
+			setHasChanges(false);
+			await startScan.mutateAsync(false);
+			showToast({ type: "success", title: "Local media saved", message: "Library scan started." });
+		} catch (error) {
+			showToast({
+				type: "error",
+				title: "Could not save local media",
+				message: error instanceof Error ? error.message : "Unknown error",
+			});
+			throw error;
+		}
 	};
 
+	const beginScan = async (withArtwork: boolean) => {
+		try {
+			await startScan.mutateAsync(withArtwork);
+			showToast({
+				type: "info",
+				title: withArtwork ? "Artwork search started" : "Library scan started",
+				message: withArtwork
+					? "Missing albums will be matched carefully in the background."
+					: "Tater Tube is updating the local media index.",
+			});
+		} catch (error) {
+			showToast({
+				type: "error",
+				title: "Could not start scan",
+				message: error instanceof Error ? error.message : "Unknown error",
+			});
+		}
+	};
+
+	const handleArtworkRefresh = async (albumId: string, hasArtwork: boolean) => {
+		try {
+			await refreshArtwork.mutateAsync({ albumId, force: hasArtwork });
+			showToast({
+				type: "success",
+				title: hasArtwork ? "Album artwork replaced" : "Album artwork found",
+			});
+		} catch (error) {
+			showToast({
+				type: "warning",
+				title: "No confident artwork match",
+				message: error instanceof Error ? error.message : "Try improving the album tags.",
+			});
+		}
+	};
+
+	const categoriesForTab = useMemo(
+		() =>
+			formData.categories
+				.map((category, index) => ({ category, index }))
+				.filter(({ category }) => libraryType(category.library_type) === activeTab),
+		[activeTab, formData.categories],
+	);
+	const stats = library.data?.stats ?? EMPTY_STATS;
+	const scanStatus = scan.data ?? library.data?.scan;
+	const scanRunning = scanStatus?.running ?? false;
+	const albumRows = (library.data?.albums ?? []).filter(
+		(album) => !missingOnly || !album.has_artwork,
+	);
+	const tabInfo = LIBRARY_TABS.find((tab) => tab.id === activeTab) ?? LIBRARY_TABS[0];
+
 	return (
-		<div className="min-w-0 space-y-8">
-			<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-				<div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+		<div className="min-w-0 space-y-6">
+			<section className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-5 sm:p-6">
+				<div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
 					<div className="min-w-0">
-						<div className="mb-3 flex items-center gap-2">
-							<Folder className="h-4 w-4 text-base-content/60" />
-							<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-								Local Media
-							</h4>
+						<div className="mb-2 flex items-center gap-2">
+							<Library className="h-5 w-5 text-primary" />
+							<h3 className="font-bold text-xl">Local Media Libraries</h3>
 						</div>
-						<p className="max-w-2xl text-base-content/60 text-sm leading-relaxed">
-							Add server or container folder paths. Movies, TV, and Folders appear under The Tube
-							Local. Music appears in Tape Deck when Tater Tube Server is selected.
+						<p className="max-w-3xl text-base-content/60 text-sm leading-relaxed">
+							Add folders that are visible to this server, scan them into a fast local index, and
+							manage the media Tater Tube exposes to your players.
 						</p>
 					</div>
-					<label className="flex items-center gap-3">
-						<span className="font-bold text-sm">Enabled</span>
-						<input
-							type="checkbox"
-							className="toggle toggle-primary"
-							checked={formData.enabled}
-							disabled={isReadOnly}
-							onChange={(event) => update({ ...formData, enabled: event.target.checked })}
-						/>
-					</label>
+					<div className="flex flex-wrap items-center gap-3">
+						<label className="flex items-center gap-3 rounded-xl border border-base-300 bg-base-100/75 px-4 py-2.5">
+							<span className="font-bold text-sm">Enabled</span>
+							<input
+								type="checkbox"
+								className="toggle toggle-primary toggle-sm"
+								checked={formData.enabled}
+								disabled={isReadOnly}
+								onChange={(event) => update({ ...formData, enabled: event.target.checked })}
+							/>
+						</label>
+						<button
+							type="button"
+							className="btn btn-outline"
+							disabled={isReadOnly || hasChanges || scanRunning || startScan.isPending}
+							onClick={() => beginScan(false)}
+						>
+							<RefreshCw className={`h-4 w-4 ${scanRunning ? "animate-spin" : ""}`} />
+							Scan Libraries
+						</button>
+					</div>
 				</div>
 
-				<div className="space-y-4">
-					{formData.categories.length === 0 && (
-						<div className="rounded-xl border border-base-300 bg-base-100/70 p-4 text-base-content/60 text-sm">
-							No local categories configured.
+				{hasChanges && (
+					<div className="alert alert-info mt-5 py-3 text-sm">
+						<Save className="h-4 w-4" />
+						<span>Save your folder changes before scanning.</span>
+					</div>
+				)}
+				{scanStatus?.phase === "error" && (
+					<div className="alert alert-error mt-5 py-3 text-sm">
+						<AlertTriangle className="h-4 w-4" />
+						<span>{scanStatus.error || scanStatus.message || "Library scan failed"}</span>
+					</div>
+				)}
+				{scanRunning && (
+					<div className="mt-5 rounded-xl border border-primary/25 bg-primary/10 p-4">
+						<div className="flex items-center gap-3">
+							<span className="loading loading-spinner loading-sm text-primary" />
+							<div className="min-w-0 flex-1">
+								<div className="font-bold text-sm">{scanStatus?.message || "Scanning library"}</div>
+								<div className="mt-1 text-base-content/55 text-xs">
+									{(scanStatus?.files_scanned ?? 0).toLocaleString()} files scanned
+									{scanStatus?.phase === "artwork"
+										? ` · ${(scanStatus.albums_processed ?? 0).toLocaleString()} albums checked · ${(scanStatus.artwork_found ?? 0).toLocaleString()} covers found`
+										: ""}
+								</div>
+							</div>
+						</div>
+					</div>
+				)}
+			</section>
+
+			<section className="space-y-5 rounded-2xl border border-base-300 bg-base-100/60 p-4 sm:p-5">
+				<ConfigMiniTabs
+					tabs={LIBRARY_TABS.map((tab) => ({
+						id: tab.id,
+						label: tab.label,
+						icon: libraryIcon(tab.id),
+						count: formData.categories.filter(
+							(category) => libraryType(category.library_type) === tab.id,
+						).length,
+					}))}
+					activeTab={activeTab}
+					onChange={setActiveTab}
+				/>
+
+				<div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+					<div>
+						<h4 className="font-bold text-lg">{tabInfo.label}</h4>
+						<p className="text-base-content/55 text-sm">{tabInfo.description}</p>
+					</div>
+					<button
+						type="button"
+						className="btn btn-outline btn-sm"
+						disabled={isReadOnly}
+						onClick={addCategory}
+					>
+						<Plus className="h-4 w-4" />
+						Add {tabInfo.label} Library
+					</button>
+				</div>
+
+				<div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+					{statCards(activeTab, stats).map((stat) => (
+						<div key={stat.label} className="rounded-xl border border-base-300 bg-base-200/55 p-3">
+							<div className="flex items-center gap-2 text-base-content/45 text-xs uppercase tracking-wide">
+								{stat.icon}
+								{stat.label}
+							</div>
+							<div className="mt-2 font-bold text-lg">{stat.value}</div>
+						</div>
+					))}
+				</div>
+
+				<div className="space-y-3">
+					{categoriesForTab.length === 0 && (
+						<div className="rounded-xl border border-base-300 border-dashed bg-base-200/30 px-5 py-8 text-center">
+							{libraryIcon(activeTab)}
+							<div className="mt-2 font-bold">No {tabInfo.label.toLowerCase()} library yet</div>
+							<p className="mt-1 text-base-content/50 text-sm">
+								Add one and choose a folder visible to this server.
+							</p>
 						</div>
 					)}
-					{formData.categories.map((category, categoryIndex) => (
+					{categoriesForTab.map(({ category, index: categoryIndex }) => (
 						<div
-							key={`local-category-${categoryIndex}`}
-							className="rounded-xl border border-base-300 bg-base-100/70 p-4"
+							key={category.id || `library-${categoryIndex}`}
+							className="rounded-xl border border-base-300 bg-base-200/35 p-4"
 						>
-							<div className="grid gap-3 md:grid-cols-[1fr_1fr_12rem_auto] md:items-end">
-								<label className="form-control">
-									<span className="label-text font-bold text-base-content text-sm">
-										Category Name
-									</span>
+							<div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+								<div className="flex min-w-0 flex-1 items-center gap-3">
+									<div className="rounded-lg bg-primary/10 p-2 text-primary">
+										{libraryIcon(activeTab)}
+									</div>
 									<input
 										type="text"
-										className="input input-bordered mt-2 w-full"
+										className="input input-bordered min-w-0 flex-1 bg-base-100 font-bold"
 										value={category.name}
 										disabled={isReadOnly}
 										onChange={(event) =>
 											updateCategory(categoryIndex, { name: event.target.value })
 										}
 									/>
-								</label>
-								<label className="form-control">
-									<span className="label-text font-bold text-base-content text-sm">
-										Category ID
-									</span>
+								</div>
+								<label className="flex items-center gap-2 px-1 text-sm">
+									Enabled
 									<input
-										type="text"
-										className="input input-bordered mt-2 w-full"
-										value={category.id}
-										disabled={isReadOnly}
-										onChange={(event) => updateCategory(categoryIndex, { id: event.target.value })}
-									/>
-								</label>
-								<label className="form-control">
-									<span className="label-text font-bold text-base-content text-sm">
-										Library Type
-									</span>
-									<select
-										className="select select-bordered mt-2 w-full"
-										value={category.library_type || "movies"}
+										type="checkbox"
+										className="toggle toggle-primary toggle-sm"
+										checked={category.enabled ?? true}
 										disabled={isReadOnly}
 										onChange={(event) =>
-											updateCategory(categoryIndex, { library_type: event.target.value })
+											updateCategory(categoryIndex, { enabled: event.target.checked })
 										}
-									>
-										<option value="movies">Movies</option>
-										<option value="tv">TV Shows</option>
-										<option value="music">Music</option>
-										<option value="folders">Folders</option>
-									</select>
+									/>
 								</label>
 								<button
 									type="button"
-									className="btn btn-error btn-outline"
+									className="btn btn-ghost btn-sm text-error"
 									disabled={isReadOnly}
 									onClick={() => removeCategory(categoryIndex)}
 								>
@@ -217,19 +548,19 @@ export function LocalMediaConfigSection({
 							</div>
 
 							<div className="mt-4 space-y-2">
-								<div className="font-bold text-base-content/50 text-xs uppercase tracking-widest">
+								<div className="font-bold text-base-content/45 text-xs uppercase tracking-widest">
 									Folders
 								</div>
 								{((category.paths ?? []).length > 0 ? category.paths : [""]).map(
 									(path, pathIndex) => (
 										<div
-											key={`local-category-${categoryIndex}-path-${pathIndex}`}
-											className="flex gap-2"
+											key={`${category.id}-path-${pathIndex}`}
+											className="flex flex-col gap-2 sm:flex-row"
 										>
 											<input
 												type="text"
-												className="input input-bordered w-full"
-												placeholder="/media/movies"
+												className="input input-bordered w-full bg-base-100 font-mono text-sm"
+												placeholder={`/media/${activeTab}`}
 												value={path}
 												disabled={isReadOnly}
 												onChange={(event) =>
@@ -238,7 +569,18 @@ export function LocalMediaConfigSection({
 											/>
 											<button
 												type="button"
-												className="btn btn-ghost btn-square"
+												className="btn btn-outline shrink-0"
+												disabled={isReadOnly}
+												onClick={() =>
+													setFolderPicker({ categoryIndex, pathIndex, initialPath: path || "/" })
+												}
+											>
+												<FolderOpen className="h-4 w-4" />
+												Browse
+											</button>
+											<button
+												type="button"
+												className="btn btn-ghost btn-square shrink-0"
 												disabled={isReadOnly}
 												onClick={() => removePath(categoryIndex, pathIndex)}
 												aria-label="Remove folder"
@@ -250,38 +592,228 @@ export function LocalMediaConfigSection({
 								)}
 								<button
 									type="button"
-									className="btn btn-outline btn-sm"
+									className="btn btn-ghost btn-sm"
 									disabled={isReadOnly}
 									onClick={() => addPath(categoryIndex)}
 								>
-									<Plus className="h-4 w-4" />
-									Add Folder
+									<Plus className="h-4 w-4" /> Add Folder
 								</button>
 							</div>
+
+							<details className="mt-3 text-xs">
+								<summary className="cursor-pointer text-base-content/45 hover:text-base-content">
+									Advanced library details
+								</summary>
+								<label className="mt-3 block max-w-md">
+									<span className="font-bold text-base-content/50">Stable library ID</span>
+									<input
+										type="text"
+										className="input input-bordered input-sm mt-1 w-full bg-base-100 font-mono"
+										value={category.id}
+										disabled={isReadOnly}
+										onChange={(event) => updateCategory(categoryIndex, { id: event.target.value })}
+									/>
+								</label>
+							</details>
 						</div>
 					))}
 				</div>
+			</section>
 
-				<div className="mt-6">
-					<button
-						type="button"
-						className="btn btn-outline rounded-full"
-						disabled={isReadOnly}
-						onClick={addCategory}
-					>
-						<Plus className="h-4 w-4" />
-						Add Category
-					</button>
-				</div>
-			</div>
+			{activeTab === "music" && (
+				<section className="space-y-4 rounded-2xl border border-base-300 bg-base-100/70 p-4 sm:p-5">
+					<div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+						<div>
+							<div className="flex items-center gap-2">
+								<Disc3 className="h-5 w-5 text-primary" />
+								<h4 className="font-bold text-lg">Your Music Library</h4>
+							</div>
+							<p className="mt-1 text-base-content/55 text-sm">
+								Browse albums, inspect artwork sources, and repair missing covers.
+							</p>
+						</div>
+						<div className="flex flex-col gap-2 sm:flex-row">
+							<label className="input input-bordered flex items-center gap-2 bg-base-100">
+								<Search className="h-4 w-4 text-base-content/40" />
+								<input
+									type="search"
+									className="grow"
+									placeholder="Search albums or artists"
+									value={search}
+									onChange={(event) => setSearch(event.target.value)}
+								/>
+							</label>
+							<button
+								type="button"
+								className={`btn ${missingOnly ? "btn-primary" : "btn-outline"}`}
+								onClick={() => setMissingOnly((value) => !value)}
+							>
+								<ImageOff className="h-4 w-4" />
+								Missing Art
+							</button>
+							<button
+								type="button"
+								className="btn btn-secondary"
+								disabled={hasChanges || scanRunning || stats.missing_artwork === 0}
+								onClick={() => beginScan(true)}
+							>
+								<WandSparkles className="h-4 w-4" />
+								Find Missing Art
+							</button>
+						</div>
+					</div>
+
+					{library.isLoading && (
+						<div className="flex h-52 items-center justify-center">
+							<span className="loading loading-spinner loading-lg text-primary" />
+						</div>
+					)}
+					{library.error && (
+						<div className="alert alert-error">
+							<AlertTriangle className="h-5 w-5" />
+							<span>
+								{library.error instanceof Error
+									? library.error.message
+									: "Unable to load music library"}
+							</span>
+						</div>
+					)}
+					{!library.isLoading && !library.error && albumRows.length === 0 && (
+						<div className="rounded-xl border border-base-300 border-dashed py-14 text-center">
+							<Disc3 className="mx-auto h-10 w-10 text-base-content/25" />
+							<div className="mt-3 font-bold">
+								{library.data?.stale ? "Scan your music library" : "No albums match this view"}
+							</div>
+							<p className="mt-1 text-base-content/50 text-sm">
+								{library.data?.stale
+									? "Save your folders, then run a library scan to build the album index."
+									: "Try a different search or turn off the missing-art filter."}
+							</p>
+						</div>
+					)}
+					<div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6">
+						{albumRows.map((album) => (
+							<article
+								key={album.id}
+								className="group min-w-0 overflow-hidden rounded-xl border border-base-300 bg-base-200/45"
+							>
+								<div className="relative aspect-square overflow-hidden bg-base-300/60">
+									{album.artwork_url ? (
+										<img
+											src={album.artwork_url}
+											alt={`${album.title} cover`}
+											className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+											loading="lazy"
+										/>
+									) : (
+										<div className="flex h-full flex-col items-center justify-center gap-2 text-base-content/25">
+											<Disc3 className="h-14 w-14" />
+											<span className="text-xs">No artwork</span>
+										</div>
+									)}
+									<div className="absolute top-2 left-2 flex gap-1">
+										{album.has_artwork && (
+											<span className="badge badge-sm border-0 bg-black/70 text-white capitalize">
+												{album.artwork_source}
+											</span>
+										)}
+										{album.artwork_locked && (
+											<span className="badge badge-sm badge-warning">
+												<Lock className="h-3 w-3" /> Locked
+											</span>
+										)}
+									</div>
+								</div>
+								<div className="space-y-3 p-3">
+									<div className="min-w-0">
+										<div className="truncate font-bold text-sm" title={album.title}>
+											{album.title}
+										</div>
+										<div className="truncate text-base-content/55 text-xs" title={album.artist}>
+											{album.artist || "Unknown artist"}
+										</div>
+									</div>
+									<div className="flex items-center justify-between text-[11px] text-base-content/45">
+										<span>
+											{album.track_count} {album.track_count === 1 ? "song" : "songs"}
+											{album.year ? ` · ${album.year}` : ""}
+										</span>
+										<BytesDisplay bytes={album.size_bytes} mode="badge" />
+									</div>
+									<div className="grid grid-cols-2 gap-2">
+										<button
+											type="button"
+											className="btn btn-outline btn-xs"
+											disabled={refreshArtwork.isPending || album.artwork_locked}
+											onClick={() => handleArtworkRefresh(album.id, album.has_artwork)}
+										>
+											<WandSparkles className="h-3 w-3" />
+											{album.has_artwork ? "Replace" : "Find Art"}
+										</button>
+										<button
+											type="button"
+											className="btn btn-ghost btn-xs"
+											disabled={!album.has_artwork || updateArtwork.isPending}
+											onClick={() =>
+												updateArtwork.mutate({ albumId: album.id, locked: !album.artwork_locked })
+											}
+										>
+											{album.artwork_locked ? (
+												<LockOpen className="h-3 w-3" />
+											) : (
+												<Lock className="h-3 w-3" />
+											)}
+											{album.artwork_locked ? "Unlock" : "Lock"}
+										</button>
+									</div>
+									<div
+										className="truncate font-mono text-[10px] text-base-content/35"
+										title={album.path}
+									>
+										{album.category_name} / {album.path || "."}
+									</div>
+								</div>
+							</article>
+						))}
+					</div>
+
+					{(library.data?.total_albums ?? 0) > 120 && (
+						<div className="flex items-center justify-between border-base-300 border-t pt-4">
+							<div className="text-base-content/50 text-xs">
+								Albums {albumOffset + 1}–
+								{Math.min(albumOffset + 120, library.data?.total_albums ?? 0)} of{" "}
+								{(library.data?.total_albums ?? 0).toLocaleString()}
+							</div>
+							<div className="join">
+								<button
+									type="button"
+									className="btn join-item btn-sm"
+									disabled={albumOffset === 0}
+									onClick={() => setAlbumOffset(Math.max(0, albumOffset - 120))}
+								>
+									Previous
+								</button>
+								<button
+									type="button"
+									className="btn join-item btn-sm"
+									disabled={albumOffset + 120 >= (library.data?.total_albums ?? 0)}
+									onClick={() => setAlbumOffset(albumOffset + 120)}
+								>
+									Next
+								</button>
+							</div>
+						</div>
+					)}
+				</section>
+			)}
 
 			{!isReadOnly && (
-				<div className="flex justify-end border-base-200 border-t pt-6">
+				<div className="sticky bottom-3 z-20 flex justify-end rounded-2xl border border-base-300 bg-base-100/90 p-3 shadow-xl backdrop-blur">
 					<button
 						type="button"
 						className="btn btn-primary rounded-full px-8"
 						onClick={handleSave}
-						disabled={!hasChanges || isUpdating}
+						disabled={!hasChanges || isUpdating || startScan.isPending}
 					>
 						{isUpdating ? (
 							<span className="loading loading-spinner loading-sm" />
@@ -292,6 +824,16 @@ export function LocalMediaConfigSection({
 					</button>
 				</div>
 			)}
+
+			<FolderPickerModal
+				open={folderPicker !== null}
+				initialPath={folderPicker?.initialPath}
+				onClose={() => setFolderPicker(null)}
+				onSelect={(path) => {
+					if (folderPicker) updatePath(folderPicker.categoryIndex, folderPicker.pathIndex, path);
+					setFolderPicker(null);
+				}}
+			/>
 		</div>
 	);
 }

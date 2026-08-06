@@ -1,6 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import type { HealthCleanupRequest, HealthPriority } from "../types/api";
+import type { LocalMediaLibraryType } from "../types/config";
 
 // Queue hooks
 export const useQueue = (params?: {
@@ -557,6 +558,61 @@ export const useSystemBrowse = (path?: string) => {
 	return useQuery({
 		queryKey: ["system", "browse", path],
 		queryFn: () => apiClient.getSystemBrowse(path),
+	});
+};
+
+export const useLocalMediaLibrary = (params?: {
+	type?: LocalMediaLibraryType;
+	category_id?: string;
+	q?: string;
+	limit?: number;
+	offset?: number;
+}) => {
+	return useQuery({
+		queryKey: ["local-media", "library", params],
+		queryFn: () => apiClient.getLocalMediaLibrary(params),
+		refetchInterval: 5000,
+	});
+};
+
+export const useLocalMediaScanStatus = () => {
+	return useQuery({
+		queryKey: ["local-media", "scan"],
+		queryFn: () => apiClient.getLocalMediaScanStatus(),
+		refetchInterval: 1500,
+	});
+};
+
+export const useStartLocalMediaScan = () => {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (scrapeMissingArtwork: boolean) =>
+			apiClient.startLocalMediaScan(scrapeMissingArtwork),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["local-media"] });
+		},
+	});
+};
+
+export const useRefreshLocalMediaAlbumArtwork = () => {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({ albumId, force }: { albumId: string; force?: boolean }) =>
+			apiClient.refreshLocalMediaAlbumArtwork(albumId, force ?? false),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["local-media", "library"] });
+		},
+	});
+};
+
+export const useUpdateLocalMediaAlbumArtwork = () => {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({ albumId, locked }: { albumId: string; locked: boolean }) =>
+			apiClient.updateLocalMediaAlbumArtwork(albumId, locked),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["local-media", "library"] });
+		},
 	});
 };
 

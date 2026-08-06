@@ -71,6 +71,7 @@ type taterUsenetItem struct {
 	Description     string   `json:"description,omitempty"`
 	Category        string   `json:"category,omitempty"`
 	Poster          string   `json:"poster,omitempty"`
+	HasArtwork      bool     `json:"hasArtwork,omitempty"`
 	Files           string   `json:"files,omitempty"`
 	Grabs           string   `json:"grabs,omitempty"`
 	Index           int      `json:"index,omitempty"`
@@ -1425,6 +1426,7 @@ type taterMusicAlbumScan struct {
 	LeafCount    int
 	SizeBytes    int64
 	ModifiedUnix int64
+	ArtworkPath  string
 }
 
 func taterLocalMusicAlbums(cfg *config.Config, baseURL, playerToken, categoryID string) ([]taterUsenetItem, error) {
@@ -1483,6 +1485,9 @@ func taterLocalMusicAlbums(cfg *config.Config, baseURL, playerToken, categoryID 
 				}
 			}
 			metadata := taterLocalMusicMetadataForPath(cfg, path)
+			if metadata.HasArtwork && album.ArtworkPath == "" {
+				album.ArtworkPath = rel
+			}
 			if metadata.Album != "" {
 				album.Title = metadata.Album
 			}
@@ -1502,8 +1507,16 @@ func taterLocalMusicAlbums(cfg *config.Config, baseURL, playerToken, categoryID 
 	}
 
 	items := make([]taterUsenetItem, 0, len(albums))
+	indexedArtwork := map[string]taterLocalMusicAlbumIndex{}
+	if index, err := readTaterLocalLibraryIndex(cfg); err == nil && index.ConfigFingerprint == taterLocalLibraryFingerprint(cfg) {
+		for _, indexedAlbum := range index.Albums {
+			if indexedAlbum.CategoryID == cat.ID && indexedAlbum.HasArtwork {
+				indexedArtwork[indexedAlbum.ID] = indexedAlbum
+			}
+		}
+	}
 	for _, album := range albums {
-		items = append(items, taterUsenetItem{
+		item := taterUsenetItem{
 			Title:        album.Title,
 			Key:          album.ID,
 			RatingKey:    album.ID,
@@ -1520,7 +1533,14 @@ func taterLocalMusicAlbums(cfg *config.Config, baseURL, playerToken, categoryID 
 			SizeBytes:    album.SizeBytes,
 			SizeText:     musicAlbumDetail(album.LeafCount),
 			ModifiedUnix: album.ModifiedUnix,
-		})
+			Poster:       taterLocalMusicArtworkURL(baseURL, album.CategoryID, album.SourceIndex, album.ArtworkPath, playerToken),
+			HasArtwork:   album.ArtworkPath != "",
+		}
+		if indexedAlbum, ok := indexedArtwork[album.ID]; ok {
+			item.Poster = taterLocalMusicIndexedArtworkURL(baseURL, album.ID, indexedAlbum.ArtworkUpdated, indexedAlbum.ModifiedUnix, playerToken)
+			item.HasArtwork = item.Poster != ""
+		}
+		items = append(items, item)
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		left := strings.ToLower(items[i].Artist + " " + items[i].Title)
@@ -1599,7 +1619,12 @@ func taterLocalMusicTracks(cfg *config.Config, baseURL, playerToken, albumID str
 		if info != nil {
 			item.ModifiedUnix = info.ModTime().Unix()
 		}
-		applyTaterLocalMusicMetadata(&item, taterLocalMusicMetadataForPath(cfg, path))
+		metadata := taterLocalMusicMetadataForPath(cfg, path)
+		applyTaterLocalMusicMetadata(&item, metadata)
+		if metadata.HasArtwork {
+			item.Poster = taterLocalMusicArtworkURL(baseURL, cat.ID, sourceIndex, rel, playerToken)
+			item.HasArtwork = true
+		}
 		if size > 0 {
 			item.SizeText = formatTaterBytes(size)
 		}
@@ -1981,6 +2006,43 @@ func taterLocalStreamURL(baseURL, categoryID string, sourceIndex int, relPath, p
 	q.Set("category_id", categoryID)
 	q.Set("source", strconv.Itoa(sourceIndex))
 	q.Set("path", cleanLocalRelativePath(relPath))
+	q.Set("player_token", playerToken)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func taterLocalMusicArtworkURL(baseURL, categoryID string, sourceIndex int, relPath, playerToken string) string {
+	if strings.TrimSpace(relPath) == "" {
+		return ""
+	}
+	u, err := url.Parse(strings.TrimRight(baseURL, "/") + "/api/tater/music/artwork")
+	if err != nil {
+		return ""
+	}
+	q := u.Query()
+	q.Set("category_id", categoryID)
+	q.Set("source", strconv.Itoa(sourceIndex))
+	q.Set("path", cleanLocalRelativePath(relPath))
+	q.Set("player_token", playerToken)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func taterLocalMusicIndexedArtworkURL(baseURL, albumID string, updatedUnix, modifiedUnix int64, playerToken string) string {
+	if strings.TrimSpace(albumID) == "" {
+		return ""
+	}
+	u, err := url.Parse(strings.TrimRight(baseURL, "/") + "/api/tater/music/artwork")
+	if err != nil {
+		return ""
+	}
+	version := updatedUnix
+	if version <= 0 {
+		version = modifiedUnix
+	}
+	q := u.Query()
+	q.Set("album_id", strings.TrimSpace(albumID))
+	q.Set("v", strconv.FormatInt(version, 10))
 	q.Set("player_token", playerToken)
 	u.RawQuery = q.Encode()
 	return u.String()
