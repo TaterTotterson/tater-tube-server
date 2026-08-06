@@ -193,6 +193,34 @@ func TestTaterMusicCatalogHelpersFilterAndBuildFacets(t *testing.T) {
 	}
 }
 
+func TestTaterMusicCatalogPropagatesResolvedAlbumArtworkToTracks(t *testing.T) {
+	album := taterUsenetItem{
+		Title:       "Exodus",
+		Artist:      "Bob Marley & The Wailers",
+		AlbumArtist: "Bob Marley & The Wailers",
+		Genres:      []string{"Reggae"},
+		Poster:      "http://tube.local/api/tater/music/artwork?album_id=album%3Aexodus&v=42&player_token=secret",
+		HasArtwork:  true,
+	}
+	track := taterUsenetItem{
+		Title:      "Three Little Birds",
+		Poster:     "http://tube.local/api/tater/music/artwork?path=embedded.flac&player_token=secret",
+		HasArtwork: true,
+	}
+
+	applyTaterMusicAlbumCatalogDetails(&track, album)
+
+	if track.Album != album.Title || track.Artist != album.Artist || track.AlbumArtist != album.AlbumArtist {
+		t.Fatalf("album metadata was not propagated: %#v", track)
+	}
+	if len(track.Genres) != 1 || track.Genres[0] != "Reggae" || track.Genre != "Reggae" {
+		t.Fatalf("album genres were not propagated: %#v", track)
+	}
+	if !track.HasArtwork || track.Poster != album.Poster {
+		t.Fatalf("resolved album artwork was not propagated: %#v", track)
+	}
+}
+
 func TestTaterMusicCatalogEndpointReturnsPairedPlayerLibrary(t *testing.T) {
 	root := t.TempDir()
 	albumDir := filepath.Join(root, "Bob Marley", "Exodus")
