@@ -222,17 +222,18 @@ func splitTaterMusicGenres(value string) []string {
 }
 
 func mergeTaterMusicGenres(existing []string, additions []string) []string {
-	result := make([]string, 0, len(existing)+len(additions))
+	result := make([]string, 0, len(existing)+len(additions)+4)
 	seen := map[string]bool{}
 	for _, group := range [][]string{existing, additions} {
 		for _, raw := range group {
-			genre := cleanTaterText(raw)
-			key := strings.ToLower(genre)
-			if genre == "" || seen[key] {
-				continue
+			for _, genre := range expandTaterMusicGenre(raw) {
+				key := strings.ToLower(genre)
+				if genre == "" || seen[key] {
+					continue
+				}
+				seen[key] = true
+				result = append(result, genre)
 			}
-			seen[key] = true
-			result = append(result, genre)
 		}
 	}
 	return result

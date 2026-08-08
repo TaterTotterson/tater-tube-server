@@ -127,9 +127,9 @@ func applyTaterMusicAlbumCatalogDetails(track *taterUsenetItem, album taterUsene
 	if track.Artist == "" {
 		track.Artist = album.Artist
 	}
-	if len(track.Genres) == 0 && len(album.Genres) > 0 {
-		track.Genres = append([]string(nil), album.Genres...)
-		track.Genre = strings.Join(album.Genres, ", ")
+	track.Genres = mergeTaterMusicGenres(track.Genres, album.Genres)
+	if len(track.Genres) > 0 {
+		track.Genre = strings.Join(track.Genres, ", ")
 	}
 	if strings.TrimSpace(album.Poster) != "" && album.HasArtwork {
 		// The album index resolves manual, embedded, local, and scraped artwork in

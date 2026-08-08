@@ -21,6 +21,7 @@ import (
 )
 
 const taterMusicArtworkDownloadMaximumBytes = 16 * 1024 * 1024
+const taterMusicBrainzMaximumAlbumGenres = 12
 
 var (
 	taterMusicBrainzBaseURL       = "https://musicbrainz.org/ws/2"
@@ -54,6 +55,14 @@ type taterMusicBrainzSearchResponse struct {
 			} `json:"artist"`
 		} `json:"artist-credit"`
 	} `json:"release-groups"`
+}
+
+type taterMusicBrainzReleaseGroupResponse struct {
+	ID     string `json:"id"`
+	Genres []struct {
+		Name  string `json:"name"`
+		Count int    `json:"count"`
+	} `json:"genres"`
 }
 
 type taterCoverArtResponse struct {
@@ -201,6 +210,49 @@ func searchTaterMusicArtworkCandidates(
 	}
 	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].Score > candidates[j].Score })
 	return candidates, nil
+}
+
+func fetchTaterMusicBrainzReleaseGroupGenres(ctx context.Context, musicBrainzID string) ([]string, error) {
+	musicBrainzID = strings.TrimSpace(musicBrainzID)
+	if musicBrainzID == "" {
+		return nil, fmt.Errorf("MusicBrainz release group is empty")
+	}
+	if err := waitForTaterMusicBrainz(ctx); err != nil {
+		return nil, err
+	}
+	params := url.Values{}
+	params.Set("inc", "genres")
+	params.Set("fmt", "json")
+	response, err := taterMusicArtworkRequest(
+		ctx,
+		strings.TrimRight(taterMusicBrainzBaseURL, "/")+"/release-group/"+
+			url.PathEscape(musicBrainzID)+"?"+params.Encode(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("MusicBrainz returned HTTP %d", response.StatusCode)
+	}
+	var payload taterMusicBrainzReleaseGroupResponse
+	if err := json.NewDecoder(io.LimitReader(response.Body, 2*1024*1024)).Decode(&payload); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(payload.Genres, func(i, j int) bool {
+		if payload.Genres[i].Count != payload.Genres[j].Count {
+			return payload.Genres[i].Count > payload.Genres[j].Count
+		}
+		return strings.ToLower(payload.Genres[i].Name) < strings.ToLower(payload.Genres[j].Name)
+	})
+	genres := []string{}
+	for _, row := range payload.Genres {
+		genres = mergeTaterMusicGenres(genres, []string{row.Name})
+		if len(genres) >= taterMusicBrainzMaximumAlbumGenres {
+			break
+		}
+	}
+	return genres, nil
 }
 
 func resolveTaterCoverArtURL(ctx context.Context, musicBrainzID string) (string, error) {
@@ -373,23 +425,67 @@ func refreshTaterAlbumArtwork(
 	if err != nil {
 		return err
 	}
+	genres, _ := fetchTaterMusicBrainzReleaseGroupGenres(ctx, candidate.MusicBrainzID)
 	ref, err := writeTaterMusicArtworkCache(cfg, album.ID, raw, contentType)
 	if err != nil {
 		return err
 	}
 	store := readTaterMusicArtworkStore(cfg)
 	updatedAt := time.Now().UTC()
-	store.Items[album.ID] = taterMusicArtworkOverride{
-		AlbumID: album.ID, Source: "scraped", Ref: ref, ContentType: contentType,
-		MusicBrainzID: candidate.MusicBrainzID, Locked: force, UpdatedAt: updatedAt,
-	}
+	override := store.Items[album.ID]
+	override.AlbumID = album.ID
+	override.Source = "scraped"
+	override.Ref = ref
+	override.ContentType = contentType
+	override.MusicBrainzID = candidate.MusicBrainzID
+	override.Genres = mergeTaterMusicGenres(override.Genres, genres)
+	override.Locked = force
+	override.UpdatedAt = updatedAt
+	store.Items[album.ID] = override
 	if err := writeTaterMusicArtworkStore(cfg, store); err != nil {
 		return err
 	}
+	album.Genres = mergeTaterMusicGenres(album.Genres, override.Genres)
 	setTaterMusicAlbumArtwork(album, "scraped", ref, force, candidate.MusicBrainzID, updatedAt)
 	album.ArtworkURL = taterLocalMusicAdminArtworkURL(*album)
 	refreshTaterLibraryArtworkStats(index)
 	return nil
+}
+
+func refreshTaterAlbumGenres(
+	ctx context.Context,
+	cfg *config.Config,
+	album *taterLocalMusicAlbumIndex,
+) error {
+	if album == nil {
+		return fmt.Errorf("album is unavailable")
+	}
+	candidates, err := searchTaterMusicArtworkCandidates(ctx, *album)
+	if err != nil {
+		return err
+	}
+	for _, candidate := range candidates {
+		genres, genreErr := fetchTaterMusicBrainzReleaseGroupGenres(ctx, candidate.MusicBrainzID)
+		if genreErr != nil || len(genres) == 0 {
+			continue
+		}
+		store := readTaterMusicArtworkStore(cfg)
+		override := store.Items[album.ID]
+		override.AlbumID = album.ID
+		override.MusicBrainzID = candidate.MusicBrainzID
+		override.Genres = mergeTaterMusicGenres(override.Genres, genres)
+		if override.UpdatedAt.IsZero() {
+			override.UpdatedAt = time.Now().UTC()
+		}
+		store.Items[album.ID] = override
+		if err := writeTaterMusicArtworkStore(cfg, store); err != nil {
+			return err
+		}
+		album.MusicBrainzID = candidate.MusicBrainzID
+		album.Genres = mergeTaterMusicGenres(album.Genres, override.Genres)
+		return nil
+	}
+	return os.ErrNotExist
 }
 
 func scrapeTaterMissingAlbumArtwork(
@@ -408,16 +504,27 @@ func scrapeTaterMissingAlbumArtwork(
 			return err
 		}
 		album := &index.Albums[i]
-		if album.HasArtwork || album.ArtworkLocked {
+		needsArtwork := !album.HasArtwork && !album.ArtworkLocked
+		needsGenres := len(album.Genres) == 0
+		if !needsArtwork && !needsGenres {
 			continue
 		}
 		processed++
-		message := fmt.Sprintf("Finding artwork for %s", album.Title)
+		message := fmt.Sprintf("Finding artwork and genres for %s", album.Title)
 		if progress != nil {
 			progress(processed, found, message)
 		}
-		if err := refreshTaterAlbumArtwork(ctx, cfg, index, album, false); err == nil && album.HasArtwork {
-			found++
+		if needsArtwork {
+			artworkErr := refreshTaterAlbumArtwork(ctx, cfg, index, album, false)
+			if artworkErr == nil && album.HasArtwork {
+				found++
+			} else if needsGenres {
+				// Genre metadata can still be available for releases that do not
+				// have a usable Cover Art Archive image.
+				_ = refreshTaterAlbumGenres(ctx, cfg, album)
+			}
+		} else if needsGenres {
+			_ = refreshTaterAlbumGenres(ctx, cfg, album)
 		}
 		if progress != nil {
 			progress(processed, found, message)
