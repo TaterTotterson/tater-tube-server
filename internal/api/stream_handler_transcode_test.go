@@ -30,6 +30,27 @@ func TestBuildFFmpegTranscodeArgsFileSeek(t *testing.T) {
 	require.NotContains(t, joined, "-i pipe:0")
 }
 
+func TestBuildFFmpegAudioSyncArgs(t *testing.T) {
+	args := buildFFmpegAudioSyncArgs("", 0)
+	joined := strings.Join(args, " ")
+
+	require.Contains(t, joined, "-i pipe:0")
+	require.Contains(t, joined, "-map 0:a:0 -vn -sn -dn")
+	require.Contains(t, joined, "-map_metadata -1")
+	require.Contains(t, joined, "-af aresample=48000:async=0:first_pts=0")
+	require.Contains(t, joined, "-c:a pcm_s16le -ac 2 -ar 48000")
+	require.Contains(t, joined, "-f wav pipe:1")
+	require.NotContains(t, joined, "-c:v")
+}
+
+func TestBuildFFmpegAudioSyncArgsFileSeek(t *testing.T) {
+	args := buildFFmpegAudioSyncArgs("/media/song.flac", 12.5)
+	joined := strings.Join(args, " ")
+
+	require.Contains(t, joined, "-ss 12.500 -i /media/song.flac")
+	require.NotContains(t, joined, "-i pipe:0")
+}
+
 func TestBuildFFmpegTranscodeArgsVAAPI(t *testing.T) {
 	args := buildFFmpegTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["hdmi_1080p"], "vaapi", "", 0)
 	joined := strings.Join(args, " ")
@@ -152,4 +173,37 @@ func TestShouldTranscodeIgnoresUnsupportedExtensions(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/files/stream/subtitle.srt?transcode=1", nil)
 
 	require.False(t, handler.shouldTranscode(req, "/media/subtitle.srt"))
+}
+
+func TestShouldTranscodeAudioSyncProfileAcceptsMusic(t *testing.T) {
+	handler := &StreamHandler{
+		configGetter: func() *config.Config {
+			return &config.Config{}
+		},
+	}
+	for _, path := range []string{
+		"/media/song.aiff",
+		"/media/song.flac",
+		"/media/song.mp3",
+		"/media/song.m4a",
+		"/media/song.wav",
+	} {
+		req := httptest.NewRequest(
+			"GET",
+			"/api/tater/local/stream?transcode=1&profile=audio_sync",
+			nil,
+		)
+		require.True(t, handler.shouldTranscode(req, path), path)
+	}
+}
+
+func TestShouldTranscodeMusicRequiresAudioSyncProfile(t *testing.T) {
+	handler := &StreamHandler{
+		configGetter: func() *config.Config {
+			return &config.Config{}
+		},
+	}
+	req := httptest.NewRequest("GET", "/api/tater/local/stream?transcode=1", nil)
+
+	require.False(t, handler.shouldTranscode(req, "/media/song.flac"))
 }

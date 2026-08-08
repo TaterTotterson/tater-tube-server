@@ -337,8 +337,10 @@ type transcodeProfile struct {
 }
 
 const (
-	transcodeCodecH264 = "h264"
-	transcodeCodecHEVC = "hevc"
+	transcodeCodecH264   = "h264"
+	transcodeCodecHEVC   = "hevc"
+	audioSyncProfileID   = "audio_sync"
+	audioSyncProfileName = "Audio Sync PCM"
 )
 
 var transcodeProfiles = map[string]transcodeProfile{
@@ -410,7 +412,17 @@ func (h *StreamHandler) shouldTranscode(r *http.Request, path string) bool {
 		return false
 	}
 
-	switch strings.ToLower(filepath.Ext(path)) {
+	extension := strings.ToLower(filepath.Ext(path))
+	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("profile")), audioSyncProfileID) {
+		switch extension {
+		case ".aac", ".aiff", ".alac", ".flac", ".m4a", ".m4b", ".mp3", ".ogg", ".opus", ".wav", ".wma":
+			return true
+		default:
+			return false
+		}
+	}
+
+	switch extension {
 	case ".mkv", ".mp4", ".m4v", ".mov", ".avi", ".ts", ".m2ts", ".mpg", ".mpeg", ".wmv", ".webm":
 		return true
 	default:
@@ -435,6 +447,10 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	profileID := r.URL.Query().Get("profile")
 	if profileID == "" {
 		profileID = cfg.Transcoding.Profile
+	}
+	if profileID == audioSyncProfileID {
+		h.serveAudioSyncTranscoded(w, r, ctx, path, file, ffmpegPath)
+		return
 	}
 	profile, ok := transcodeProfiles[profileID]
 	if !ok {
@@ -504,6 +520,66 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 			"profile", profileID,
 			"hardware_acceleration", effectiveAccel,
 			"video_codec", videoCodec,
+			"start_seconds", startSeconds,
+			"error", err,
+			"stderr", stderr.String())
+	}
+}
+
+func (h *StreamHandler) serveAudioSyncTranscoded(
+	w http.ResponseWriter,
+	r *http.Request,
+	ctx context.Context,
+	path string,
+	file afero.File,
+	ffmpegPath string,
+) {
+	startSeconds := parseTranscodeStartSeconds(r.URL.Query().Get("start"))
+	inputPath := ""
+	if startSeconds > 0 {
+		inputPath = path
+	}
+	args := buildFFmpegAudioSyncArgs(inputPath, startSeconds)
+	durationSeconds := h.probeMediaDuration(ctx, path)
+	h.markTranscodedStream(
+		w,
+		file,
+		audioSyncProfileID,
+		audioSyncProfileName,
+		"none",
+		"",
+		"pcm_s16le",
+		startSeconds,
+		durationSeconds,
+	)
+
+	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
+	if inputPath == "" {
+		cmd.Stdin = file
+	}
+
+	var stderr limitedBuffer
+	cmd.Stderr = &stderr
+	cmd.Stdout = flushWriter{w: w}
+
+	w.Header().Set("Content-Type", "audio/wav")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Disposition", `inline; filename="`+filepath.Base(path)+`.sync.wav"`)
+	w.Header().Set("X-Tater-Transcode-Profile", audioSyncProfileID)
+	w.Header().Del("Accept-Ranges")
+	w.WriteHeader(http.StatusOK)
+
+	slog.InfoContext(ctx, "Starting FFmpeg audio sync transcode stream",
+		"path", path,
+		"profile", audioSyncProfileID,
+		"sample_rate", 48000,
+		"channels", 2,
+		"start_seconds", startSeconds)
+
+	if err := cmd.Run(); err != nil && r.Context().Err() == nil {
+		slog.ErrorContext(ctx, "FFmpeg audio sync transcode failed",
+			"path", path,
+			"profile", audioSyncProfileID,
 			"start_seconds", startSeconds,
 			"error", err,
 			"stderr", stderr.String())
@@ -657,6 +733,37 @@ func (h *StreamHandler) markTranscodedStream(w http.ResponseWriter, file afero.F
 
 func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, inputPath string, startSeconds float64) []string {
 	return buildFFmpegTranscodeArgsWithCodec(cfg, profile, accel, transcodeCodecH264, inputPath, startSeconds)
+}
+
+func buildFFmpegAudioSyncArgs(inputPath string, startSeconds float64) []string {
+	args := []string{
+		"-hide_banner",
+		"-loglevel", "warning",
+		"-nostdin",
+	}
+	if strings.TrimSpace(inputPath) != "" {
+		if startSeconds > 0 {
+			args = append(args, "-ss", strconv.FormatFloat(startSeconds, 'f', 3, 64))
+		}
+		args = append(args, "-i", inputPath)
+	} else {
+		args = append(args, "-i", "pipe:0")
+	}
+	args = append(args,
+		"-map", "0:a:0",
+		"-vn",
+		"-sn",
+		"-dn",
+		"-map_metadata", "-1",
+		"-af", "aresample=48000:async=0:first_pts=0",
+		"-c:a", "pcm_s16le",
+		"-ac", "2",
+		"-ar", "48000",
+		"-fflags", "+genpts",
+		"-f", "wav",
+		"pipe:1",
+	)
+	return args
 }
 
 func buildFFmpegTranscodeArgsWithCodec(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, inputPath string, startSeconds float64) []string {
