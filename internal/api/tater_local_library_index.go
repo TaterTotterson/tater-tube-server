@@ -105,6 +105,7 @@ type taterMusicArtworkOverride struct {
 	Ref           string    `json:"ref"`
 	ContentType   string    `json:"content_type,omitempty"`
 	MusicBrainzID string    `json:"musicbrainz_id,omitempty"`
+	Genres        []string  `json:"genres,omitempty"`
 	Locked        bool      `json:"locked"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
@@ -552,7 +553,11 @@ func buildTaterLocalLibraryStats(cfg *config.Config, index *taterLocalLibraryInd
 			album.DiscCount = 1
 		}
 		cat := categoryConfig[album.CategoryID]
-		applyTaterMusicAlbumArtwork(cfg, cat, &album, overrides.Items[album.ID])
+		override := overrides.Items[album.ID]
+		if override.AlbumID == album.ID {
+			album.Genres = mergeTaterMusicGenres(album.Genres, override.Genres)
+		}
+		applyTaterMusicAlbumArtwork(cfg, cat, &album, override)
 		album.ArtworkURL = taterLocalMusicAdminArtworkURL(album)
 		if category := categoryByID[album.CategoryID]; category != nil {
 			category.Stats.Albums++
@@ -595,6 +600,9 @@ func applyTaterMusicAlbumArtwork(
 	album.ArtworkLocked = false
 	album.MusicBrainzID = ""
 	album.ArtworkUpdated = 0
+	if override.AlbumID == album.ID {
+		album.MusicBrainzID = strings.TrimSpace(override.MusicBrainzID)
+	}
 	validOverride := override.AlbumID == album.ID && taterMusicArtworkOverrideExists(cfg, cat, override)
 	if validOverride && override.Locked {
 		setTaterMusicAlbumArtwork(album, override.Source, override.Ref, true, override.MusicBrainzID, override.UpdatedAt)
@@ -857,7 +865,7 @@ func (s *Server) handleLocalMediaScan(c *fiber.Ctx) error {
 		if err == nil && request.ScrapeMissingArtwork {
 			updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
 				status.Phase = "artwork"
-				status.Message = "Finding missing album artwork"
+				status.Message = "Finding album artwork and genres"
 			})
 			err = scrapeTaterMissingAlbumArtwork(context.Background(), cfg, &index, func(processed, found int, message string) {
 				updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
@@ -963,10 +971,14 @@ func (s *Server) handleLocalMediaMusicArtworkUpdate(c *fiber.Ctx) error {
 	}
 	store := readTaterMusicArtworkStore(cfg)
 	if *request.Locked {
-		store.Items[album.ID] = taterMusicArtworkOverride{
-			AlbumID: album.ID, Source: album.ArtworkSource, Ref: album.ArtworkRef,
-			MusicBrainzID: album.MusicBrainzID, Locked: true, UpdatedAt: time.Now().UTC(),
-		}
+		existing := store.Items[album.ID]
+		existing.AlbumID = album.ID
+		existing.Source = album.ArtworkSource
+		existing.Ref = album.ArtworkRef
+		existing.MusicBrainzID = album.MusicBrainzID
+		existing.Locked = true
+		existing.UpdatedAt = time.Now().UTC()
+		store.Items[album.ID] = existing
 		album.ArtworkLocked = true
 	} else if existing, exists := store.Items[album.ID]; exists {
 		existing.Locked = false

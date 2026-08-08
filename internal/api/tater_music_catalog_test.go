@@ -70,6 +70,17 @@ func TestTaterLocalMusicMetadataUsesEmbeddedTags(t *testing.T) {
 	}
 }
 
+func TestTaterMusicGenresAddMajorBrowseFamilies(t *testing.T) {
+	genres := splitTaterMusicGenres("Dancehall; Alternative Rock; R&B; House")
+	wanted := []string{
+		"Dancehall", "Reggae", "Alternative Rock", "Alternative", "Rock",
+		"R&B/Soul", "House", "Electronic",
+	}
+	if strings.Join(genres, "|") != strings.Join(wanted, "|") {
+		t.Fatalf("unexpected expanded genres: %#v", genres)
+	}
+}
+
 func TestTaterMusicCatalogPublishesAndServesEmbeddedArtwork(t *testing.T) {
 	root := t.TempDir()
 	binDir := filepath.Join(root, "bin")
@@ -218,6 +229,18 @@ func TestTaterMusicCatalogPropagatesResolvedAlbumArtworkToTracks(t *testing.T) {
 	}
 	if !track.HasArtwork || track.Poster != album.Poster {
 		t.Fatalf("resolved album artwork was not propagated: %#v", track)
+	}
+}
+
+func TestTaterMusicCatalogMergesAlbumGenresIntoTaggedTracks(t *testing.T) {
+	album := taterUsenetItem{Genres: []string{"Roots Reggae"}}
+	track := taterUsenetItem{Genres: []string{"Dub"}, Genre: "Dub"}
+
+	applyTaterMusicAlbumCatalogDetails(&track, album)
+
+	wanted := "Dub, Reggae, Roots Reggae"
+	if track.Genre != wanted || strings.Join(track.Genres, ", ") != wanted {
+		t.Fatalf("album genre enrichment was not merged: %#v", track)
 	}
 }
 

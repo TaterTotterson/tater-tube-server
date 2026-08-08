@@ -340,9 +340,9 @@ export function LocalMediaConfigSection({
 			await startScan.mutateAsync(withArtwork);
 			showToast({
 				type: "info",
-				title: withArtwork ? "Artwork search started" : "Library scan started",
+				title: withArtwork ? "Music matching started" : "Library scan started",
 				message: withArtwork
-					? "Missing albums will be matched carefully in the background."
+					? "Albums will be matched carefully for missing artwork and genre details in the background."
 					: "Tater Tube is updating the local media index.",
 			});
 		} catch (error) {
@@ -629,7 +629,7 @@ export function LocalMediaConfigSection({
 								<h4 className="font-bold text-lg">Your Music Library</h4>
 							</div>
 							<p className="mt-1 text-base-content/55 text-sm">
-								Browse albums, inspect artwork sources, and repair missing covers.
+								Browse albums, inspect artwork sources, and enrich missing music details.
 							</p>
 						</div>
 						<div className="flex flex-col gap-2 sm:flex-row">
@@ -654,11 +654,11 @@ export function LocalMediaConfigSection({
 							<button
 								type="button"
 								className="btn btn-secondary"
-								disabled={hasChanges || scanRunning || stats.missing_artwork === 0}
+								disabled={hasChanges || scanRunning || stats.albums === 0}
 								onClick={() => beginScan(true)}
 							>
 								<WandSparkles className="h-4 w-4" />
-								Find Missing Art
+								Find Art & Genres
 							</button>
 						</div>
 					</div>

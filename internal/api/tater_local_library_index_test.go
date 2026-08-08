@@ -140,9 +140,12 @@ func TestTaterAlbumArtworkScraperCachesConfidentMusicBrainzMatch(t *testing.T) {
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch {
-		case strings.HasPrefix(request.URL.Path, "/ws/2/release-group/"):
+		case request.URL.Path == "/ws/2/release-group/" && request.URL.Query().Get("query") != "":
 			response.Header().Set("Content-Type", "application/json")
 			_, _ = response.Write([]byte(`{"release-groups":[{"id":"release-group-1","title":"Exodus","score":100,"artist-credit":[{"name":"Bob Marley & The Wailers"}]},{"id":"wrong","title":"Other Album","score":100,"artist-credit":[{"name":"Other Artist"}]}]}`))
+		case request.URL.Path == "/ws/2/release-group/release-group-1":
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = response.Write([]byte(`{"id":"release-group-1","genres":[{"name":"roots reggae","count":8},{"name":"reggae","count":20}]}`))
 		case request.URL.Path == "/release-group/release-group-1":
 			response.Header().Set("Content-Type", "application/json")
 			_, _ = response.Write([]byte(fmt.Sprintf(`{"images":[{"front":true,"approved":true,"thumbnails":{"500":%q}}]}`, server.URL+"/cover.jpg")))
@@ -175,6 +178,9 @@ func TestTaterAlbumArtworkScraperCachesConfidentMusicBrainzMatch(t *testing.T) {
 	if !album.HasArtwork || album.ArtworkSource != "scraped" || album.MusicBrainzID != "release-group-1" || album.ArtworkLocked {
 		t.Fatalf("unexpected scraped artwork result: %#v", album)
 	}
+	if strings.Join(album.Genres, "|") != "Reggae|roots reggae" {
+		t.Fatalf("MusicBrainz genres were not applied: %#v", album.Genres)
+	}
 	path, err := safeTaterMusicArtworkCachePath(cfg, album.ArtworkRef)
 	if err != nil {
 		t.Fatal(err)
@@ -183,7 +189,56 @@ func TestTaterAlbumArtworkScraperCachesConfidentMusicBrainzMatch(t *testing.T) {
 		t.Fatalf("cached artwork mismatch: %q error=%v", raw, err)
 	}
 	store := readTaterMusicArtworkStore(cfg)
-	if store.Items[album.ID].MusicBrainzID != "release-group-1" {
+	if store.Items[album.ID].MusicBrainzID != "release-group-1" ||
+		strings.Join(store.Items[album.ID].Genres, "|") != "Reggae|roots reggae" {
 		t.Fatalf("artwork match was not persisted: %#v", store.Items)
+	}
+}
+
+func TestTaterAlbumMetadataScraperEnrichesGenresWhenArtworkAlreadyExists(t *testing.T) {
+	oldMusicBrainzURL := taterMusicBrainzBaseURL
+	oldClient := taterMusicArtworkHTTPClient
+	oldPacing := taterMusicBrainzRequestPacing
+	t.Cleanup(func() {
+		taterMusicBrainzBaseURL = oldMusicBrainzURL
+		taterMusicArtworkHTTPClient = oldClient
+		taterMusicBrainzRequestPacing = oldPacing
+		taterMusicBrainzPacer.Lock()
+		taterMusicBrainzPacer.LastRequest = time.Time{}
+		taterMusicBrainzPacer.Unlock()
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/ws/2/release-group/":
+			_, _ = response.Write([]byte(`{"release-groups":[{"id":"release-group-1","title":"Exodus","score":100,"artist-credit":[{"name":"Bob Marley & The Wailers"}]}]}`))
+		case "/ws/2/release-group/release-group-1":
+			_, _ = response.Write([]byte(`{"id":"release-group-1","genres":[{"name":"dancehall","count":5}]}`))
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	taterMusicBrainzBaseURL = server.URL + "/ws/2"
+	taterMusicArtworkHTTPClient = server.Client()
+	taterMusicBrainzRequestPacing = 0
+	cfg := &config.Config{Metadata: config.MetadataConfig{RootPath: t.TempDir()}}
+	index := taterLocalLibraryIndex{
+		Categories: []taterLocalLibraryCategoryIndex{{ID: "music", LibraryType: "music"}},
+		Albums: []taterLocalMusicAlbumIndex{{
+			ID: "album:genres", CategoryID: "music", Title: "Exodus",
+			Artist: "Bob Marley & The Wailers", HasArtwork: true, ArtworkSource: "local",
+		}},
+	}
+
+	if err := scrapeTaterMissingAlbumArtwork(context.Background(), cfg, &index, nil); err != nil {
+		t.Fatal(err)
+	}
+	album := index.Albums[0]
+	if !album.HasArtwork || album.ArtworkSource != "local" ||
+		strings.Join(album.Genres, "|") != "dancehall|Reggae" {
+		t.Fatalf("unexpected enriched album: %#v", album)
 	}
 }
