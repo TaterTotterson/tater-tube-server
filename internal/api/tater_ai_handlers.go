@@ -76,6 +76,7 @@ type taterRecommendationRequest struct {
 	ProfileID      string                         `json:"profile_id"`
 	AssistantName  string                         `json:"assistant_name"`
 	Summary        string                         `json:"summary"`
+	BootSummary    string                         `json:"boot_summary"`
 	ExpiresInHours int                            `json:"expires_in_hours"`
 	Items          []taterRecommendationSelection `json:"items"`
 }
@@ -96,6 +97,7 @@ type taterTTSCreateRequest struct {
 	ProfileID        string `json:"profile_id"`
 	RecommendationID string `json:"recommendation_id"`
 	BatchID          string `json:"batch_id"`
+	BriefingKind     string `json:"briefing_kind"`
 	LocalHour        int    `json:"local_hour"`
 }
 
@@ -355,7 +357,8 @@ func (s *Server) handleTaterCoreSaveRecommendations(c *fiber.Ctx) error {
 	}
 	batch := database.TaterRecommendationBatch{
 		ID: batchID, ProfileID: profileID, CoreID: core.ID,
-		Summary: cleanTaterText(req.Summary), GeneratedAt: now,
+		Summary:     cleanTaterText(req.Summary),
+		BootSummary: cleanTaterText(req.BootSummary), GeneratedAt: now,
 		ExpiresAt: now.Add(time.Duration(hours) * time.Hour),
 	}
 	items := make([]database.TaterRecommendation, 0, min(len(req.Items), 12))
@@ -479,9 +482,20 @@ func (s *Server) handleTaterPlayerCreateTTSRequest(c *fiber.Ctx) error {
 	var text string
 	var err error
 	if batchID != "" {
-		text, err = s.queueRepo.GetActiveTaterRecommendationSummary(
-			c.Context(), batchID, profileID, time.Now().UTC(),
-		)
+		if strings.EqualFold(strings.TrimSpace(req.BriefingKind), "boot") {
+			text, err = s.queueRepo.GetActiveTaterRecommendationBootSummary(
+				c.Context(), batchID, profileID, time.Now().UTC(),
+			)
+			if err == nil && strings.TrimSpace(text) == "" {
+				text, err = s.queueRepo.GetActiveTaterRecommendationSummary(
+					c.Context(), batchID, profileID, time.Now().UTC(),
+				)
+			}
+		} else {
+			text, err = s.queueRepo.GetActiveTaterRecommendationSummary(
+				c.Context(), batchID, profileID, time.Now().UTC(),
+			)
+		}
 	} else if recommendationID != "" {
 		// Compatibility with players released before batch briefings.
 		text, err = s.queueRepo.GetActiveTaterRecommendationReason(
