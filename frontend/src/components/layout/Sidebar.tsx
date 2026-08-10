@@ -61,7 +61,7 @@ export function Sidebar() {
 	const getBadgeCount = (path: string) => {
 		switch (path) {
 			case "/queue":
-				return queueStats ? activeQueueCount + queueStats.total_failed : 0;
+				return activeQueueCount;
 			default:
 				return 0;
 		}
@@ -70,19 +70,14 @@ export function Sidebar() {
 	const getBadgeColor = (path: string, count: number) => {
 		if (count === 0) return "";
 		switch (path) {
-			case "/queue": {
-				if (queueStats && queueStats.total_failed > 0) {
-					return "badge-error";
-				}
+			case "/queue":
 				return queueStats && queueStats.total_processing > 0 ? "badge-warning" : "badge-info";
-			}
 			default:
 				return "badge-info";
 		}
 	};
 
 	const statusLabel = () => {
-		if (queueStats && queueStats.total_failed > 0) return "attention";
 		if (activeStreamCount > 0) return "streaming";
 		if (activeQueueCount > 0) return "working";
 		return "ready";
@@ -90,7 +85,6 @@ export function Sidebar() {
 
 	const queueLabel = () => {
 		if (activeWorkCount > 0) return `${activeWorkCount} active`;
-		if (queueStats && queueStats.total_failed > 0) return `${queueStats.total_failed} failed`;
 		return "idle";
 	};
 
