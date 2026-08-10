@@ -50,6 +50,7 @@ type TaterRecommendationBatch struct {
 	CoreID        string    `json:"core_id"`
 	AssistantName string    `json:"assistant_name"`
 	Summary       string    `json:"summary"`
+	BootSummary   string    `json:"boot_summary,omitempty"`
 	GeneratedAt   time.Time `json:"generated_at"`
 	ExpiresAt     time.Time `json:"expires_at"`
 }
@@ -287,9 +288,10 @@ func (r *Repository) SaveTaterRecommendations(ctx context.Context, batch TaterRe
 	return r.WithTransaction(ctx, func(tx *Repository) error {
 		if _, err := tx.db.ExecContext(ctx, `
 			INSERT INTO tater_recommendation_batches
-				(id, profile_id, core_id, summary, generated_at, expires_at)
-			VALUES (?, ?, ?, ?, ?, ?)
-		`, batch.ID, batch.ProfileID, batch.CoreID, batch.Summary, batch.GeneratedAt, batch.ExpiresAt); err != nil {
+				(id, profile_id, core_id, summary, boot_summary, generated_at, expires_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`, batch.ID, batch.ProfileID, batch.CoreID, batch.Summary, batch.BootSummary,
+			batch.GeneratedAt, batch.ExpiresAt); err != nil {
 			return err
 		}
 		for _, item := range items {
@@ -310,7 +312,7 @@ func (r *Repository) SaveTaterRecommendations(ctx context.Context, batch TaterRe
 func (r *Repository) GetActiveTaterRecommendations(ctx context.Context, profileID string, now time.Time) (*TaterRecommendationBatch, []TaterRecommendation, error) {
 	var batch TaterRecommendationBatch
 	err := r.db.QueryRowContext(ctx, `
-		SELECT batch.id, batch.profile_id, batch.core_id, batch.summary,
+		SELECT batch.id, batch.profile_id, batch.core_id, batch.summary, batch.boot_summary,
 			batch.generated_at, batch.expires_at,
 			COALESCE(NULLIF(core.assistant_name, ''), 'Tater')
 		FROM tater_recommendation_batches AS batch
@@ -318,7 +320,7 @@ func (r *Repository) GetActiveTaterRecommendations(ctx context.Context, profileI
 		WHERE batch.profile_id = ? AND batch.expires_at > ?
 		ORDER BY batch.generated_at DESC LIMIT 1
 	`, profileID, now).Scan(
-		&batch.ID, &batch.ProfileID, &batch.CoreID, &batch.Summary,
+		&batch.ID, &batch.ProfileID, &batch.CoreID, &batch.Summary, &batch.BootSummary,
 		&batch.GeneratedAt, &batch.ExpiresAt, &batch.AssistantName,
 	)
 	if err != nil {
@@ -351,7 +353,7 @@ func (r *Repository) ListTaterRecommendationBatches(ctx context.Context, profile
 		limit = 20
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT batch.id, batch.profile_id, batch.core_id, batch.summary,
+		SELECT batch.id, batch.profile_id, batch.core_id, batch.summary, batch.boot_summary,
 			batch.generated_at, batch.expires_at,
 			COALESCE(NULLIF(core.assistant_name, ''), 'Tater')
 		FROM tater_recommendation_batches AS batch
@@ -367,7 +369,7 @@ func (r *Repository) ListTaterRecommendationBatches(ctx context.Context, profile
 	for rows.Next() {
 		var item TaterRecommendationBatch
 		if err := rows.Scan(
-			&item.ID, &item.ProfileID, &item.CoreID, &item.Summary,
+			&item.ID, &item.ProfileID, &item.CoreID, &item.Summary, &item.BootSummary,
 			&item.GeneratedAt, &item.ExpiresAt, &item.AssistantName,
 		); err != nil {
 			return nil, err
@@ -419,6 +421,23 @@ func (r *Repository) GetActiveTaterRecommendationSummary(
 	var summary string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT summary
+		FROM tater_recommendation_batches
+		WHERE id = ?
+			AND profile_id = ?
+			AND expires_at > ?
+		LIMIT 1
+	`, batchID, profileID, now).Scan(&summary)
+	return summary, err
+}
+
+func (r *Repository) GetActiveTaterRecommendationBootSummary(
+	ctx context.Context,
+	batchID, profileID string,
+	now time.Time,
+) (string, error) {
+	var summary string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT boot_summary
 		FROM tater_recommendation_batches
 		WHERE id = ?
 			AND profile_id = ?
