@@ -223,6 +223,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/tater/usenet/status", s.handleTaterUsenetStatus)
 	api.Get("/tater/usenet/catalog", s.handleTaterUsenetCatalog)
 	api.Get("/tater/bumpers/settings", s.handleTaterBumperSettings)
+	api.Get("/tater/bumpers/next", s.handleTaterBumperNext)
 	api.Get("/tater/usenet/items", s.handleTaterUsenetItems)
 	api.Get("/tater/usenet/search", s.handleTaterUsenetSearch)
 	api.Get("/tater/usenet/discover", s.handleTaterUsenetDiscover)

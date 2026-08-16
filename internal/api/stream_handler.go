@@ -344,6 +344,16 @@ const (
 )
 
 var transcodeProfiles = map[string]transcodeProfile{
+	"xbox_480p": {
+		Name:         "Original Xbox 480p",
+		MaxWidth:     640,
+		MaxHeight:    480,
+		VideoBitrate: "900k",
+		MaxRate:      "1200k",
+		BufferSize:   "2400k",
+		AudioBitrate: "96k",
+		Level:        "3.0",
+	},
 	"crt_480p": {
 		Name:         "CRT 480p",
 		MaxWidth:     640,

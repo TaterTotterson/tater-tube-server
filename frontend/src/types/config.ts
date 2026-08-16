@@ -79,7 +79,7 @@ export interface StreamingConfig {
 // FFmpeg transcoding configuration
 export interface TranscodingConfig {
 	enabled: boolean | null;
-	profile: "crt_480p" | "hdmi_720p" | "hdmi_1080p" | "hdmi_4k" | string;
+	profile: "xbox_480p" | "crt_480p" | "hdmi_720p" | "hdmi_1080p" | "hdmi_4k" | string;
 	hardware_acceleration:
 		| "none"
 		| "auto"
