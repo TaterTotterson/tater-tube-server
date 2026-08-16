@@ -147,8 +147,12 @@ func (s *Server) handleTaterTVLineup(c *fiber.Ctx) error {
 	if err != nil {
 		return RespondServiceUnavailable(c, "Failed to build TV lineup", err.Error())
 	}
+	channels := taterTVPersonalizeChannels(guide.Channels, baseURL, playerToken)
+	if taterTVLineupSummaryRequested(c) {
+		channels = taterTVPersonalizeChannelSummaries(guide.Channels, baseURL, playerToken)
+	}
 	return RespondSuccess(c, fiber.Map{
-		"channels":     taterTVPersonalizeChannels(guide.Channels, baseURL, playerToken),
+		"channels":     channels,
 		"startedAt":    guide.StartedAt,
 		"plannedUntil": guide.PlannedUntil,
 		"serverNow":    time.Now(),
@@ -160,6 +164,16 @@ func (s *Server) handleTaterTVLineup(c *fiber.Ctx) error {
 			"commercial_categories": cfg.TubeTV.CommercialCategories,
 		},
 	})
+}
+
+func taterTVLineupSummaryRequested(c *fiber.Ctx) bool {
+	for _, key := range []string{"summary", "lite", "channels_only"} {
+		switch strings.ToLower(strings.TrimSpace(c.Query(key))) {
+		case "1", "true", "yes", "on":
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleTubeTVGuide(c *fiber.Ctx) error {
@@ -1666,6 +1680,17 @@ func taterTVPersonalizeChannels(channels []taterTVChannel, baseURL, playerToken 
 			next.Schedule[index]["serverSeek"] = true
 			next.Schedule[index]["seekMode"] = "server"
 		}
+		out = append(out, next)
+	}
+	return out
+}
+
+func taterTVPersonalizeChannelSummaries(channels []taterTVChannel, baseURL, playerToken string) []taterTVChannel {
+	out := make([]taterTVChannel, 0, len(channels))
+	for _, channel := range channels {
+		next := channel
+		next.StreamURL = taterTVChannelStreamURL(baseURL, channel.Number, playerToken)
+		next.Schedule = nil
 		out = append(out, next)
 	}
 	return out

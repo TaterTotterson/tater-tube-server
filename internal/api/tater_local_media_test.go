@@ -1399,6 +1399,34 @@ func TestTaterTVPersonalizeChannelsRestoresScheduledItemURLs(t *testing.T) {
 	}
 }
 
+func TestTaterTVPersonalizeChannelSummariesOmitSchedules(t *testing.T) {
+	channels := []taterTVChannel{{
+		Number: "02",
+		Title:  "Cartoons",
+		Schedule: []map[string]any{
+			{
+				"title": "Episode One",
+				"kind":  "episode",
+			},
+		},
+	}}
+
+	personalized := taterTVPersonalizeChannelSummaries(channels, "http://server:8080", "player token")
+	if len(personalized) != 1 {
+		t.Fatalf("unexpected personalized channels: %#v", personalized)
+	}
+	if !strings.Contains(personalized[0].StreamURL, "/api/tater/tv/channel/02/playlist.m3u8") ||
+		!strings.Contains(personalized[0].StreamURL, "player_token=player+token") {
+		t.Fatalf("expected playable channel URL, got %q", personalized[0].StreamURL)
+	}
+	if len(personalized[0].Schedule) != 0 {
+		t.Fatalf("expected summary schedule to be omitted, got %#v", personalized[0].Schedule)
+	}
+	if len(channels[0].Schedule) != 1 {
+		t.Fatal("summarizing the guide mutated the cached schedule")
+	}
+}
+
 func TestTaterTVChannelItemFromPath(t *testing.T) {
 	number, index, ok := taterTVChannelItemFromPath("/api/tater/tv/channel/09/item/42")
 	if !ok || number != "09" || index != 42 {
