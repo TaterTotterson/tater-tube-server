@@ -687,6 +687,37 @@ func (t *StreamTracker) KillStream(id string) bool {
 	return false
 }
 
+// KillStreamsForPlayer cancels and removes active streams owned by a paired Tater player.
+func (t *StreamTracker) KillStreamsForPlayer(playerID, userName string) int {
+	if t == nil {
+		return 0
+	}
+	playerID = strings.TrimSpace(playerID)
+	userName = strings.TrimSpace(userName)
+	ids := []string{}
+	t.streams.Range(func(key, value any) bool {
+		internal := valueToInternal(value)
+		stream := internal.ActiveStream
+		playerMatches := playerID != "" && strings.EqualFold(strings.TrimSpace(stream.PlayerID), playerID)
+		nameMatches := userName != "" && strings.EqualFold(strings.TrimSpace(stream.UserName), userName)
+		if playerMatches || nameMatches {
+			if streamID, ok := key.(string); ok {
+				ids = append(ids, streamID)
+			}
+		}
+		return true
+	})
+
+	stopped := 0
+	for _, id := range ids {
+		if _, ok := t.streams.Load(id); ok {
+			t.Remove(id)
+			stopped++
+		}
+	}
+	return stopped
+}
+
 // GetHistory returns active and recently completed stream history.
 func (t *StreamTracker) GetHistory() []nzbfilesystem.ActiveStream {
 	streams := t.GetAll()

@@ -230,6 +230,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/tater/usenet/trending", s.handleTaterUsenetTrending)
 	api.Post("/tater/usenet/play", s.handleTaterUsenetPlay)
 	api.Get("/tater/streams/active", s.handleTaterActiveStreams)
+	api.Post("/tater/streams/active/stop", s.handleTaterStopActiveStreams)
+	api.Delete("/tater/streams/active", s.handleTaterStopActiveStreams)
 	api.Get("/tater/playstate/continue", s.handleTaterPlayStateContinue)
 	api.Post("/tater/playstate/next", s.handleTaterPlayStateNext)
 	api.Post("/tater/playstate", s.handleTaterPlayStateSave)
