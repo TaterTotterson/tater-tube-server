@@ -323,6 +323,117 @@ func TestTaterLocalTVItemsBrowsesShowsSeasonsEpisodes(t *testing.T) {
 	}
 }
 
+func TestTaterLocalMovieItemsUsesFreshLibraryIndex(t *testing.T) {
+	configDir := t.TempDir()
+	cfg := config.DefaultConfig(configDir)
+	cfg.LocalMedia.Enabled = boolPtr(true)
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID:          "movies",
+		Name:        "Movies",
+		LibraryType: "movies",
+		Paths:       []string{filepath.Join(configDir, "missing-movies")},
+		Enabled:     boolPtr(true),
+	}}
+	cat := cfg.LocalMedia.Categories[0]
+	index := taterLocalLibraryIndex{
+		Schema:            taterLocalLibraryIndexSchema,
+		ConfigFingerprint: taterLocalLibraryFingerprint(cfg),
+		Files: []taterLocalLibraryFileIndex{{
+			CategoryID:      "movies",
+			LibraryType:     "movies",
+			SourceIndex:     0,
+			Path:            "That Movie (2024)/That Movie (2024).mkv",
+			Title:           "That Movie",
+			Year:            "2024",
+			SizeBytes:       1234,
+			DurationSeconds: 92,
+		}},
+	}
+	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), index); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := taterLocalMovieItems(cfg, cat, taterLocalMediaCategoryPaths(cat), "http://server", "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Title != "That Movie" || items[0].MediaType != "movie" {
+		t.Fatalf("unexpected indexed movie rows: %#v", items)
+	}
+	if !strings.Contains(items[0].StreamURL, "category_id=movies") || !strings.Contains(items[0].StreamURL, "player_token=token") {
+		t.Fatalf("unexpected indexed movie stream URL: %q", items[0].StreamURL)
+	}
+	if items[0].DurationSeconds != 92 || items[0].DurationDisplay != "1:32" {
+		t.Fatalf("expected indexed duration, got %#v", items[0])
+	}
+}
+
+func TestTaterLocalTVItemsUsesFreshLibraryIndex(t *testing.T) {
+	configDir := t.TempDir()
+	cfg := config.DefaultConfig(configDir)
+	cfg.LocalMedia.Enabled = boolPtr(true)
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID:          "tv",
+		Name:        "TV",
+		LibraryType: "tv",
+		Paths:       []string{filepath.Join(configDir, "missing-tv")},
+		Enabled:     boolPtr(true),
+	}}
+	cat := cfg.LocalMedia.Categories[0]
+	index := taterLocalLibraryIndex{
+		Schema:            taterLocalLibraryIndexSchema,
+		ConfigFingerprint: taterLocalLibraryFingerprint(cfg),
+		Files: []taterLocalLibraryFileIndex{
+			{
+				CategoryID:      "tv",
+				LibraryType:     "tv",
+				SourceIndex:     0,
+				Path:            "Some.Show.2020/Season 01/Some.Show.S01E01.Pilot.mkv",
+				Title:           "Pilot",
+				DurationSeconds: 1200,
+			},
+			{
+				CategoryID:      "tv",
+				LibraryType:     "tv",
+				SourceIndex:     0,
+				Path:            "Some.Show.2020/Season 01/Some.Show.S01E02.The.One.mkv",
+				Title:           "The One",
+				DurationSeconds: 1201,
+			},
+		},
+	}
+	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), index); err != nil {
+		t.Fatal(err)
+	}
+
+	shows, err := taterLocalTVItems(cfg, cat, taterLocalMediaCategoryPaths(cat), "http://server", "token", -1, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shows) != 1 || shows[0].Title != "Some Show" || shows[0].MediaType != "show" {
+		t.Fatalf("unexpected indexed show rows: %#v", shows)
+	}
+
+	seasons, err := taterLocalTVItems(cfg, cat, taterLocalMediaCategoryPaths(cat), "http://server", "token", -1, "Some.Show.2020")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seasons) != 1 || seasons[0].Title != "Season 1" || seasons[0].MediaType != "season" {
+		t.Fatalf("unexpected indexed season rows: %#v", seasons)
+	}
+
+	episodes, err := taterLocalTVItems(cfg, cat, taterLocalMediaCategoryPaths(cat), "http://server", "token", -1, "Some.Show.2020/Season 01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(episodes) != 2 || episodes[0].Title != "S01E01 Pilot" || episodes[1].Title != "S01E02 The One" {
+		t.Fatalf("unexpected indexed episode rows: %#v", episodes)
+	}
+	if !strings.Contains(episodes[0].StreamURL, "category_id=tv") || !strings.Contains(episodes[0].StreamURL, "source=0") {
+		t.Fatalf("unexpected indexed episode stream URL: %q", episodes[0].StreamURL)
+	}
+}
+
 func TestTaterLocalMusicItemsBrowseAlbumsAndTracks(t *testing.T) {
 	root := t.TempDir()
 	albumDir := filepath.Join(root, "Cool.Artist", "Big.Album.2024")

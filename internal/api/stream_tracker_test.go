@@ -117,6 +117,27 @@ func TestStreamTracker_GetAll_IncludesTranscodingInfo(t *testing.T) {
 	assert.Equal(t, "h264_vaapi", streams[0].VideoCodec)
 }
 
+func TestStreamTracker_KillStreamsForPlayer(t *testing.T) {
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+
+	owned := tracker.AddStream("/movies/owned.mkv", "Local", "Xbox", "127.0.0.1", "TestAgent", 1000)
+	tracker.SetPlayerID(owned.ID, "player-1")
+	fallback := tracker.AddStream("/movies/fallback.mkv", "Local", "Xbox", "127.0.0.1", "TestAgent", 1000)
+	other := tracker.AddStream("/movies/other.mkv", "Local", "Other", "127.0.0.1", "TestAgent", 1000)
+	tracker.SetPlayerID(other.ID, "player-2")
+
+	stopped := tracker.KillStreamsForPlayer("player-1", "Xbox")
+
+	assert.Equal(t, 2, stopped)
+	assert.Equal(t, 1, tracker.ActiveStreams())
+	streams := tracker.GetAll()
+	assert.Len(t, streams, 1)
+	assert.Equal(t, "/movies/other.mkv", streams[0].FilePath)
+	assert.Equal(t, "player-2", streams[0].PlayerID)
+	assert.NotEqual(t, fallback.FilePath, streams[0].FilePath)
+}
+
 func TestStreamTracker_GetHistory_IncludesActivePlayback(t *testing.T) {
 	tracker := NewStreamTracker(nil)
 	defer tracker.Stop()

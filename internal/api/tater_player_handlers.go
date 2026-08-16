@@ -306,6 +306,23 @@ func (s *Server) handleTaterActiveStreams(c *fiber.Ctx) error {
 	return RespondSuccess(c, filtered)
 }
 
+func (s *Server) handleTaterStopActiveStreams(c *fiber.Ctx) error {
+	cfg, token, ok := s.taterAuthorizedConfig(c)
+	if !ok {
+		return nil
+	}
+	if s.streamTracker == nil {
+		return RespondSuccess(c, fiber.Map{"stopped": 0})
+	}
+
+	player, ok := findTaterPlayerByToken(cfg, token)
+	if !ok {
+		return RespondUnauthorized(c, "Invalid player token", "")
+	}
+	stopped := s.streamTracker.KillStreamsForPlayer(player.ID, taterPlayerDisplayName(player))
+	return RespondSuccess(c, fiber.Map{"stopped": stopped})
+}
+
 func (s *Server) taterAuthorizedConfig(c *fiber.Ctx) (*config.Config, string, bool) {
 	if s.configManager == nil {
 		RespondServiceUnavailable(c, "Configuration not available", "")
