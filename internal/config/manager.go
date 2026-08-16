@@ -1048,13 +1048,14 @@ func (c *Config) Validate() error {
 		cat.Paths = cleanPaths
 	}
 	validTranscodeProfiles := map[string]bool{
+		"xbox_480p":  true,
 		"crt_480p":   true,
 		"hdmi_720p":  true,
 		"hdmi_1080p": true,
 		"hdmi_4k":    true,
 	}
 	if !validTranscodeProfiles[c.Transcoding.Profile] {
-		return fmt.Errorf("transcoding profile must be one of: crt_480p, hdmi_720p, hdmi_1080p, hdmi_4k")
+		return fmt.Errorf("transcoding profile must be one of: xbox_480p, crt_480p, hdmi_720p, hdmi_1080p, hdmi_4k")
 	}
 	validHardwareAcceleration := map[string]bool{
 		"none":         true,

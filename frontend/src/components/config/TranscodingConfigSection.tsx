@@ -198,6 +198,7 @@ export function TranscodingConfigSection({
 								disabled={isReadOnly}
 								onChange={(e) => handleTranscodingChange("profile", e.target.value)}
 							>
+								<option value="xbox_480p">Original Xbox 480p</option>
 								<option value="crt_480p">CRT 480p</option>
 								<option value="hdmi_720p">HDMI 720p</option>
 								<option value="hdmi_1080p">HDMI 1080p</option>

@@ -30,6 +30,8 @@ func (s *Server) handleTaterServerInfo(c *fiber.Ctx) error {
 			"usenet_status":        "/api/tater/usenet/status",
 			"usenet_catalog":       "/api/tater/usenet/catalog",
 			"bumper_settings":      "/api/tater/bumpers/settings",
+			"bumper_next":          "/api/tater/bumpers/next",
+			"bumper_file":          "/api/tater/bumpers/file/{name}",
 			"usenet_items":         "/api/tater/usenet/items",
 			"usenet_search":        "/api/tater/usenet/search",
 			"usenet_discover":      "/api/tater/usenet/discover",
