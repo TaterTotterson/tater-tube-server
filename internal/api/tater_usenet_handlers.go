@@ -1686,15 +1686,19 @@ func taterLocalMusicAlbums(cfg *config.Config, baseURL, playerToken, categoryID 
 	}
 
 	items := make([]taterUsenetItem, 0, len(albums))
-	indexedArtwork := map[string]taterLocalMusicAlbumIndex{}
+	indexedAlbums := map[string]taterLocalMusicAlbumIndex{}
 	if index, err := readTaterLocalLibraryIndex(cfg); err == nil && index.ConfigFingerprint == taterLocalLibraryFingerprint(cfg) {
 		for _, indexedAlbum := range index.Albums {
-			if indexedAlbum.CategoryID == cat.ID && indexedAlbum.HasArtwork {
-				indexedArtwork[indexedAlbum.ID] = indexedAlbum
+			if indexedAlbum.CategoryID == cat.ID {
+				indexedAlbums[indexedAlbum.ID] = indexedAlbum
 			}
 		}
 	}
 	for _, album := range albums {
+		indexedAlbum, indexed := indexedAlbums[album.ID]
+		if indexed {
+			album.Genres = mergeTaterMusicGenres(album.Genres, indexedAlbum.Genres)
+		}
 		item := taterUsenetItem{
 			Title:        album.Title,
 			Key:          album.ID,
@@ -1715,7 +1719,7 @@ func taterLocalMusicAlbums(cfg *config.Config, baseURL, playerToken, categoryID 
 			Poster:       taterLocalMusicArtworkURL(baseURL, album.CategoryID, album.SourceIndex, album.ArtworkPath, playerToken),
 			HasArtwork:   album.ArtworkPath != "",
 		}
-		if indexedAlbum, ok := indexedArtwork[album.ID]; ok {
+		if indexed && indexedAlbum.HasArtwork {
 			item.Poster = taterLocalMusicIndexedArtworkURL(baseURL, album.ID, indexedAlbum.ArtworkUpdated, indexedAlbum.ModifiedUnix, playerToken)
 			item.HasArtwork = item.Poster != ""
 		}
