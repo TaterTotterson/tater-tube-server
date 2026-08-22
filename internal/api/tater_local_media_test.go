@@ -483,6 +483,83 @@ func TestTaterLocalMusicItemsBrowseAlbumsAndTracks(t *testing.T) {
 	}
 }
 
+func TestTaterLocalMusicAlbumsMergeIndexedGenresWithAndWithoutArtwork(t *testing.T) {
+	root := t.TempDir()
+	metadataRoot := t.TempDir()
+	albumPaths := []string{
+		filepath.Join("Bob Marley & The Wailers", "Exodus"),
+		filepath.Join("Toots & The Maytals", "Funky Kingston"),
+	}
+	for _, albumPath := range albumPaths {
+		dir := filepath.Join(root, albumPath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "01 Track.flac"), []byte("audio"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	enabled := true
+	cfg := &config.Config{
+		Metadata: config.MetadataConfig{RootPath: metadataRoot},
+		LocalMedia: config.LocalMediaConfig{
+			Enabled: &enabled,
+			Categories: []config.LocalMediaCategory{{
+				ID:          "music",
+				Name:        "Music",
+				LibraryType: "music",
+				Paths:       []string{root},
+				Enabled:     &enabled,
+			}},
+		},
+	}
+	index := taterLocalLibraryIndex{
+		Schema:            taterLocalLibraryIndexSchema,
+		ConfigFingerprint: taterLocalLibraryFingerprint(cfg),
+		Albums: []taterLocalMusicAlbumIndex{
+			{
+				ID:         taterMusicAlbumID("music", 0, filepath.ToSlash(albumPaths[0])),
+				CategoryID: "music",
+				Genres:     []string{"Roots Reggae"},
+			},
+			{
+				ID:             taterMusicAlbumID("music", 0, filepath.ToSlash(albumPaths[1])),
+				CategoryID:     "music",
+				Genres:         []string{"Ska"},
+				HasArtwork:     true,
+				ArtworkUpdated: 42,
+			},
+		},
+	}
+	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), index); err != nil {
+		t.Fatal(err)
+	}
+
+	albums, err := taterLocalMusicAlbums(cfg, "http://server", "token", "music")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(albums) != 2 {
+		t.Fatalf("expected two albums, got %#v", albums)
+	}
+	byTitle := map[string]taterUsenetItem{}
+	for _, album := range albums {
+		byTitle[album.Title] = album
+	}
+	exodus := byTitle["Exodus"]
+	if strings.Join(exodus.Genres, "|") != "Roots Reggae|Reggae" || exodus.HasArtwork {
+		t.Fatalf("genre-only indexed metadata was not merged: %#v", exodus)
+	}
+	funkyKingston := byTitle["Funky Kingston"]
+	if strings.Join(funkyKingston.Genres, "|") != "Ska|Reggae" || !funkyKingston.HasArtwork {
+		t.Fatalf("indexed genres and artwork were not merged: %#v", funkyKingston)
+	}
+	if !strings.Contains(funkyKingston.Poster, "/api/tater/music/artwork") {
+		t.Fatalf("unexpected indexed artwork URL: %q", funkyKingston.Poster)
+	}
+}
+
 func TestTaterLocalDiscoverRowsAndItems(t *testing.T) {
 	movieRoot := t.TempDir()
 	tvRoot := t.TempDir()
