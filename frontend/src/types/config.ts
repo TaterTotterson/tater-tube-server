@@ -591,6 +591,8 @@ export interface LocalMediaScanStatus {
 	files_scanned: number;
 	albums_processed: number;
 	artwork_found: number;
+	genre_matches: number;
+	genre_unmatched: number;
 	error?: string;
 }
 

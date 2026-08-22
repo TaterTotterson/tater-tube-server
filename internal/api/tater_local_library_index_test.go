@@ -242,3 +242,158 @@ func TestTaterAlbumMetadataScraperEnrichesGenresWhenArtworkAlreadyExists(t *test
 		t.Fatalf("unexpected enriched album: %#v", album)
 	}
 }
+
+func TestTaterAlbumMetadataScraperFallsBackToArtistGenresAndReportsProgress(t *testing.T) {
+	oldMusicBrainzURL := taterMusicBrainzBaseURL
+	oldClient := taterMusicArtworkHTTPClient
+	oldPacing := taterMusicBrainzRequestPacing
+	t.Cleanup(func() {
+		taterMusicBrainzBaseURL = oldMusicBrainzURL
+		taterMusicArtworkHTTPClient = oldClient
+		taterMusicBrainzRequestPacing = oldPacing
+		taterMusicBrainzPacer.Lock()
+		taterMusicBrainzPacer.LastRequest = time.Time{}
+		taterMusicBrainzPacer.Unlock()
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/ws/2/release-group/":
+			_, _ = response.Write([]byte(`{"release-groups":[{"id":"release-group-1","title":"Collecting Dust","score":100,"artist-credit":[{"name":"Surfer Girl","artist":{"id":"artist-1","name":"Surfer Girl"}}]}]}`))
+		case "/ws/2/release-group/release-group-1":
+			_, _ = response.Write([]byte(`{"id":"release-group-1","genres":[]}`))
+		case "/ws/2/artist/artist-1":
+			_, _ = response.Write([]byte(`{"id":"artist-1","genres":[{"name":"reggae","count":20},{"name":"indie rock","count":3}]}`))
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	taterMusicBrainzBaseURL = server.URL + "/ws/2"
+	taterMusicArtworkHTTPClient = server.Client()
+	taterMusicBrainzRequestPacing = 0
+	cfg := &config.Config{Metadata: config.MetadataConfig{RootPath: t.TempDir()}}
+	index := taterLocalLibraryIndex{
+		Albums: []taterLocalMusicAlbumIndex{{
+			ID: "album:artist-fallback", CategoryID: "music", Title: "Collecting Dust",
+			Artist: "Surfer Girl", HasArtwork: true, ArtworkSource: "embedded",
+		}},
+	}
+	latest := taterMusicEnrichmentProgress{}
+	if err := scrapeTaterMissingAlbumArtwork(
+		context.Background(), cfg, &index,
+		func(progress taterMusicEnrichmentProgress) { latest = progress },
+	); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(index.Albums[0].Genres, "|"); got != "Reggae|indie rock|Alternative|Rock" {
+		t.Fatalf("artist genres were not applied: %q", got)
+	}
+	if latest.AlbumsProcessed != 1 || latest.GenreMatches != 1 || latest.GenreUnmatched != 0 {
+		t.Fatalf("unexpected enrichment progress: %#v", latest)
+	}
+}
+
+func TestTaterAlbumMetadataScraperUsesExactArtistSearchWhenReleaseIsMissing(t *testing.T) {
+	oldMusicBrainzURL := taterMusicBrainzBaseURL
+	oldClient := taterMusicArtworkHTTPClient
+	oldPacing := taterMusicBrainzRequestPacing
+	t.Cleanup(func() {
+		taterMusicBrainzBaseURL = oldMusicBrainzURL
+		taterMusicArtworkHTTPClient = oldClient
+		taterMusicBrainzRequestPacing = oldPacing
+		taterMusicBrainzPacer.Lock()
+		taterMusicBrainzPacer.LastRequest = time.Time{}
+		taterMusicBrainzPacer.Unlock()
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/ws/2/release-group/":
+			_, _ = response.Write([]byte(`{"release-groups":[]}`))
+		case "/ws/2/artist/":
+			_, _ = response.Write([]byte(`{"artists":[{"id":"artist-1","name":"The Elovaters","score":100},{"id":"artist-2","name":"Elovater Tribute","score":100}]}`))
+		case "/ws/2/artist/artist-1":
+			_, _ = response.Write([]byte(`{"id":"artist-1","genres":[{"name":"roots reggae","count":12}]}`))
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	taterMusicBrainzBaseURL = server.URL + "/ws/2"
+	taterMusicArtworkHTTPClient = server.Client()
+	taterMusicBrainzRequestPacing = 0
+	cfg := &config.Config{Metadata: config.MetadataConfig{RootPath: t.TempDir()}}
+	album := taterLocalMusicAlbumIndex{
+		ID: "album:artist-search", CategoryID: "music", Title: "Endless Summer",
+		Artist: "The Elovaters", HasArtwork: true, ArtworkSource: "embedded",
+	}
+	if err := refreshTaterAlbumGenres(context.Background(), cfg, &album); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(album.Genres, "|"); got != "roots reggae|Reggae" {
+		t.Fatalf("exact artist fallback genres were not applied: %q", got)
+	}
+	if album.MusicBrainzID != "" {
+		t.Fatalf("artist fallback should not be stored as a release-group ID: %q", album.MusicBrainzID)
+	}
+}
+
+func TestTaterMusicSimplifiedAlbumTitleOnlyRemovesEditionSuffixes(t *testing.T) {
+	for input, expected := range map[string]string{
+		"World on Fire (Deluxe Version)": "World on Fire",
+		"Set in Stone [Instrumentals]":   "Set in Stone",
+		"Live at Red Rocks":              "Live at Red Rocks",
+		"Album (Part 2)":                 "Album (Part 2)",
+	} {
+		if got := taterMusicSimplifiedAlbumTitle(input); got != expected {
+			t.Fatalf("simplified title %q = %q, want %q", input, got, expected)
+		}
+	}
+}
+
+func TestTaterMusicGenreMatchingRelaxesEditionSuffixWithoutRelaxingArtwork(t *testing.T) {
+	oldMusicBrainzURL := taterMusicBrainzBaseURL
+	oldClient := taterMusicArtworkHTTPClient
+	oldPacing := taterMusicBrainzRequestPacing
+	t.Cleanup(func() {
+		taterMusicBrainzBaseURL = oldMusicBrainzURL
+		taterMusicArtworkHTTPClient = oldClient
+		taterMusicBrainzRequestPacing = oldPacing
+		taterMusicBrainzPacer.Lock()
+		taterMusicBrainzPacer.LastRequest = time.Time{}
+		taterMusicBrainzPacer.Unlock()
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		query := request.URL.Query().Get("query")
+		if request.URL.Path != "/ws/2/release-group/" {
+			http.NotFound(response, request)
+			return
+		}
+		if strings.Contains(query, `releasegroup:"World on Fire"`) {
+			_, _ = response.Write([]byte(`{"release-groups":[{"id":"release-group-1","title":"World on Fire","score":100,"artist-credit":[{"name":"Stick Figure","artist":{"id":"artist-1","name":"Stick Figure"}}]}]}`))
+			return
+		}
+		_, _ = response.Write([]byte(`{"release-groups":[]}`))
+	}))
+	defer server.Close()
+
+	taterMusicBrainzBaseURL = server.URL + "/ws/2"
+	taterMusicArtworkHTTPClient = server.Client()
+	taterMusicBrainzRequestPacing = 0
+	album := taterLocalMusicAlbumIndex{Title: "World on Fire (Deluxe Version)", Artist: "Stick Figure"}
+	genreCandidates, err := searchTaterMusicGenreCandidates(context.Background(), album)
+	if err != nil || len(genreCandidates) != 1 || genreCandidates[0].MusicBrainzID != "release-group-1" {
+		t.Fatalf("genre matching did not use the simplified edition title: %#v error=%v", genreCandidates, err)
+	}
+	artworkCandidates, err := searchTaterMusicArtworkCandidates(context.Background(), album)
+	if err != nil || len(artworkCandidates) != 0 {
+		t.Fatalf("artwork matching should remain exact: %#v error=%v", artworkCandidates, err)
+	}
+}

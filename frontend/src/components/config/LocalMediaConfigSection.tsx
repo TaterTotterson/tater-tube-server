@@ -1,5 +1,6 @@
 import {
 	AlertTriangle,
+	CircleCheck,
 	Disc3,
 	Film,
 	Folder,
@@ -443,11 +444,22 @@ export function LocalMediaConfigSection({
 								<div className="mt-1 text-base-content/55 text-xs">
 									{(scanStatus?.files_scanned ?? 0).toLocaleString()} files scanned
 									{scanStatus?.phase === "artwork"
-										? ` · ${(scanStatus.albums_processed ?? 0).toLocaleString()} albums checked · ${(scanStatus.artwork_found ?? 0).toLocaleString()} covers found`
+										? ` · ${(scanStatus.albums_processed ?? 0).toLocaleString()} albums checked · ${(scanStatus.artwork_found ?? 0).toLocaleString()} covers found · ${(scanStatus.genre_matches ?? 0).toLocaleString()} genre matches · ${(scanStatus.genre_unmatched ?? 0).toLocaleString()} unmatched`
 										: ""}
 								</div>
 							</div>
 						</div>
+					</div>
+				)}
+				{scanStatus?.phase === "complete" && (scanStatus.albums_processed ?? 0) > 0 && (
+					<div className="alert alert-success mt-5 py-3 text-sm">
+						<CircleCheck className="h-4 w-4" />
+						<span>
+							{(scanStatus.albums_processed ?? 0).toLocaleString()} albums checked ·{" "}
+							{(scanStatus.genre_matches ?? 0).toLocaleString()} genre matches ·{" "}
+							{(scanStatus.genre_unmatched ?? 0).toLocaleString()} still unmatched ·{" "}
+							{(scanStatus.artwork_found ?? 0).toLocaleString()} covers found
+						</span>
 					</div>
 				)}
 			</section>
