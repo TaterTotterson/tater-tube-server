@@ -101,3 +101,27 @@ func expandTaterMusicGenre(value string) []string {
 	}
 	return result
 }
+
+// taterMusicBroadGenres reduces detailed tags to the stable browse families
+// used by Tater Tube. It is intentionally conservative so provider styles and
+// same-artist inference do not copy album-specific microgenres everywhere.
+func taterMusicBroadGenres(values []string) []string {
+	result := []string{}
+	seen := map[string]bool{}
+	for _, value := range values {
+		for _, expanded := range expandTaterMusicGenre(value) {
+			for _, family := range taterMusicGenreFamilies {
+				if !strings.EqualFold(expanded, family.Name) {
+					continue
+				}
+				key := strings.ToLower(family.Name)
+				if !seen[key] {
+					seen[key] = true
+					result = append(result, family.Name)
+				}
+				break
+			}
+		}
+	}
+	return result
+}

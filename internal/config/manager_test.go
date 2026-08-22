@@ -250,6 +250,15 @@ func TestConfig_Validate_TaterBumpersDefaultOn(t *testing.T) {
 	assert.True(t, *cfg.TaterBumpers.NZBMovies)
 }
 
+func TestConfig_Validate_AudioDBEnrichmentDefaultsOn(t *testing.T) {
+	cfg := DefaultConfig(t.TempDir())
+	cfg.LocalMedia.AudioDBEnabled = nil
+
+	assert.NoError(t, cfg.Validate())
+	assert.NotNil(t, cfg.LocalMedia.AudioDBEnabled)
+	assert.True(t, *cfg.LocalMedia.AudioDBEnabled)
+}
+
 func TestConfig_GetWebhookBaseURL(t *testing.T) {
 	tests := []struct {
 		name     string

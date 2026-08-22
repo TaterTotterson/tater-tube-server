@@ -530,6 +530,9 @@ export interface LocalMediaCategory {
 
 export interface LocalMediaConfig {
 	enabled: boolean;
+	audiodb_enabled?: boolean;
+	audiodb_api_key?: string;
+	audiodb_api_key_set?: boolean;
 	categories: LocalMediaCategory[];
 }
 

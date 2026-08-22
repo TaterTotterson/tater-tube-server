@@ -50,6 +50,9 @@ interface LocalMediaConfigSectionProps {
 
 const DEFAULT_LOCAL_MEDIA: LocalMediaConfig = {
 	enabled: false,
+	audiodb_enabled: true,
+	audiodb_api_key: "",
+	audiodb_api_key_set: false,
 	categories: [],
 };
 
@@ -111,6 +114,9 @@ function normalize(config: ConfigResponse): LocalMediaConfig {
 	const source = config.local_media ?? DEFAULT_LOCAL_MEDIA;
 	return {
 		enabled: source.enabled ?? false,
+		audiodb_enabled: source.audiodb_enabled ?? true,
+		audiodb_api_key: "",
+		audiodb_api_key_set: source.audiodb_api_key_set ?? false,
 		categories: (source.categories ?? []).map((category) => ({
 			id: category.id || slug(category.name || "local"),
 			name: category.name || "Local",
@@ -311,6 +317,8 @@ export function LocalMediaConfigSection({
 		if (!onUpdate || !hasChanges) return;
 		const next = {
 			enabled: formData.enabled,
+			audiodb_enabled: formData.audiodb_enabled ?? true,
+			audiodb_api_key: formData.audiodb_api_key?.trim() ?? "",
 			categories: formData.categories.map((category) => ({
 				...category,
 				id: slug(category.id || category.name),
@@ -322,7 +330,12 @@ export function LocalMediaConfigSection({
 		};
 		try {
 			await onUpdate("local_media", next);
-			setFormData(next);
+			setFormData({
+				...next,
+				audiodb_api_key: "",
+				audiodb_api_key_set:
+					formData.audiodb_api_key_set || (formData.audiodb_api_key?.trim() ?? "") !== "",
+			});
 			setHasChanges(false);
 			await startScan.mutateAsync(false);
 			showToast({ type: "success", title: "Local media saved", message: "Library scan started." });
@@ -505,6 +518,60 @@ export function LocalMediaConfigSection({
 						</div>
 					))}
 				</div>
+
+				{activeTab === "music" && (
+					<div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+						<div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+							<div className="flex min-w-0 gap-3">
+								<div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
+									<WandSparkles className="h-4 w-4" />
+								</div>
+								<div>
+									<div className="font-bold text-sm">Music Metadata Enrichment</div>
+									<p className="mt-1 max-w-2xl text-base-content/55 text-xs leading-relaxed">
+										MusicBrainz identifies albums first. TheAudioDB can fill missing genre, style,
+										and cover details, then Tater Tube safely reuses broad genres from other albums
+										by the same exact artist.
+									</p>
+								</div>
+							</div>
+							<label className="flex shrink-0 items-center gap-3 rounded-lg border border-base-300 bg-base-100/75 px-3 py-2">
+								<span className="font-bold text-xs">Use TheAudioDB</span>
+								<input
+									type="checkbox"
+									className="toggle toggle-primary toggle-sm"
+									checked={formData.audiodb_enabled ?? true}
+									disabled={isReadOnly}
+									onChange={(event) =>
+										update({ ...formData, audiodb_enabled: event.target.checked })
+									}
+								/>
+							</label>
+						</div>
+						{formData.audiodb_enabled !== false && (
+							<label className="mt-4 block max-w-xl">
+								<span className="font-bold text-base-content/65 text-xs">
+									TheAudioDB API Key <span className="font-normal opacity-70">(optional)</span>
+								</span>
+								<input
+									type="password"
+									className="input input-bordered input-sm mt-1.5 w-full bg-base-100"
+									placeholder={
+										formData.audiodb_api_key_set
+											? "Saved - leave blank to keep"
+											: "Optional - public access is used automatically"
+									}
+									value={formData.audiodb_api_key ?? ""}
+									disabled={isReadOnly}
+									onChange={(event) => update({ ...formData, audiodb_api_key: event.target.value })}
+								/>
+								<span className="mt-1.5 block text-[11px] text-base-content/45">
+									No account or key is required for the built-in public lookup.
+								</span>
+							</label>
+						)}
+					</div>
+				)}
 
 				<div className="space-y-3">
 					{categoriesForTab.length === 0 && (

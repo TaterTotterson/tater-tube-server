@@ -343,6 +343,144 @@ func TestTaterAlbumMetadataScraperUsesExactArtistSearchWhenReleaseIsMissing(t *t
 	}
 }
 
+func TestTaterAlbumMetadataScraperUsesAudioDBAfterMusicBrainz(t *testing.T) {
+	oldMusicBrainzURL := taterMusicBrainzBaseURL
+	oldCoverArtURL := taterCoverArtArchiveBaseURL
+	oldAudioDBURL := taterAudioDBBaseURL
+	oldClient := taterMusicArtworkHTTPClient
+	oldMusicBrainzPacing := taterMusicBrainzRequestPacing
+	oldAudioDBPacing := taterAudioDBRequestPacing
+	t.Cleanup(func() {
+		taterMusicBrainzBaseURL = oldMusicBrainzURL
+		taterCoverArtArchiveBaseURL = oldCoverArtURL
+		taterAudioDBBaseURL = oldAudioDBURL
+		taterMusicArtworkHTTPClient = oldClient
+		taterMusicBrainzRequestPacing = oldMusicBrainzPacing
+		taterAudioDBRequestPacing = oldAudioDBPacing
+		taterMusicBrainzPacer.Lock()
+		taterMusicBrainzPacer.LastRequest = time.Time{}
+		taterMusicBrainzPacer.Unlock()
+		taterAudioDBPacer.Lock()
+		taterAudioDBPacer.LastRequest = time.Time{}
+		taterAudioDBPacer.Unlock()
+	})
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/ws/2/release-group/":
+			_, _ = response.Write([]byte(`{"release-groups":[{"id":"release-group-1","title":"Island Album","score":100,"artist-credit":[{"name":"Island Artist","artist":{"id":"artist-1","name":"Island Artist"}}]}]}`))
+		case "/ws/2/release-group/release-group-1":
+			_, _ = response.Write([]byte(`{"id":"release-group-1","genres":[]}`))
+		case "/release-group/release-group-1":
+			http.NotFound(response, request)
+		case "/audiodb/test-key/album-mb.php":
+			if request.URL.Query().Get("i") != "release-group-1" {
+				http.Error(response, "unexpected TheAudioDB release ID", http.StatusBadRequest)
+				return
+			}
+			_, _ = response.Write([]byte(fmt.Sprintf(`{"album":[{"idAlbum":"1","strAlbum":"Island Album","strArtist":"Island Artist","strGenre":"Reggae","strStyle":"Dub / Pop","strAlbumThumb":%q,"strMusicBrainzID":"release-group-1"}]}`, server.URL+"/audiodb-cover.jpg")))
+		case "/audiodb-cover.jpg":
+			response.Header().Set("Content-Type", "image/jpeg")
+			_, _ = response.Write([]byte("\xff\xd8audiodb-cover\xff\xd9"))
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	taterMusicBrainzBaseURL = server.URL + "/ws/2"
+	taterCoverArtArchiveBaseURL = server.URL
+	taterAudioDBBaseURL = server.URL + "/audiodb"
+	taterMusicArtworkHTTPClient = server.Client()
+	taterMusicBrainzRequestPacing = 0
+	taterAudioDBRequestPacing = 0
+	enabled := true
+	cfg := &config.Config{
+		Metadata: config.MetadataConfig{RootPath: t.TempDir()},
+		LocalMedia: config.LocalMediaConfig{
+			AudioDBEnabled: &enabled,
+			AudioDBAPIKey:  "test-key",
+		},
+	}
+	index := taterLocalLibraryIndex{
+		Categories: []taterLocalLibraryCategoryIndex{{ID: "music", LibraryType: "music"}},
+		Albums: []taterLocalMusicAlbumIndex{{
+			ID: "album:audiodb", CategoryID: "music", Title: "Island Album", Artist: "Island Artist",
+		}},
+	}
+
+	if err := refreshTaterAlbumArtwork(context.Background(), cfg, &index, &index.Albums[0], false); err != nil {
+		t.Fatal(err)
+	}
+	album := index.Albums[0]
+	if !album.HasArtwork || album.MusicBrainzID != "release-group-1" {
+		t.Fatalf("unexpected TheAudioDB artwork result: %#v", album)
+	}
+	if got := strings.Join(album.Genres, "|"); got != "Reggae|Pop" {
+		t.Fatalf("unexpected TheAudioDB genres: %q", got)
+	}
+}
+
+func TestTaterAlbumMetadataScraperUsesExactArtistConsensusLast(t *testing.T) {
+	oldMusicBrainzURL := taterMusicBrainzBaseURL
+	oldClient := taterMusicArtworkHTTPClient
+	oldPacing := taterMusicBrainzRequestPacing
+	t.Cleanup(func() {
+		taterMusicBrainzBaseURL = oldMusicBrainzURL
+		taterMusicArtworkHTTPClient = oldClient
+		taterMusicBrainzRequestPacing = oldPacing
+		taterMusicBrainzPacer.Lock()
+		taterMusicBrainzPacer.LastRequest = time.Time{}
+		taterMusicBrainzPacer.Unlock()
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/ws/2/release-group/":
+			_, _ = response.Write([]byte(`{"release-groups":[]}`))
+		case "/ws/2/artist/":
+			_, _ = response.Write([]byte(`{"artists":[]}`))
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	taterMusicBrainzBaseURL = server.URL + "/ws/2"
+	taterMusicArtworkHTTPClient = server.Client()
+	taterMusicBrainzRequestPacing = 0
+	audioDBEnabled := false
+	cfg := &config.Config{
+		Metadata:   config.MetadataConfig{RootPath: t.TempDir()},
+		LocalMedia: config.LocalMediaConfig{AudioDBEnabled: &audioDBEnabled},
+	}
+	index := taterLocalLibraryIndex{Albums: []taterLocalMusicAlbumIndex{
+		{ID: "album:known", Title: "Known", Artist: "Roots Band", Genres: []string{"Roots Reggae"}, HasArtwork: true},
+		{ID: "album:missing", Title: "Missing", Artist: "Roots Band", HasArtwork: true},
+		{ID: "album:various-known", Title: "Compilation One", Artist: "Various Artists", Genres: []string{"Rock"}, HasArtwork: true},
+		{ID: "album:various-missing", Title: "Compilation Two", Artist: "Various Artists", HasArtwork: true},
+	}}
+	latest := taterMusicEnrichmentProgress{}
+	if err := scrapeTaterMissingAlbumArtwork(
+		context.Background(), cfg, &index,
+		func(progress taterMusicEnrichmentProgress) { latest = progress },
+	); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(index.Albums[1].Genres, "|"); got != "Reggae" {
+		t.Fatalf("same-artist broad genre was not applied: %q", got)
+	}
+	if len(index.Albums[3].Genres) != 0 {
+		t.Fatalf("generic compilation artist should not inherit genres: %#v", index.Albums[3].Genres)
+	}
+	if latest.AlbumsProcessed != 2 || latest.GenreMatches != 1 || latest.GenreUnmatched != 1 {
+		t.Fatalf("unexpected consensus progress: %#v", latest)
+	}
+}
+
 func TestTaterMusicSimplifiedAlbumTitleOnlyRemovesEditionSuffixes(t *testing.T) {
 	for input, expected := range map[string]string{
 		"World on Fire (Deluxe Version)": "World on Fire",
