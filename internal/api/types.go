@@ -169,8 +169,11 @@ type NewznabAPIResponse struct {
 
 // LocalMediaAPIResponse exposes server-local media categories for the config UI.
 type LocalMediaAPIResponse struct {
-	Enabled    bool                        `json:"enabled"`
-	Categories []config.LocalMediaCategory `json:"categories"`
+	Enabled          bool                        `json:"enabled"`
+	AudioDBEnabled   bool                        `json:"audiodb_enabled"`
+	AudioDBAPIKey    string                      `json:"audiodb_api_key"`
+	AudioDBAPIKeySet bool                        `json:"audiodb_api_key_set"`
+	Categories       []config.LocalMediaCategory `json:"categories"`
 }
 
 // Helper functions to create API responses from core config types
@@ -299,8 +302,13 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		newznabResp.APIKey = "********"
 	}
 	localMediaResp := LocalMediaAPIResponse{
-		Enabled:    cfg.LocalMedia.Enabled != nil && *cfg.LocalMedia.Enabled,
-		Categories: cfg.LocalMedia.Categories,
+		Enabled:          cfg.LocalMedia.Enabled != nil && *cfg.LocalMedia.Enabled,
+		AudioDBEnabled:   cfg.LocalMedia.AudioDBEnabled == nil || *cfg.LocalMedia.AudioDBEnabled,
+		AudioDBAPIKeySet: strings.TrimSpace(cfg.LocalMedia.AudioDBAPIKey) != "",
+		Categories:       cfg.LocalMedia.Categories,
+	}
+	if localMediaResp.AudioDBAPIKeySet {
+		localMediaResp.AudioDBAPIKey = "********"
 	}
 	if localMediaResp.Categories == nil {
 		localMediaResp.Categories = []config.LocalMediaCategory{}

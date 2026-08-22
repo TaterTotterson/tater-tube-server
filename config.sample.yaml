@@ -47,6 +47,10 @@ newznab:
 
 local_media:
   enabled: false
+  # Enrich confidently identified MusicBrainz releases with TheAudioDB genre/style data.
+  # Public API access is used when no key is supplied; a personal key can improve access.
+  audiodb_enabled: true
+  audiodb_api_key: ''
   categories: []
   # library_type can be:
   # - movies: recursively scans video files and shows clean movie titles
