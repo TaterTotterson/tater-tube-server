@@ -124,6 +124,8 @@ type taterLocalLibraryScanStatus struct {
 	FilesScanned    int       `json:"files_scanned"`
 	AlbumsProcessed int       `json:"albums_processed"`
 	ArtworkFound    int       `json:"artwork_found"`
+	GenreMatches    int       `json:"genre_matches"`
+	GenreUnmatched  int       `json:"genre_unmatched"`
 	Error           string    `json:"error,omitempty"`
 }
 
@@ -867,11 +869,13 @@ func (s *Server) handleLocalMediaScan(c *fiber.Ctx) error {
 				status.Phase = "artwork"
 				status.Message = "Finding album artwork and genres"
 			})
-			err = scrapeTaterMissingAlbumArtwork(context.Background(), cfg, &index, func(processed, found int, message string) {
+			err = scrapeTaterMissingAlbumArtwork(context.Background(), cfg, &index, func(progress taterMusicEnrichmentProgress) {
 				updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
-					status.AlbumsProcessed = processed
-					status.ArtworkFound = found
-					status.Message = message
+					status.AlbumsProcessed = progress.AlbumsProcessed
+					status.ArtworkFound = progress.ArtworkFound
+					status.GenreMatches = progress.GenreMatches
+					status.GenreUnmatched = progress.GenreUnmatched
+					status.Message = progress.Message
 				})
 			})
 		}
@@ -890,7 +894,15 @@ func (s *Server) handleLocalMediaScan(c *fiber.Ctx) error {
 			} else {
 				status.Phase = "complete"
 				status.FilesScanned = len(index.Files)
-				status.Message = "Local media library is up to date"
+				if status.AlbumsProcessed > 0 {
+					status.Message = fmt.Sprintf(
+						"Library updated: %d genre matches, %d albums still unmatched",
+						status.GenreMatches,
+						status.GenreUnmatched,
+					)
+				} else {
+					status.Message = "Local media library is up to date"
+				}
 			}
 		})
 		if err != nil {
