@@ -44,10 +44,17 @@ func (s *Server) handleTaterPlayStateContinue(c *fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
-
-	store, err := loadTaterPlayStateStore(cfg)
+	rows, err := taterContinueWatchingItems(cfg, resolveBaseURL(c, ""), playerToken)
 	if err != nil {
 		return RespondServiceUnavailable(c, "Failed to load play state", err.Error())
+	}
+	return RespondSuccess(c, fiber.Map{"items": rows})
+}
+
+func taterContinueWatchingItems(cfg *config.Config, baseURL, playerToken string) ([]taterUsenetItem, error) {
+	store, err := loadTaterPlayStateStore(cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	collapsed := make(map[string]taterPlayState)
@@ -75,7 +82,7 @@ func (s *Server) handleTaterPlayStateContinue(c *fiber.Ctx) error {
 
 	rows := make([]taterUsenetItem, 0, len(states))
 	for _, state := range states {
-		row := taterPlayStateToItem(state, resolveBaseURL(c, ""), playerToken)
+		row := taterPlayStateToItem(state, baseURL, playerToken)
 		if row.PlayStateID != "" {
 			rows = append(rows, row)
 		}
@@ -84,7 +91,7 @@ func (s *Server) handleTaterPlayStateContinue(c *fiber.Ctx) error {
 		rows[i].Index = i + 1
 	}
 
-	return RespondSuccess(c, fiber.Map{"items": rows})
+	return rows, nil
 }
 
 func (s *Server) handleTaterPlayStateSave(c *fiber.Ctx) error {
