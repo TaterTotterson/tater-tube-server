@@ -23,6 +23,8 @@ func (s *Server) handleTaterServerInfo(c *fiber.Ctx) error {
 		"modules":     []string{"usenet_streaming"},
 		"stream_path": "/api/files/stream",
 		"endpoints": map[string]string{
+			"player_home":          "/api/v1/player/home",
+			"player_local_artwork": "/api/v1/player/artwork/local",
 			"server":               "/api/tater/server",
 			"players":              "/api/tater/players",
 			"player_pair":          "/api/tater/players/pair",
