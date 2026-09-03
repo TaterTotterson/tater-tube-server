@@ -151,3 +151,15 @@ func TestTaterPlayerHomeProgramReportsCurrentProgress(t *testing.T) {
 	require.Equal(t, startedAt.Add(100*time.Second), program.StartsAt)
 	require.True(t, strings.EqualFold("episode", program.Kind))
 }
+
+func TestTaterPlayerHomeChannelsNeverWaitsForGuideRefresh(t *testing.T) {
+	taterTVResetGuide()
+	taterTVGuideMu.Lock()
+	started := time.Now()
+	_, err := taterPlayerHomeChannels(&config.Config{}, "http://server", "token", started)
+	elapsed := time.Since(started)
+	taterTVGuideMu.Unlock()
+
+	require.Error(t, err)
+	require.Less(t, elapsed, 100*time.Millisecond)
+}

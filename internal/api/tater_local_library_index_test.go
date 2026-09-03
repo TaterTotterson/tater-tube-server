@@ -51,6 +51,12 @@ func TestTaterLocalLibraryIndexBuildsStatsArtworkAndReusesUnchangedMusicMetadata
 	}
 	probeScript := fmt.Sprintf(`#!/bin/sh
 printf x >> %q
+case "$*" in
+  *default=noprint_wrappers*)
+    printf '5400.000\n'
+    exit 0
+    ;;
+esac
 cat <<'EOF'
 {"format":{"duration":"180","tags":{"title":"Three Little Birds","artist":"Bob Marley & The Wailers","album_artist":"Bob Marley & The Wailers","album":"Exodus","genre":"Reggae","track":"9","date":"1977"}},"streams":[]}
 EOF
@@ -97,9 +103,20 @@ EOF
 	if statsByID["music"].Artists != 1 || statsByID["music"].Albums != 1 || statsByID["music"].Songs != 1 || statsByID["music"].Artwork != 1 {
 		t.Fatalf("unexpected music stats: %#v", statsByID["music"])
 	}
+	for _, file := range first.Files {
+		if file.LibraryType != "music" && file.DurationSeconds != 5400 {
+			t.Fatalf("expected indexed video duration, got %#v", file)
+		}
+	}
 	countBefore, err := os.ReadFile(probeCount)
-	if err != nil || len(countBefore) != 1 {
-		t.Fatalf("expected one ffprobe call, count=%q error=%v", countBefore, err)
+	if err != nil || len(countBefore) != 3 {
+		t.Fatalf("expected three ffprobe calls, count=%q error=%v", countBefore, err)
+	}
+	for i := range first.Files {
+		if first.Files[i].LibraryType != "music" {
+			first.Files[i].DurationSeconds = 0
+			break
+		}
 	}
 
 	taterLocalMusicMetadataCache.Lock()
@@ -110,8 +127,13 @@ EOF
 		t.Fatal(err)
 	}
 	countAfter, err := os.ReadFile(probeCount)
-	if err != nil || len(countAfter) != 1 {
-		t.Fatalf("unchanged track should reuse persistent metadata, count=%q error=%v", countAfter, err)
+	if err != nil || len(countAfter) != 4 {
+		t.Fatalf("missing video duration should be backfilled without re-probing other media, count=%q error=%v", countAfter, err)
+	}
+	for _, file := range second.Files {
+		if file.LibraryType != "music" && file.DurationSeconds != 5400 {
+			t.Fatalf("expected indexed video duration after backfill, got %#v", file)
+		}
 	}
 	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), second); err != nil {
 		t.Fatal(err)

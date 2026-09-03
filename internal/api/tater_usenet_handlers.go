@@ -1309,7 +1309,16 @@ func taterIndexedLocalVideoItem(cfg *config.Config, cat config.LocalMediaCategor
 	} else {
 		item.SizeText = localMovieDetail(year)
 	}
-	attachTaterDuration(&item, file.DurationSeconds)
+	durationSeconds := file.DurationSeconds
+	if durationSeconds <= 0 {
+		paths := taterLocalMediaCategoryPaths(cat)
+		if file.SourceIndex >= 0 && file.SourceIndex < len(paths) {
+			if path, err := safeLocalPath(paths[file.SourceIndex], rel); err == nil {
+				durationSeconds = taterLocalDurationSeconds(cfg, path)
+			}
+		}
+	}
+	attachTaterDuration(&item, durationSeconds)
 	return item
 }
 

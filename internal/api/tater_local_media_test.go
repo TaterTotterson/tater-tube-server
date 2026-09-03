@@ -1327,6 +1327,127 @@ func TestTaterTVGuideBuildsAndExtendsSharedSchedule(t *testing.T) {
 	}
 }
 
+func TestTaterTVGuideUsesDurationMissingFromOlderLibraryIndex(t *testing.T) {
+	taterTVResetGuide()
+	defer taterTVResetGuide()
+
+	configDir := t.TempDir()
+	mediaRoot := filepath.Join(configDir, "movies")
+	moviePath := filepath.Join(mediaRoot, "Indexed.Movie.2026.mkv")
+	if err := os.MkdirAll(mediaRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(moviePath, []byte("movie"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig(configDir)
+	cfg.Transcoding.FFmpegPath = fakeFFmpegWithProbe(t, configDir, "#!/bin/sh\nprintf '7200.000\\n'\n")
+	cfg.LocalMedia.Enabled = boolPtr(true)
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID:          "movies",
+		Name:        "Movies",
+		LibraryType: "movies",
+		Paths:       []string{mediaRoot},
+		Enabled:     boolPtr(true),
+	}}
+
+	info, err := os.Stat(moviePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := taterLocalLibraryIndex{
+		Schema:            taterLocalLibraryIndexSchema,
+		ConfigFingerprint: taterLocalLibraryFingerprint(cfg),
+		GeneratedAt:       time.Now().UTC(),
+		Files: []taterLocalLibraryFileIndex{{
+			Key:              taterLocalLibraryFileKey("movies", 0, "Indexed.Movie.2026.mkv"),
+			CategoryID:       "movies",
+			LibraryType:      "movies",
+			SourceIndex:      0,
+			Path:             "Indexed.Movie.2026.mkv",
+			SizeBytes:        info.Size(),
+			ModifiedUnix:     info.ModTime().Unix(),
+			ModifiedUnixNano: info.ModTime().UnixNano(),
+		}},
+	}
+	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), index); err != nil {
+		t.Fatal(err)
+	}
+
+	channels, err := taterBuildTVLineup(cfg, "http://server", "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(channels) == 0 || channels[0].TotalDuration < taterTVGuideHorizon.Seconds() {
+		t.Fatalf("expected indexed media to build a complete guide, got %#v", channels)
+	}
+}
+
+func TestTaterTVGuideKeepsLastChannelsWhenRefreshFindsNoMedia(t *testing.T) {
+	taterTVResetGuide()
+
+	configDir := t.TempDir()
+	mediaRoot := filepath.Join(configDir, "movies")
+	moviePath := filepath.Join(mediaRoot, "Reliable.Movie.2026.mkv")
+	if err := os.MkdirAll(mediaRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(moviePath, []byte("movie"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig(configDir)
+	cfg.Transcoding.FFmpegPath = fakeFFmpegWithProbe(t, configDir, "#!/bin/sh\nprintf '7200.000\\n'\n")
+	cfg.LocalMedia.Enabled = boolPtr(true)
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID:          "movies",
+		Name:        "Movies",
+		LibraryType: "movies",
+		Paths:       []string{mediaRoot},
+		Enabled:     boolPtr(true),
+	}}
+	defer taterTVResetGuideForConfig(cfg)
+
+	now := time.Now().Truncate(time.Second)
+	guide, err := taterTVEnsureGuide(cfg, "http://server", now)
+	if err != nil || len(guide.Channels) == 0 {
+		t.Fatalf("expected initial guide, got %#v error=%v", guide, err)
+	}
+	if err := os.RemoveAll(mediaRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	taterTVGuideMu.Lock()
+	taterTVGuideCache.PlannedUntil = now.Add(time.Hour)
+	taterTVGuideCache.UpdatedAt = now.Add(-taterTVGuideRetryInterval)
+	taterTVGuideMu.Unlock()
+
+	refreshed, err := taterTVEnsureGuide(cfg, "http://server", now.Add(2*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refreshed.Channels) != len(guide.Channels) || refreshed.Channels[0].Title != guide.Channels[0].Title {
+		t.Fatalf("expected last valid guide to survive an empty refresh, got %#v", refreshed.Channels)
+	}
+}
+
+func TestTaterTVEmptyGuideRetriesOnPlannerInterval(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	entry := &taterTVGuideCacheEntry{
+		Channels:     []taterTVChannel{},
+		StartedAt:    now,
+		UpdatedAt:    now,
+		PlannedUntil: now,
+	}
+	if taterTVGuideNeedsRefresh(entry, now.Add(time.Minute)) {
+		t.Fatal("empty guide should not be rebuilt for every player request")
+	}
+	if !taterTVGuideNeedsRefresh(entry, now.Add(taterTVGuideRetryInterval)) {
+		t.Fatal("empty guide should be retried by the automatic planner")
+	}
+}
+
 func TestTaterTVGuideCapsLargeSeriesWhileBuilding(t *testing.T) {
 	cfg := config.DefaultConfig(t.TempDir())
 	episodes := make([]taterUsenetItem, 5000)

@@ -125,6 +125,7 @@ const (
 	taterTVGuideHorizon         = 12 * time.Hour
 	taterTVGuideRefillThreshold = 2 * time.Hour
 	taterTVGuidePlannerInterval = 5 * time.Minute
+	taterTVGuideRetryInterval   = 5 * time.Minute
 	taterTVGuideCacheVersion    = 6
 	taterTVGuideCacheFile       = "tube-tv-guide-cache.json"
 )
@@ -1468,12 +1469,14 @@ func taterTVEnsureGuide(cfg *config.Config, baseURL string, now time.Time) (tate
 				"planned_until", cached.PlannedUntil)
 		}
 	}
-	if taterTVGuideCache == nil || taterTVGuideCache.StartedAt.IsZero() || now.After(taterTVGuideCache.PlannedUntil.Add(-taterTVGuideRefillThreshold)) {
+	if taterTVGuideNeedsRefresh(taterTVGuideCache, now) {
 		targetEndSeconds := taterTVGuideHorizon.Seconds()
 		var existing []taterTVChannel
 		startedAt := now.Truncate(time.Second)
 		generatedAt := now
-		if taterTVGuideCache != nil && !taterTVGuideCache.StartedAt.IsZero() {
+		hasUsableGuide := taterTVGuideCache != nil &&
+			!taterTVGuideCache.StartedAt.IsZero() && len(taterTVGuideCache.Channels) > 0
+		if hasUsableGuide {
 			startedAt = taterTVGuideCache.StartedAt
 			generatedAt = taterTVGuideCache.GeneratedAt
 			existing = taterTVGuideCache.Channels
@@ -1482,7 +1485,19 @@ func taterTVEnsureGuide(cfg *config.Config, baseURL string, now time.Time) (tate
 		}
 		channels, err := taterBuildTVLineupUntil(cfg, baseURL, "", targetEndSeconds, existing)
 		if err != nil {
+			if hasUsableGuide {
+				taterTVGuideCache.UpdatedAt = now
+				taterTVSaveGuideCache(cfg, *taterTVGuideCache)
+				slog.Warn("Keeping the last Tube TV guide after a refresh failure", "error", err)
+				return taterTVCloneGuide(*taterTVGuideCache), nil
+			}
 			return taterTVGuideCacheEntry{}, err
+		}
+		if len(channels) == 0 && hasUsableGuide {
+			taterTVGuideCache.UpdatedAt = now
+			taterTVSaveGuideCache(cfg, *taterTVGuideCache)
+			slog.Warn("Keeping the last Tube TV guide because a refresh produced no channels")
+			return taterTVCloneGuide(*taterTVGuideCache), nil
 		}
 		plannedUntil := startedAt
 		if len(channels) > 0 {
@@ -1505,8 +1520,49 @@ func taterTVEnsureGuide(cfg *config.Config, baseURL string, now time.Time) (tate
 		entry = taterTVSanitizeGuide(entry)
 		taterTVGuideCache = &entry
 		taterTVSaveGuideCache(cfg, entry)
+		if len(entry.Channels) == 0 {
+			slog.Warn("Tube TV guide refresh produced no channels; the planner will retry", "retry_in", taterTVGuideRetryInterval)
+		}
 	}
 	return taterTVCloneGuide(*taterTVGuideCache), nil
+}
+
+func taterTVGuideNeedsRefresh(entry *taterTVGuideCacheEntry, now time.Time) bool {
+	if entry == nil || entry.StartedAt.IsZero() {
+		return true
+	}
+	if !entry.UpdatedAt.IsZero() && now.Before(entry.UpdatedAt.Add(taterTVGuideRetryInterval)) {
+		return false
+	}
+	if len(entry.Channels) == 0 || entry.PlannedUntil.IsZero() {
+		return true
+	}
+	return now.After(entry.PlannedUntil.Add(-taterTVGuideRefillThreshold))
+}
+
+// taterTVCachedGuide returns the last guide immediately. Player home uses this
+// path so a library scan or guide refresh can never hold up the whole home page.
+func taterTVCachedGuide(cfg *config.Config) (taterTVGuideCacheEntry, bool) {
+	if !taterTVGuideMu.TryLock() {
+		return taterTVGuideCacheEntry{}, false
+	}
+	defer taterTVGuideMu.Unlock()
+
+	fingerprint := taterTVGuideFingerprint(cfg)
+	if taterTVGuideCache != nil && taterTVGuideCache.Fingerprint != "" && taterTVGuideCache.Fingerprint != fingerprint {
+		return taterTVGuideCacheEntry{}, false
+	}
+	if taterTVGuideCache == nil {
+		cached, ok := taterTVLoadGuideCache(cfg, fingerprint)
+		if !ok {
+			return taterTVGuideCacheEntry{}, false
+		}
+		taterTVGuideCache = cached
+	}
+	if len(taterTVGuideCache.Channels) == 0 {
+		return taterTVGuideCacheEntry{}, false
+	}
+	return taterTVCloneGuide(*taterTVGuideCache), true
 }
 
 func taterTVResetGuide() {
