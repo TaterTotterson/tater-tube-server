@@ -842,6 +842,19 @@ func taterLocalDiscoverLibraryItems(cfg *config.Config, baseURL, playerToken str
 }
 
 func taterLocalDiscoverVideoItems(cfg *config.Config, cat config.LocalMediaCategory, paths []string, baseURL, playerToken, mediaType string) ([]taterUsenetItem, error) {
+	if files, ok := taterIndexedLocalFiles(cfg, cat, -1); ok {
+		items := make([]taterUsenetItem, 0, len(files))
+		for _, file := range files {
+			items = append(items, taterIndexedLocalVideoItem(
+				cfg, cat, file, baseURL, playerToken, mediaType,
+			))
+		}
+		sort.SliceStable(items, func(i, j int) bool {
+			return strings.ToLower(items[i].Title) < strings.ToLower(items[j].Title)
+		})
+		return items, nil
+	}
+
 	items := []taterUsenetItem{}
 	for sourceIndex, root := range paths {
 		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
@@ -1298,6 +1311,8 @@ func taterIndexedLocalVideoItem(cfg *config.Config, cat config.LocalMediaCategor
 		StreamURL:     taterLocalStreamURL(baseURL, cat.ID, file.SourceIndex, rel, playerToken),
 		SeekMode:      taterLocalSeekMode(cfg, filepath.Ext(rel)),
 		Date:          year,
+		Category:      strings.Join(file.Genres, ", "),
+		Genres:        append([]string(nil), file.Genres...),
 		SizeBytes:     file.SizeBytes,
 		ModifiedUnix:  file.ModifiedUnix,
 		PlayStateID:   taterLocalPlayStateID(cat.ID, file.SourceIndex, rel),

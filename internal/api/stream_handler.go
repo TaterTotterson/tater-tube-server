@@ -602,9 +602,9 @@ func (h *StreamHandler) serveAudioOnlyVideoTranscoded(
 	cmd.Stderr = &stderr
 	cmd.Stdout = flushWriter{w: w}
 
-	w.Header().Set("Content-Type", "video/mp2t")
+	w.Header().Set("Content-Type", "video/x-matroska")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Disposition", `inline; filename="`+filepath.Base(path)+`.audio-aac.ts"`)
+	w.Header().Set("Content-Disposition", `inline; filename="`+filepath.Base(path)+`.audio-aac.mkv"`)
 	w.Header().Set("X-Tater-Transcode-Profile", audioOnlyProfileID)
 	w.Header().Set("X-Tater-Video-Mode", "direct")
 	w.Header().Set("X-Tater-Audio-Mode", "transcode")
@@ -905,9 +905,7 @@ func buildFFmpegAudioOnlyVideoArgs(audioBitrate, inputPath string, startSeconds 
 		"-ac", "2",
 		"-ar", "48000",
 		"-fflags", "+genpts",
-		"-muxdelay", "0",
-		"-muxpreload", "0",
-		"-f", "mpegts",
+		"-f", "matroska",
 		"pipe:1",
 	)
 	return args
