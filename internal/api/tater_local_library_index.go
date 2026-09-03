@@ -422,6 +422,11 @@ func scanTaterLocalLibrary(
 						file.HasEmbeddedArtwork = metadata.HasArtwork
 					}
 				}
+				if category.LibraryType != "music" && file.DurationSeconds <= 0 {
+					// Video durations were absent from older index files. Backfill them
+					// even when the media itself has not changed.
+					file.DurationSeconds = probeMediaDurationSeconds(ctx, cfg.Transcoding.FFmpegPath, path)
+				}
 				index.Files = append(index.Files, file)
 				filesScanned++
 				if progress != nil && filesScanned%25 == 0 {

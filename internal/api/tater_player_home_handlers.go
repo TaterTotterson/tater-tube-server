@@ -135,9 +135,9 @@ func limitTaterPlayerHomeItems(items []taterUsenetItem) []taterUsenetItem {
 }
 
 func taterPlayerHomeChannels(cfg *config.Config, baseURL, playerToken string, now time.Time) ([]taterPlayerHomeChannel, error) {
-	guide, err := taterTVEnsureGuide(cfg, baseURL, now)
-	if err != nil {
-		return nil, err
+	guide, ok := taterTVCachedGuide(cfg)
+	if !ok {
+		return nil, fmt.Errorf("tube TV guide is being prepared")
 	}
 	elapsed := now.Sub(guide.StartedAt).Seconds()
 	channels := make([]taterPlayerHomeChannel, 0, len(guide.Channels))
