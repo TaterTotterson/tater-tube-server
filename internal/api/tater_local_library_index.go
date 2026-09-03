@@ -91,12 +91,13 @@ type taterLocalMusicAlbumIndex struct {
 }
 
 type taterLocalLibraryIndex struct {
-	Schema            int                              `json:"schema"`
-	ConfigFingerprint string                           `json:"config_fingerprint"`
-	GeneratedAt       time.Time                        `json:"generated_at"`
-	Categories        []taterLocalLibraryCategoryIndex `json:"categories"`
-	Albums            []taterLocalMusicAlbumIndex      `json:"albums"`
-	Files             []taterLocalLibraryFileIndex     `json:"files"`
+	Schema                int                              `json:"schema"`
+	ConfigFingerprint     string                           `json:"config_fingerprint"`
+	GeneratedAt           time.Time                        `json:"generated_at"`
+	VideoDurationsScanned bool                             `json:"video_durations_scanned,omitempty"`
+	Categories            []taterLocalLibraryCategoryIndex `json:"categories"`
+	Albums                []taterLocalMusicAlbumIndex      `json:"albums"`
+	Files                 []taterLocalLibraryFileIndex     `json:"files"`
 }
 
 type taterMusicArtworkOverride struct {
@@ -131,6 +132,16 @@ type taterLocalLibraryScanStatus struct {
 
 type taterLocalLibraryScanRequest struct {
 	ScrapeMissingArtwork bool `json:"scrape_missing_artwork"`
+}
+
+type taterLocalDurationProbeJob struct {
+	FileIndex int
+	Path      string
+}
+
+type taterLocalDurationProbeResult struct {
+	FileIndex       int
+	DurationSeconds float64
 }
 
 type taterLocalMusicArtworkRequest struct {
@@ -327,12 +338,13 @@ func scanTaterLocalLibrary(
 	progress func(files int, message string),
 ) (taterLocalLibraryIndex, error) {
 	index := taterLocalLibraryIndex{
-		Schema:            taterLocalLibraryIndexSchema,
-		ConfigFingerprint: taterLocalLibraryFingerprint(cfg),
-		GeneratedAt:       time.Now().UTC(),
-		Categories:        []taterLocalLibraryCategoryIndex{},
-		Albums:            []taterLocalMusicAlbumIndex{},
-		Files:             []taterLocalLibraryFileIndex{},
+		Schema:                taterLocalLibraryIndexSchema,
+		ConfigFingerprint:     taterLocalLibraryFingerprint(cfg),
+		GeneratedAt:           time.Now().UTC(),
+		VideoDurationsScanned: true,
+		Categories:            []taterLocalLibraryCategoryIndex{},
+		Albums:                []taterLocalMusicAlbumIndex{},
+		Files:                 []taterLocalLibraryFileIndex{},
 	}
 	if cfg == nil {
 		return index, fmt.Errorf("configuration is unavailable")
@@ -342,6 +354,7 @@ func scanTaterLocalLibrary(
 		previousFiles[file.Key] = file
 	}
 	filesScanned := 0
+	durationJobs := []taterLocalDurationProbeJob{}
 	for _, cat := range cfg.LocalMedia.Categories {
 		if err := ctx.Err(); err != nil {
 			return index, err
@@ -422,12 +435,13 @@ func scanTaterLocalLibrary(
 						file.HasEmbeddedArtwork = metadata.HasArtwork
 					}
 				}
-				if category.LibraryType != "music" && file.DurationSeconds <= 0 {
-					// Video durations were absent from older index files. Backfill them
-					// even when the media itself has not changed.
-					file.DurationSeconds = probeMediaDurationSeconds(ctx, cfg.Transcoding.FFmpegPath, path)
-				}
 				index.Files = append(index.Files, file)
+				if category.LibraryType != "music" && file.DurationSeconds <= 0 {
+					durationJobs = append(durationJobs, taterLocalDurationProbeJob{
+						FileIndex: len(index.Files) - 1,
+						Path:      path,
+					})
+				}
 				filesScanned++
 				if progress != nil && filesScanned%25 == 0 {
 					progress(filesScanned, "Scanning "+category.Name)
@@ -440,6 +454,11 @@ func scanTaterLocalLibrary(
 		}
 		index.Categories = append(index.Categories, category)
 	}
+	if err := probeTaterLocalLibraryDurations(
+		ctx, cfg, &index, durationJobs, filesScanned, progress,
+	); err != nil {
+		return index, err
+	}
 	buildTaterLocalLibraryStats(cfg, &index)
 	sort.SliceStable(index.Categories, func(i, j int) bool {
 		if index.Categories[i].LibraryType != index.Categories[j].LibraryType {
@@ -448,6 +467,68 @@ func scanTaterLocalLibrary(
 		return strings.ToLower(index.Categories[i].Name) < strings.ToLower(index.Categories[j].Name)
 	})
 	return index, nil
+}
+
+func probeTaterLocalLibraryDurations(
+	ctx context.Context,
+	cfg *config.Config,
+	index *taterLocalLibraryIndex,
+	jobs []taterLocalDurationProbeJob,
+	filesScanned int,
+	progress func(files int, message string),
+) error {
+	if len(jobs) == 0 || index == nil {
+		return ctx.Err()
+	}
+
+	workerCount := min(4, len(jobs))
+	jobQueue := make(chan taterLocalDurationProbeJob)
+	results := make(chan taterLocalDurationProbeResult)
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer workers.Done()
+			for job := range jobQueue {
+				duration := probeMediaDurationSeconds(ctx, cfg.Transcoding.FFmpegPath, job.Path)
+				select {
+				case results <- taterLocalDurationProbeResult{
+					FileIndex: job.FileIndex, DurationSeconds: duration,
+				}:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+	go func() {
+		defer close(jobQueue)
+		for _, job := range jobs {
+			select {
+			case jobQueue <- job:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	go func() {
+		workers.Wait()
+		close(results)
+	}()
+
+	completed := 0
+	for result := range results {
+		if result.FileIndex >= 0 && result.FileIndex < len(index.Files) {
+			index.Files[result.FileIndex].DurationSeconds = result.DurationSeconds
+		}
+		completed++
+		if progress != nil && (completed%10 == 0 || completed == len(jobs)) {
+			progress(filesScanned, fmt.Sprintf(
+				"Reading video durations (%d/%d)", completed, len(jobs),
+			))
+		}
+	}
+	return ctx.Err()
 }
 
 func buildTaterLocalLibraryStats(cfg *config.Config, index *taterLocalLibraryIndex) {
@@ -840,6 +921,101 @@ func (s *Server) handleLocalMediaScanStatus(c *fiber.Ctx) error {
 	return RespondSuccess(c, getTaterLocalLibraryScanStatus(s.configManager.GetConfig()))
 }
 
+func taterLocalLibraryIndexNeedsMaintenance(cfg *config.Config) (bool, string) {
+	if !taterLocalMediaEnabled(cfg) {
+		return false, ""
+	}
+	index, err := readTaterLocalLibraryIndex(cfg)
+	if err != nil {
+		return true, "Building the local media index"
+	}
+	if index.ConfigFingerprint != taterLocalLibraryFingerprint(cfg) {
+		return true, "Updating the local media index"
+	}
+	if !index.VideoDurationsScanned {
+		return true, "Backfilling video durations"
+	}
+	return false, ""
+}
+
+func beginTaterLocalLibraryScan(cfg *config.Config, message string) bool {
+	key := taterLocalLibraryScanKey(cfg)
+	taterLocalLibraryScans.Lock()
+	defer taterLocalLibraryScans.Unlock()
+	if taterLocalLibraryScans.Items[key].Running {
+		return false
+	}
+	if strings.TrimSpace(message) == "" {
+		message = "Starting local media scan"
+	}
+	taterLocalLibraryScans.Items[key] = taterLocalLibraryScanStatus{
+		Running: true, Phase: "scanning", Message: message,
+		StartedAt: time.Now().UTC(),
+	}
+	return true
+}
+
+func runTaterLocalLibraryScan(
+	cfg *config.Config,
+	request taterLocalLibraryScanRequest,
+) (taterLocalLibraryIndex, error) {
+	previous, _ := readTaterLocalLibraryIndex(cfg)
+	index, err := scanTaterLocalLibrary(context.Background(), cfg, previous, func(files int, message string) {
+		updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
+			status.FilesScanned = files
+			status.Message = message
+			if strings.HasPrefix(message, "Reading video durations") {
+				status.Phase = "durations"
+			}
+		})
+	})
+	if err == nil && request.ScrapeMissingArtwork {
+		updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
+			status.Phase = "artwork"
+			status.Message = "Finding album artwork and genres"
+		})
+		err = scrapeTaterMissingAlbumArtwork(context.Background(), cfg, &index, func(progress taterMusicEnrichmentProgress) {
+			updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
+				status.AlbumsProcessed = progress.AlbumsProcessed
+				status.ArtworkFound = progress.ArtworkFound
+				status.GenreMatches = progress.GenreMatches
+				status.GenreUnmatched = progress.GenreUnmatched
+				status.Message = progress.Message
+			})
+		})
+	}
+	if err == nil {
+		index.GeneratedAt = time.Now().UTC()
+		err = writeTaterJSON(taterLocalLibraryIndexPath(cfg), index)
+	}
+	finishedAt := time.Now().UTC()
+	updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
+		status.Running = false
+		status.FinishedAt = finishedAt
+		if err != nil {
+			status.Phase = "error"
+			status.Error = err.Error()
+			status.Message = "Local media scan failed"
+		} else {
+			status.Phase = "complete"
+			status.FilesScanned = len(index.Files)
+			if status.AlbumsProcessed > 0 {
+				status.Message = fmt.Sprintf(
+					"Library updated: %d genre matches, %d albums still unmatched",
+					status.GenreMatches,
+					status.GenreUnmatched,
+				)
+			} else {
+				status.Message = "Local media library is up to date"
+			}
+		}
+	})
+	if err != nil {
+		slog.Warn("Local media scan failed", "error", err)
+	}
+	return index, err
+}
+
 func (s *Server) handleLocalMediaScan(c *fiber.Ctx) error {
 	if s.configManager == nil || s.configManager.GetConfig() == nil {
 		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
@@ -851,67 +1027,16 @@ func (s *Server) handleLocalMediaScan(c *fiber.Ctx) error {
 		}
 	}
 	cfg := s.configManager.GetConfig().DeepCopy()
-	status := getTaterLocalLibraryScanStatus(cfg)
-	if status.Running {
+	if !beginTaterLocalLibraryScan(cfg, "Starting local media scan") {
+		status := getTaterLocalLibraryScanStatus(cfg)
 		return RespondConflict(c, "A local media scan is already running", status.Message)
 	}
-	updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
-		*status = taterLocalLibraryScanStatus{
-			Running: true, Phase: "scanning", Message: "Starting local media scan",
-			StartedAt: time.Now().UTC(),
-		}
-	})
 	go func() {
-		previous, _ := readTaterLocalLibraryIndex(cfg)
-		index, err := scanTaterLocalLibrary(context.Background(), cfg, previous, func(files int, message string) {
-			updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
-				status.FilesScanned = files
-				status.Message = message
-			})
-		})
-		if err == nil && request.ScrapeMissingArtwork {
-			updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
-				status.Phase = "artwork"
-				status.Message = "Finding album artwork and genres"
-			})
-			err = scrapeTaterMissingAlbumArtwork(context.Background(), cfg, &index, func(progress taterMusicEnrichmentProgress) {
-				updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
-					status.AlbumsProcessed = progress.AlbumsProcessed
-					status.ArtworkFound = progress.ArtworkFound
-					status.GenreMatches = progress.GenreMatches
-					status.GenreUnmatched = progress.GenreUnmatched
-					status.Message = progress.Message
-				})
-			})
-		}
-		if err == nil {
-			index.GeneratedAt = time.Now().UTC()
-			err = writeTaterJSON(taterLocalLibraryIndexPath(cfg), index)
-		}
-		finishedAt := time.Now().UTC()
-		updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
-			status.Running = false
-			status.FinishedAt = finishedAt
-			if err != nil {
-				status.Phase = "error"
-				status.Error = err.Error()
-				status.Message = "Local media scan failed"
-			} else {
-				status.Phase = "complete"
-				status.FilesScanned = len(index.Files)
-				if status.AlbumsProcessed > 0 {
-					status.Message = fmt.Sprintf(
-						"Library updated: %d genre matches, %d albums still unmatched",
-						status.GenreMatches,
-						status.GenreUnmatched,
-					)
-				} else {
-					status.Message = "Local media library is up to date"
-				}
+		if _, err := runTaterLocalLibraryScan(cfg, request); err == nil {
+			taterTVResetGuideForConfig(cfg)
+			if _, guideErr := taterTVEnsureGuide(cfg, "", time.Now()); guideErr != nil {
+				slog.Warn("Failed to rebuild Tube TV guide after local media scan", "error", guideErr)
 			}
-		})
-		if err != nil {
-			slog.Warn("Local media scan failed", "error", err)
 		}
 	}()
 	return RespondSuccess(c, getTaterLocalLibraryScanStatus(cfg))

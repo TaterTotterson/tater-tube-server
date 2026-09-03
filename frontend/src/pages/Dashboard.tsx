@@ -126,24 +126,35 @@ function playbackMode(stream?: ActiveStream) {
 	if (!stream) {
 		return null;
 	}
+	const videoMode = stream.video_mode || (stream.transcoded ? "transcode" : "direct");
+	const audioMode = stream.audio_mode || (stream.transcoded ? "transcode" : "direct");
+	const audioCodec = String(stream.audio_codec || "aac").toUpperCase();
+	if (videoMode === "direct" && audioMode === "transcode") {
+		return {
+			label: "Audio Transcode",
+			className: "badge-warning",
+			detail: `Video: Direct • Audio: Transcoding (${audioCodec})`,
+		};
+	}
 	if (!stream.transcoded) {
 		return {
 			label: "Direct",
 			className: "badge-outline",
-			detail: "direct play",
+			detail: "Video: Direct • Audio: Direct",
 		};
 	}
+	const trackDetail = `Video: Transcoding • Audio: Transcoding (${audioCodec})`;
 	if (stream.hardware_active) {
 		return {
 			label: `HW ${hardwareName(stream.hardware_acceleration)}`,
 			className: "badge-success",
-			detail: stream.video_codec || stream.hardware_device || "hardware transcode",
+			detail: `${trackDetail} • ${stream.video_codec || stream.hardware_device || "hardware"}`,
 		};
 	}
 	return {
 		label: "SW Transcode",
 		className: "badge-warning",
-		detail: stream.transcode_name || stream.video_codec || "software transcode",
+		detail: `${trackDetail} • ${stream.transcode_name || stream.video_codec || "software"}`,
 	};
 }
 

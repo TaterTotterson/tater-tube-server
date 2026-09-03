@@ -51,6 +51,27 @@ func TestBuildFFmpegAudioSyncArgsFileSeek(t *testing.T) {
 	require.NotContains(t, joined, "-i pipe:0")
 }
 
+func TestBuildFFmpegAudioOnlyVideoArgsCopiesVideoAndTranscodesAudio(t *testing.T) {
+	args := buildFFmpegAudioOnlyVideoArgs("192k", "", 0)
+	joined := strings.Join(args, " ")
+
+	require.Contains(t, joined, "-i pipe:0")
+	require.Contains(t, joined, "-map 0:v:0 -map 0:a:0?")
+	require.Contains(t, joined, "-c:v copy")
+	require.Contains(t, joined, "-c:a aac -b:a 192k -ac 2 -ar 48000")
+	require.Contains(t, joined, "-f mpegts pipe:1")
+	require.NotContains(t, joined, "libx264")
+}
+
+func TestBuildFFmpegAudioOnlyVideoArgsFileSeek(t *testing.T) {
+	args := buildFFmpegAudioOnlyVideoArgs("", "/media/movie.mkv", 12.5)
+	joined := strings.Join(args, " ")
+
+	require.Contains(t, joined, "-ss 12.500 -i /media/movie.mkv")
+	require.Contains(t, joined, "-b:a 192k")
+	require.NotContains(t, joined, "-i pipe:0")
+}
+
 func TestBuildFFmpegTranscodeArgsVAAPI(t *testing.T) {
 	args := buildFFmpegTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["hdmi_1080p"], "vaapi", "", 0)
 	joined := strings.Join(args, " ")
@@ -137,6 +158,18 @@ func TestShouldTranscodeRequestCanForceOn(t *testing.T) {
 	}
 	req := httptest.NewRequest("GET", "/api/files/stream/movie.mkv?transcode=1", nil)
 
+	require.True(t, handler.shouldTranscode(req, "/media/movie.mkv"))
+}
+
+func TestShouldTranscodeRequestAcceptsAudioOnlyMode(t *testing.T) {
+	handler := &StreamHandler{
+		configGetter: func() *config.Config {
+			return &config.Config{}
+		},
+	}
+	req := httptest.NewRequest("GET", "/api/files/stream/movie.mkv?transcode=audio", nil)
+
+	require.True(t, isAudioOnlyTranscodeRequest(req))
 	require.True(t, handler.shouldTranscode(req, "/media/movie.mkv"))
 }
 

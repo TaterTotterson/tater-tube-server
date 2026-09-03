@@ -341,6 +341,8 @@ const (
 	transcodeCodecHEVC   = "hevc"
 	audioSyncProfileID   = "audio_sync"
 	audioSyncProfileName = "Audio Sync PCM"
+	audioOnlyProfileID   = "audio_aac"
+	audioOnlyProfileName = "Video Direct / Audio AAC"
 )
 
 var transcodeProfiles = map[string]transcodeProfile{
@@ -417,7 +419,8 @@ func (h *StreamHandler) shouldTranscode(r *http.Request, path string) bool {
 	forceTranscode := transcodeValue == "1" ||
 		transcodeValue == "true" ||
 		transcodeValue == "on" ||
-		transcodeValue == "yes"
+		transcodeValue == "yes" ||
+		isAudioOnlyTranscodeRequest(r)
 	if !forceTranscode {
 		return false
 	}
@@ -440,6 +443,18 @@ func (h *StreamHandler) shouldTranscode(r *http.Request, path string) bool {
 	}
 }
 
+func isAudioOnlyTranscodeRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("transcode"))) {
+	case "audio", "audio-only", "audio_only":
+		return true
+	default:
+		return false
+	}
+}
+
 func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, ctx context.Context, path string, file afero.File) {
 	cfg := h.configGetter()
 	if cfg == nil {
@@ -451,6 +466,10 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	if _, err := exec.LookPath(ffmpegPath); err != nil {
 		slog.ErrorContext(ctx, "FFmpeg not available for transcoding", "path", ffmpegPath, "error", err)
 		http.Error(w, "Transcoding unavailable: ffmpeg not found", http.StatusServiceUnavailable)
+		return
+	}
+	if isAudioOnlyTranscodeRequest(r) {
+		h.serveAudioOnlyVideoTranscoded(w, r, ctx, path, file, ffmpegPath, cfg)
 		return
 	}
 
@@ -513,6 +532,10 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set("Content-Type", "video/mp2t")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Disposition", `inline; filename="`+filepath.Base(path)+`.ts"`)
+	w.Header().Set("X-Tater-Transcode-Profile", profileID)
+	w.Header().Set("X-Tater-Video-Mode", "transcode")
+	w.Header().Set("X-Tater-Audio-Mode", "transcode")
+	w.Header().Set("X-Tater-Audio-Codec", "aac")
 	w.Header().Del("Accept-Ranges")
 	w.WriteHeader(http.StatusOK)
 
@@ -536,6 +559,75 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
+func (h *StreamHandler) serveAudioOnlyVideoTranscoded(
+	w http.ResponseWriter,
+	r *http.Request,
+	ctx context.Context,
+	path string,
+	file afero.File,
+	ffmpegPath string,
+	cfg *config.Config,
+) {
+	profileID := strings.TrimSpace(r.URL.Query().Get("profile"))
+	if profileID == "" {
+		profileID = strings.TrimSpace(cfg.Transcoding.Profile)
+	}
+	profile, ok := transcodeProfiles[profileID]
+	if !ok {
+		profile = transcodeProfiles["hdmi_1080p"]
+	}
+	startSeconds := parseTranscodeStartSeconds(r.URL.Query().Get("start"))
+	inputPath := ""
+	if startSeconds > 0 {
+		inputPath = path
+	}
+	args := buildFFmpegAudioOnlyVideoArgs(profile.AudioBitrate, inputPath, startSeconds)
+	durationSeconds := h.probeMediaDuration(ctx, path)
+	streamID := h.markTranscodedStream(
+		w, file, audioOnlyProfileID, audioOnlyProfileName,
+		"none", "", "copy", startSeconds, durationSeconds,
+	)
+	if h.streamTracker != nil && streamID != "" {
+		h.streamTracker.SetTrackProcessingInfo(
+			streamID, "direct", "transcode", "aac", "Transcoding audio",
+		)
+	}
+
+	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
+	if inputPath == "" {
+		cmd.Stdin = file
+	}
+
+	var stderr limitedBuffer
+	cmd.Stderr = &stderr
+	cmd.Stdout = flushWriter{w: w}
+
+	w.Header().Set("Content-Type", "video/mp2t")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Disposition", `inline; filename="`+filepath.Base(path)+`.audio-aac.ts"`)
+	w.Header().Set("X-Tater-Transcode-Profile", audioOnlyProfileID)
+	w.Header().Set("X-Tater-Video-Mode", "direct")
+	w.Header().Set("X-Tater-Audio-Mode", "transcode")
+	w.Header().Set("X-Tater-Audio-Codec", "aac")
+	w.Header().Del("Accept-Ranges")
+	w.WriteHeader(http.StatusOK)
+
+	slog.InfoContext(ctx, "Starting FFmpeg audio-only transcode stream",
+		"path", path,
+		"video_mode", "direct",
+		"audio_mode", "transcode",
+		"audio_codec", "aac",
+		"start_seconds", startSeconds)
+
+	if err := cmd.Run(); err != nil && r.Context().Err() == nil {
+		slog.ErrorContext(ctx, "FFmpeg audio-only transcode failed",
+			"path", path,
+			"start_seconds", startSeconds,
+			"error", err,
+			"stderr", stderr.String())
+	}
+}
+
 func (h *StreamHandler) serveAudioSyncTranscoded(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -551,7 +643,7 @@ func (h *StreamHandler) serveAudioSyncTranscoded(
 	}
 	args := buildFFmpegAudioSyncArgs(inputPath, startSeconds)
 	durationSeconds := h.probeMediaDuration(ctx, path)
-	h.markTranscodedStream(
+	streamID := h.markTranscodedStream(
 		w,
 		file,
 		audioSyncProfileID,
@@ -562,6 +654,11 @@ func (h *StreamHandler) serveAudioSyncTranscoded(
 		startSeconds,
 		durationSeconds,
 	)
+	if h.streamTracker != nil && streamID != "" {
+		h.streamTracker.SetTrackProcessingInfo(
+			streamID, "none", "transcode", "pcm_s16le", "Transcoding audio",
+		)
+	}
 
 	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
 	if inputPath == "" {
@@ -576,6 +673,9 @@ func (h *StreamHandler) serveAudioSyncTranscoded(
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Disposition", `inline; filename="`+filepath.Base(path)+`.sync.wav"`)
 	w.Header().Set("X-Tater-Transcode-Profile", audioSyncProfileID)
+	w.Header().Set("X-Tater-Video-Mode", "none")
+	w.Header().Set("X-Tater-Audio-Mode", "transcode")
+	w.Header().Set("X-Tater-Audio-Codec", "pcm_s16le")
 	w.Header().Del("Accept-Ranges")
 	w.WriteHeader(http.StatusOK)
 
@@ -712,9 +812,9 @@ func effectiveFFprobePath(ffmpegPath string) string {
 	return ""
 }
 
-func (h *StreamHandler) markTranscodedStream(w http.ResponseWriter, file afero.File, profileID, profileName, hardwareAccel, hardwareDevice, videoCodec string, playbackStartSeconds, durationSeconds float64) {
+func (h *StreamHandler) markTranscodedStream(w http.ResponseWriter, file afero.File, profileID, profileName, hardwareAccel, hardwareDevice, videoCodec string, playbackStartSeconds, durationSeconds float64) string {
 	if h.streamTracker == nil {
-		return
+		return ""
 	}
 
 	streamID := ""
@@ -724,7 +824,7 @@ func (h *StreamHandler) markTranscodedStream(w http.ResponseWriter, file afero.F
 		streamID = mvf.GetStreamID()
 	}
 	if streamID == "" {
-		return
+		return ""
 	}
 
 	h.streamTracker.SetTranscodingInfo(
@@ -739,6 +839,7 @@ func (h *StreamHandler) markTranscodedStream(w http.ResponseWriter, file afero.F
 	if durationSeconds > 0 || playbackStartSeconds > 0 {
 		h.streamTracker.SetMediaInfo(streamID, durationSeconds, playbackStartSeconds)
 	}
+	return streamID
 }
 
 func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, inputPath string, startSeconds float64) []string {
@@ -771,6 +872,42 @@ func buildFFmpegAudioSyncArgs(inputPath string, startSeconds float64) []string {
 		"-ar", "48000",
 		"-fflags", "+genpts",
 		"-f", "wav",
+		"pipe:1",
+	)
+	return args
+}
+
+func buildFFmpegAudioOnlyVideoArgs(audioBitrate, inputPath string, startSeconds float64) []string {
+	if strings.TrimSpace(audioBitrate) == "" {
+		audioBitrate = "192k"
+	}
+	args := []string{
+		"-hide_banner",
+		"-loglevel", "warning",
+		"-nostdin",
+	}
+	if strings.TrimSpace(inputPath) != "" {
+		if startSeconds > 0 {
+			args = append(args, "-ss", strconv.FormatFloat(startSeconds, 'f', 3, 64))
+		}
+		args = append(args, "-i", inputPath)
+	} else {
+		args = append(args, "-i", "pipe:0")
+	}
+	args = append(args,
+		"-map", "0:v:0",
+		"-map", "0:a:0?",
+		"-sn",
+		"-dn",
+		"-c:v", "copy",
+		"-c:a", "aac",
+		"-b:a", audioBitrate,
+		"-ac", "2",
+		"-ar", "48000",
+		"-fflags", "+genpts",
+		"-muxdelay", "0",
+		"-muxpreload", "0",
+		"-f", "mpegts",
 		"pipe:1",
 	)
 	return args

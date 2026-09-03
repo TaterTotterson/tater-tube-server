@@ -138,6 +138,20 @@ EOF
 	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), second); err != nil {
 		t.Fatal(err)
 	}
+	if needed, reason := taterLocalLibraryIndexNeedsMaintenance(cfg); needed {
+		t.Fatalf("completed index should not need maintenance: %s", reason)
+	}
+	second.VideoDurationsScanned = false
+	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), second); err != nil {
+		t.Fatal(err)
+	}
+	if needed, reason := taterLocalLibraryIndexNeedsMaintenance(cfg); !needed || reason != "Backfilling video durations" {
+		t.Fatalf("durationless video should need maintenance, needed=%v reason=%q", needed, reason)
+	}
+	second.VideoDurationsScanned = true
+	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), second); err != nil {
+		t.Fatal(err)
+	}
 	loaded, err := readTaterLocalLibraryIndex(cfg)
 	if err != nil || len(loaded.Albums) != 1 || loaded.ConfigFingerprint != taterLocalLibraryFingerprint(cfg) {
 		t.Fatalf("persistent index did not round-trip: %#v error=%v", loaded, err)

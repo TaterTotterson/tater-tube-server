@@ -72,6 +72,32 @@ func TestTaterLocalMovieItemsDefaultToClientSeek(t *testing.T) {
 	}
 }
 
+func TestTaterLocalMovieItemsFallbackDoesNotProbeDurations(t *testing.T) {
+	configDir := t.TempDir()
+	moviePath := filepath.Join(configDir, "Fast.Browse.2026.mkv")
+	if err := os.WriteFile(moviePath, []byte("media"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	probeMarker := filepath.Join(configDir, "unexpected-probe")
+	cfg := config.DefaultConfig(configDir)
+	cfg.Transcoding.FFmpegPath = fakeFFmpegWithProbe(t, configDir, fmt.Sprintf(
+		"#!/bin/sh\nprintf x >> %q\nprintf '92.000\\n'\n", probeMarker,
+	))
+
+	items, err := taterLocalMovieItems(cfg,
+		config.LocalMediaCategory{ID: "movies", Name: "Movies"},
+		[]string{configDir}, "http://server", "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].DurationSeconds != 0 {
+		t.Fatalf("expected a fast durationless fallback row, got %#v", items)
+	}
+	if _, err := os.Stat(probeMarker); !os.IsNotExist(err) {
+		t.Fatalf("fallback library browsing unexpectedly ran ffprobe: %v", err)
+	}
+}
+
 func TestCleanMovieTitleAndYearTrimsOpenYearParen(t *testing.T) {
 	title, year := cleanMovieTitleAndYear("Some Movie (2024)")
 
@@ -365,6 +391,49 @@ func TestTaterLocalMovieItemsUsesFreshLibraryIndex(t *testing.T) {
 	}
 	if items[0].DurationSeconds != 92 || items[0].DurationDisplay != "1:32" {
 		t.Fatalf("expected indexed duration, got %#v", items[0])
+	}
+}
+
+func TestTaterLocalMovieItemsDoesNotProbeMissingIndexedDuration(t *testing.T) {
+	configDir := t.TempDir()
+	probeMarker := filepath.Join(configDir, "unexpected-probe")
+	cfg := config.DefaultConfig(configDir)
+	cfg.Transcoding.FFmpegPath = fakeFFmpegWithProbe(t, configDir, fmt.Sprintf(
+		"#!/bin/sh\nprintf x >> %q\nprintf '92.000\\n'\n", probeMarker,
+	))
+	cfg.LocalMedia.Enabled = boolPtr(true)
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID:          "movies",
+		Name:        "Movies",
+		LibraryType: "movies",
+		Paths:       []string{filepath.Join(configDir, "movies")},
+		Enabled:     boolPtr(true),
+	}}
+	cat := cfg.LocalMedia.Categories[0]
+	index := taterLocalLibraryIndex{
+		Schema:            taterLocalLibraryIndexSchema,
+		ConfigFingerprint: taterLocalLibraryFingerprint(cfg),
+		Files: []taterLocalLibraryFileIndex{{
+			CategoryID:  "movies",
+			LibraryType: "movies",
+			SourceIndex: 0,
+			Path:        "That Movie (2024).mkv",
+			Title:       "That Movie",
+		}},
+	}
+	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), index); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := taterLocalMovieItems(cfg, cat, taterLocalMediaCategoryPaths(cat), "http://server", "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].DurationSeconds != 0 {
+		t.Fatalf("expected durationless indexed item, got %#v", items)
+	}
+	if _, err := os.Stat(probeMarker); !os.IsNotExist(err) {
+		t.Fatalf("library browsing unexpectedly ran ffprobe: %v", err)
 	}
 }
 
@@ -1327,7 +1396,7 @@ func TestTaterTVGuideBuildsAndExtendsSharedSchedule(t *testing.T) {
 	}
 }
 
-func TestTaterTVGuideUsesDurationMissingFromOlderLibraryIndex(t *testing.T) {
+func TestTaterTVGuideMaintenanceBackfillsDurationMissingFromOlderLibraryIndex(t *testing.T) {
 	taterTVResetGuide()
 	defer taterTVResetGuide()
 
@@ -1373,6 +1442,18 @@ func TestTaterTVGuideUsesDurationMissingFromOlderLibraryIndex(t *testing.T) {
 	}
 	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), index); err != nil {
 		t.Fatal(err)
+	}
+	if needed, reason := taterLocalLibraryIndexNeedsMaintenance(cfg); !needed || reason != "Backfilling video durations" {
+		t.Fatalf("older index should need duration maintenance, needed=%v reason=%q", needed, reason)
+	}
+	if !beginTaterLocalLibraryScan(cfg, "Backfilling video durations") {
+		t.Fatal("expected to start local library maintenance")
+	}
+	if _, err := runTaterLocalLibraryScan(cfg, taterLocalLibraryScanRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if needed, reason := taterLocalLibraryIndexNeedsMaintenance(cfg); needed {
+		t.Fatalf("maintained index should be ready for the guide: %s", reason)
 	}
 
 	channels, err := taterBuildTVLineup(cfg, "http://server", "token")

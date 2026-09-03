@@ -435,8 +435,24 @@ func (t *StreamTracker) SetTranscodingInfo(id, profileID, profileName, hardwareA
 		stream.HardwareAccel = hardwareAccel
 		stream.HardwareDevice = hardwareDevice
 		stream.VideoCodec = videoCodec
+		stream.VideoMode = "transcode"
+		stream.AudioMode = "transcode"
+		stream.AudioCodec = "aac"
 		stream.HardwareActive = hardwareActive
 		stream.Status = "Transcoding"
+		stream.lastReadAt = time.Now()
+	}
+}
+
+func (t *StreamTracker) SetTrackProcessingInfo(id, videoMode, audioMode, audioCodec, status string) {
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*streamInternal)
+		stream.VideoMode = strings.ToLower(strings.TrimSpace(videoMode))
+		stream.AudioMode = strings.ToLower(strings.TrimSpace(audioMode))
+		stream.AudioCodec = strings.ToLower(strings.TrimSpace(audioCodec))
+		if strings.TrimSpace(status) != "" {
+			stream.Status = strings.TrimSpace(status)
+		}
 		stream.lastReadAt = time.Now()
 	}
 }
@@ -670,6 +686,9 @@ func mergePlaybackRecord(existing *nzbfilesystem.ActiveStream, next nzbfilesyste
 		existing.HardwareAccel = next.HardwareAccel
 		existing.HardwareDevice = next.HardwareDevice
 		existing.VideoCodec = next.VideoCodec
+		existing.VideoMode = next.VideoMode
+		existing.AudioMode = next.AudioMode
+		existing.AudioCodec = next.AudioCodec
 		existing.HardwareActive = next.HardwareActive
 	}
 	updateWatchedDuration(existing)
@@ -815,6 +834,9 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 				existing.HardwareAccel = s.HardwareAccel
 				existing.HardwareDevice = s.HardwareDevice
 				existing.VideoCodec = s.VideoCodec
+				existing.VideoMode = s.VideoMode
+				existing.AudioMode = s.AudioMode
+				existing.AudioCodec = s.AudioCodec
 				existing.HardwareActive = s.HardwareActive
 				if existing.Status != "Streaming" {
 					existing.Status = s.Status

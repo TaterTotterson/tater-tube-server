@@ -429,6 +429,9 @@ export interface ActiveStream {
 	hardware_acceleration?: string;
 	hardware_device?: string;
 	video_codec?: string;
+	video_mode?: "direct" | "transcode" | "none" | string;
+	audio_mode?: "direct" | "transcode" | "none" | string;
+	audio_codec?: string;
 	hardware_active: boolean;
 }
 
