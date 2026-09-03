@@ -685,6 +685,7 @@ func taterTVAddRowsToSource(cfg *config.Config, baseURL, playerToken string, sou
 	for _, row := range rows {
 		switch strings.ToLower(row.Type) {
 		case "localfile":
+			taterTVAttachMissingLocalDuration(cfg, &row)
 			taterTVAddFile(source, row, showTitle)
 		case "localfolder":
 			nextShowTitle := showTitle
@@ -701,6 +702,26 @@ func taterTVAddRowsToSource(cfg *config.Config, baseURL, playerToken string, sou
 		}
 	}
 	return nil
+}
+
+func taterTVAttachMissingLocalDuration(cfg *config.Config, item *taterUsenetItem) {
+	if cfg == nil || item == nil || item.DurationSeconds > 0 {
+		return
+	}
+	categoryID := strings.TrimPrefix(strings.TrimSpace(item.CategoryID), "local:")
+	cat, ok := taterLocalMediaCategory(cfg, categoryID)
+	if !ok {
+		return
+	}
+	paths := taterLocalMediaCategoryPaths(cat)
+	if item.SourceIndex < 0 || item.SourceIndex >= len(paths) {
+		return
+	}
+	path, err := safeLocalPath(paths[item.SourceIndex], item.Path)
+	if err != nil {
+		return
+	}
+	attachTaterLocalDuration(cfg, path, item)
 }
 
 func taterTVAddFile(source *taterTVSource, item taterUsenetItem, showTitle string) {

@@ -115,6 +115,28 @@ func TestStreamTracker_GetAll_IncludesTranscodingInfo(t *testing.T) {
 	assert.Equal(t, "vaapi", streams[0].HardwareAccel)
 	assert.Equal(t, "/dev/dri/renderD128", streams[0].HardwareDevice)
 	assert.Equal(t, "h264_vaapi", streams[0].VideoCodec)
+	assert.Equal(t, "transcode", streams[0].VideoMode)
+	assert.Equal(t, "transcode", streams[0].AudioMode)
+	assert.Equal(t, "aac", streams[0].AudioCodec)
+}
+
+func TestStreamTracker_GetAll_ReportsAudioOnlyTranscoding(t *testing.T) {
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+
+	stream := tracker.AddStream("/movies/movie.mkv", "Local", "Living Room", "127.0.0.1", "TestAgent", 1000)
+	tracker.SetTranscodingInfo(stream.ID, audioOnlyProfileID, audioOnlyProfileName, "none", "", "copy", false)
+	tracker.SetTrackProcessingInfo(stream.ID, "direct", "transcode", "aac", "Transcoding audio")
+
+	streams := tracker.GetAll()
+
+	assert.Len(t, streams, 1)
+	assert.True(t, streams[0].Transcoded)
+	assert.False(t, streams[0].HardwareActive)
+	assert.Equal(t, "direct", streams[0].VideoMode)
+	assert.Equal(t, "transcode", streams[0].AudioMode)
+	assert.Equal(t, "aac", streams[0].AudioCodec)
+	assert.Equal(t, "Transcoding audio", streams[0].Status)
 }
 
 func TestStreamTracker_KillStreamsForPlayer(t *testing.T) {

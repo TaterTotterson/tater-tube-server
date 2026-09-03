@@ -467,6 +467,19 @@ func (s *Server) runTVGuidePlanner(ctx context.Context) {
 		if cfg == nil || !taterTubeTVEnabled(cfg) {
 			return
 		}
+		if needed, message := taterLocalLibraryIndexNeedsMaintenance(cfg); needed {
+			scanCfg := cfg.DeepCopy()
+			if !beginTaterLocalLibraryScan(scanCfg, message) {
+				return
+			}
+			slog.InfoContext(ctx, "Maintaining local media index before refreshing Tube TV guide", "reason", message)
+			if _, err := runTaterLocalLibraryScan(scanCfg, taterLocalLibraryScanRequest{}); err != nil {
+				slog.WarnContext(ctx, "Failed to maintain local media index", "error", err)
+				return
+			}
+			taterTVResetGuideForConfig(scanCfg)
+			cfg = scanCfg
+		}
 		if _, err := taterTVEnsureGuide(cfg, "", time.Now()); err != nil {
 			slog.WarnContext(ctx, "Failed to refresh Tube TV guide", "error", err)
 		}

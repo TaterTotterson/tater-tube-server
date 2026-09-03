@@ -1309,16 +1309,10 @@ func taterIndexedLocalVideoItem(cfg *config.Config, cat config.LocalMediaCategor
 	} else {
 		item.SizeText = localMovieDetail(year)
 	}
-	durationSeconds := file.DurationSeconds
-	if durationSeconds <= 0 {
-		paths := taterLocalMediaCategoryPaths(cat)
-		if file.SourceIndex >= 0 && file.SourceIndex < len(paths) {
-			if path, err := safeLocalPath(paths[file.SourceIndex], rel); err == nil {
-				durationSeconds = taterLocalDurationSeconds(cfg, path)
-			}
-		}
-	}
-	attachTaterDuration(&item, durationSeconds)
+	// Library browsing must stay an index-only operation. Missing durations are
+	// backfilled and persisted by the background index maintenance pass instead
+	// of blocking this request on one ffprobe process per video.
+	attachTaterDuration(&item, file.DurationSeconds)
 	return item
 }
 
@@ -1458,7 +1452,8 @@ func taterLocalMovieItems(cfg *config.Config, cat config.LocalMediaCategory, pat
 				SizeBytes:   size,
 				SizeText:    localMovieDetail(year),
 			}
-			attachTaterLocalDuration(cfg, path, &item)
+			// Keep an unindexed fallback browse responsive. The background library
+			// scan persists durations, and Tube TV probes only while building a guide.
 			items = append(items, item)
 			return nil
 		})
@@ -1559,7 +1554,7 @@ func taterLocalTVItems(cfg *config.Config, cat config.LocalMediaCategory, paths 
 			SizeBytes:   size,
 			SizeText:    "EPISODE",
 		}
-		attachTaterLocalDuration(cfg, filepath.Join(dirPath, name), &item)
+		// Duration probing belongs to index maintenance, not an interactive browse.
 		items = append(items, item)
 	}
 	sort.SliceStable(items, func(i, j int) bool {

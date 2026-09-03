@@ -39,6 +39,9 @@ type ActiveStream struct {
 	HardwareAccel    string    `json:"hardware_acceleration,omitempty"`
 	HardwareDevice   string    `json:"hardware_device,omitempty"`
 	VideoCodec       string    `json:"video_codec,omitempty"`
+	VideoMode        string    `json:"video_mode,omitempty"`
+	AudioMode        string    `json:"audio_mode,omitempty"`
+	AudioCodec       string    `json:"audio_codec,omitempty"`
 	HardwareActive   bool      `json:"hardware_active"`
 }
 

@@ -143,7 +143,8 @@ function isLive(stream: ActiveStream) {
 	const status = String(stream.status || "").toLowerCase();
 	const date = activityDate(stream);
 	const recent = date ? Date.now() - date.getTime() < 20000 : false;
-	return recent && ["starting", "buffering", "streaming", "transcoding"].includes(status);
+	return recent && (["starting", "buffering", "streaming"].includes(status)
+		|| status.startsWith("transcoding"));
 }
 
 function playbackProgress(stream: ActiveStream) {
@@ -154,6 +155,9 @@ function playbackProgress(stream: ActiveStream) {
 }
 
 function hardwareLabel(stream: ActiveStream) {
+	if (stream.video_mode === "direct" && stream.audio_mode === "transcode") {
+		return "Audio Transcode";
+	}
 	if (!stream.transcoded) return "Direct Play";
 	if (!stream.hardware_active) return "Software Transcode";
 	switch (String(stream.hardware_acceleration || "").toLowerCase()) {
@@ -173,10 +177,15 @@ function hardwareLabel(stream: ActiveStream) {
 }
 
 function hardwareDetail(stream: ActiveStream) {
+	const videoMode = stream.video_mode || (stream.transcoded ? "transcode" : "direct");
+	const audioMode = stream.audio_mode || (stream.transcoded ? "transcode" : "direct");
+	const videoLabel = videoMode === "transcode" ? "Transcoding" : videoMode === "none" ? "None" : "Direct";
+	const audioCodec = stream.audio_codec ? ` (${String(stream.audio_codec).toUpperCase()})` : "";
+	const audioLabel = audioMode === "transcode" ? `Transcoding${audioCodec}` : audioMode === "none" ? "None" : "Direct";
 	const parts = [stream.video_codec, stream.transcode_name || stream.transcode_profile]
 		.filter(Boolean)
 		.map((value) => String(value));
-	return parts.join(" / ");
+	return [`Video: ${videoLabel}`, `Audio: ${audioLabel}`, ...parts].join(" / ");
 }
 
 export function QueuePage() {
@@ -198,6 +207,9 @@ export function QueuePage() {
 				playerLabel(stream),
 				sourceLabel(stream),
 				stream.video_codec,
+				stream.video_mode,
+				stream.audio_mode,
+				stream.audio_codec,
 				stream.hardware_acceleration,
 			]
 				.filter(Boolean)
