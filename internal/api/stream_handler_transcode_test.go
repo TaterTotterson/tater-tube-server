@@ -59,7 +59,7 @@ func TestBuildFFmpegAudioOnlyVideoArgsCopiesVideoAndTranscodesAudio(t *testing.T
 	require.Contains(t, joined, "-map 0:v:0 -map 0:a:0?")
 	require.Contains(t, joined, "-c:v copy")
 	require.Contains(t, joined, "-c:a aac -b:a 192k -ac 2 -ar 48000")
-	require.Contains(t, joined, "-f mpegts pipe:1")
+	require.Contains(t, joined, "-f matroska pipe:1")
 	require.NotContains(t, joined, "libx264")
 }
 

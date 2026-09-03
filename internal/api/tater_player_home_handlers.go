@@ -60,6 +60,12 @@ type taterPlayerHomeResponse struct {
 	Warnings         []string                    `json:"warnings,omitempty"`
 }
 
+type taterPlayerLibraryRow struct {
+	Title string              `json:"title"`
+	Entry taterUsenetCategory `json:"entry"`
+	Items []taterUsenetItem   `json:"items"`
+}
+
 func (s *Server) handleTaterPlayerHome(c *fiber.Ctx) error {
 	cfg, playerToken, ok := s.taterAuthorizedConfig(c)
 	if !ok {
@@ -110,6 +116,82 @@ func (s *Server) handleTaterPlayerHome(c *fiber.Ctx) error {
 	}
 
 	return RespondSuccess(c, response)
+}
+
+func (s *Server) handleTaterPlayerLibrary(c *fiber.Ctx) error {
+	cfg, playerToken, ok := s.taterAuthorizedConfig(c)
+	if !ok {
+		return nil
+	}
+	rows := []taterPlayerLibraryRow{}
+	if !taterLocalMediaEnabled(cfg) {
+		return RespondSuccess(c, fiber.Map{"rows": rows})
+	}
+
+	baseURL := resolveBaseURL(c, "")
+	continueWatching, err := taterContinueWatchingItems(cfg, baseURL, playerToken)
+	if err == nil && len(continueWatching) > 0 {
+		continueWatching = limitTaterPlayerHomeItems(continueWatching)
+		decorateTaterPlayerHomeItems(cfg, baseURL, playerToken, continueWatching)
+		rows = append(rows, taterPlayerLibraryRow{
+			Title: "Continue Watching",
+			Entry: taterUsenetCategory{Type: "continue", Title: "Continue Watching"},
+			Items: continueWatching,
+		})
+	}
+
+	allItems, err := taterLocalDiscoverLibraryItems(cfg, baseURL, playerToken)
+	if err != nil {
+		return RespondServiceUnavailable(c, "Failed to load player library", err.Error())
+	}
+	allItems = taterAttachLocalPlayStates(cfg, allItems)
+	for _, def := range taterLocalDiscoverDefinitions() {
+		items := taterFilterLocalDiscoverItems(allItems, def.ID)
+		if len(items) == 0 {
+			continue
+		}
+		items = limitTaterPlayerHomeItems(items)
+		decorateTaterPlayerHomeItems(cfg, baseURL, playerToken, items)
+		rows = append(rows, taterPlayerLibraryRow{
+			Title: def.Title,
+			Entry: taterUsenetCategory{
+				ID: def.ID, Type: "localDiscover", Title: def.Title, Detail: def.Detail,
+			},
+			Items: items,
+		})
+	}
+
+	for _, category := range cfg.LocalMedia.Categories {
+		if !taterLocalLibraryEnabled(category) ||
+			strings.EqualFold(strings.TrimSpace(category.LibraryType), "music") {
+			continue
+		}
+		categoryID := strings.TrimSpace(category.ID)
+		title := cleanTaterText(category.Name)
+		if categoryID == "" || title == "" {
+			continue
+		}
+		items := []taterUsenetItem{}
+		for _, item := range allItems {
+			if taterRawLocalCategoryID(item.CategoryID) == categoryID {
+				items = append(items, item)
+			}
+		}
+		if len(items) == 0 {
+			continue
+		}
+		items = limitTaterPlayerHomeItems(items)
+		decorateTaterPlayerHomeItems(cfg, baseURL, playerToken, items)
+		rows = append(rows, taterPlayerLibraryRow{
+			Title: title,
+			Entry: taterUsenetCategory{
+				ID: "local:" + categoryID, Type: "local", Title: title, Detail: "LOCAL",
+			},
+			Items: items,
+		})
+	}
+
+	return RespondSuccess(c, fiber.Map{"rows": rows})
 }
 
 func taterPlayerCapabilities(cfg *config.Config) taterPlayerHomeCapabilities {

@@ -27,6 +27,16 @@ func TestTaterPlayerHomeRequiresPairedPlayer(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, response.StatusCode)
 }
 
+func TestTaterPlayerLibraryRequiresPairedPlayer(t *testing.T) {
+	app := fiber.New()
+	server := &Server{configManager: &mockConfigManager{cfg: &config.Config{}}}
+	app.Get("/api/v1/player/library", server.handleTaterPlayerLibrary)
+
+	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/api/v1/player/library", nil))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusUnauthorized, response.StatusCode)
+}
+
 func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 	configDir := t.TempDir()
 	libraryRoot := t.TempDir()
@@ -74,6 +84,7 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 	server := &Server{configManager: &mockConfigManager{cfg: cfg}}
 	app := fiber.New()
 	app.Get("/api/v1/player/home", server.handleTaterPlayerHome)
+	app.Get("/api/v1/player/library", server.handleTaterPlayerLibrary)
 	app.Get("/api/v1/player/artwork/local", server.handleTaterPlayerLocalArtwork)
 
 	request := httptest.NewRequest(http.MethodGet, "http://tube.local/api/v1/player/home", nil)
@@ -103,6 +114,27 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 	servedPoster, err := io.ReadAll(artworkResponse.Body)
 	require.NoError(t, err)
 	require.Equal(t, posterBytes, servedPoster)
+
+	libraryRequest := httptest.NewRequest(http.MethodGet, "http://tube.local/api/v1/player/library", nil)
+	libraryRequest.Header.Set(fiber.HeaderAuthorization, "Bearer home-token")
+	libraryResponse, err := app.Test(libraryRequest)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, libraryResponse.StatusCode)
+	var libraryEnvelope testAPIResponse[struct {
+		Rows []taterPlayerLibraryRow `json:"rows"`
+	}]
+	require.NoError(t, json.NewDecoder(libraryResponse.Body).Decode(&libraryEnvelope))
+	require.True(t, libraryEnvelope.Success)
+	require.NotEmpty(t, libraryEnvelope.Data.Rows)
+	foundRecentlyAdded := false
+	for _, row := range libraryEnvelope.Data.Rows {
+		if row.Entry.ID == "local-discover:recent" {
+			foundRecentlyAdded = true
+			require.NotEmpty(t, row.Items)
+			require.Contains(t, row.Items[0].Poster, "/api/v1/player/artwork/local")
+		}
+	}
+	require.True(t, foundRecentlyAdded)
 }
 
 func TestTaterPlayerLocalArtworkRejectsEscapingPath(t *testing.T) {

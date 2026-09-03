@@ -208,6 +208,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/tater/server", s.handleTaterServerInfo)
 	api.Post("/tater/players/pair", s.handleTaterPairPlayer)
 	api.Get("/v1/player/home", s.handleTaterPlayerHome)
+	api.Get("/v1/player/library", s.handleTaterPlayerLibrary)
 	api.Get("/v1/player/artwork/local", s.handleTaterPlayerLocalArtwork)
 	api.Post("/tater/core/pair", s.handleTaterPairCore)
 	api.Get("/tater/core/context", s.handleTaterCoreContext)
