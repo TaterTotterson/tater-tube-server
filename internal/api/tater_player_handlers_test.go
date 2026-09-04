@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzbfilesystem"
 	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -83,4 +84,35 @@ func TestTaterUpdatePlayerRenamesPairedPlayer(t *testing.T) {
 	require.True(t, envelope.Success)
 	require.Equal(t, "Bedroom CRT", envelope.Data.Name)
 	require.Equal(t, "Bedroom CRT", manager.cfg.Players.Paired[0].Name)
+}
+
+func TestTaterActiveStreamsUsesPlayerIDWhenNamesMatch(t *testing.T) {
+	app := fiber.New()
+	manager := &mockConfigManager{cfg: &config.Config{
+		Players: config.PlayersConfig{Paired: []config.PlayerConfig{
+			{ID: "player-1", Name: "Tater Tube Player", TokenHash: hashTaterSecret("player-token")},
+			{ID: "player-2", Name: "Tater Tube Player", TokenHash: hashTaterSecret("other-token")},
+		}},
+	}}
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+	owned := tracker.AddStream("/movies/owned.mkv", "Local", "Tater Tube Player", "127.0.0.1", "TestAgent", 1000)
+	tracker.SetPlayerID(owned.ID, "player-1")
+	other := tracker.AddStream("/movies/other.mkv", "Local", "Tater Tube Player", "127.0.0.1", "TestAgent", 1000)
+	tracker.SetPlayerID(other.ID, "player-2")
+
+	server := &Server{configManager: manager, streamTracker: tracker}
+	app.Get("/streams", server.handleTaterActiveStreams)
+	req := httptest.NewRequest(http.MethodGet, "/streams", nil)
+	req.Header.Set("Authorization", "Bearer player-token")
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var envelope testAPIResponse[[]nzbfilesystem.ActiveStream]
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope))
+	require.True(t, envelope.Success)
+	require.Len(t, envelope.Data, 1)
+	require.Equal(t, "player-1", envelope.Data[0].PlayerID)
+	require.Equal(t, "/movies/owned.mkv", envelope.Data[0].FilePath)
 }
