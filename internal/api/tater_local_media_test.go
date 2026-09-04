@@ -721,6 +721,21 @@ func TestTaterLocalDiscoverRowsAndItems(t *testing.T) {
 	if len(actionItems) != 1 || actionItems[0].Title != "Metadata Action" || actionItems[0].Date != "1988" || actionItems[0].Category != "Action" {
 		t.Fatalf("expected NFO metadata to feed action discovery, got %#v", actionItems)
 	}
+
+	limitedMovies, err := taterLocalDiscoverItemsWithLimit(cfg, "http://server", "token", "local-discover:movies", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limitedMovies) != 1 {
+		t.Fatalf("expected the requested discovery preview limit, got %d items", len(limitedMovies))
+	}
+	allMovies, err := taterLocalDiscoverItemsWithLimit(cfg, "http://server", "token", "local-discover:movies", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(allMovies) != 3 {
+		t.Fatalf("expected the full discovery collection, got %d items", len(allMovies))
+	}
 }
 
 func hasTaterLocalDiscoverTitle(rows []taterUsenetCategory, title string) bool {

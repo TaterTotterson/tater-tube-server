@@ -262,7 +262,11 @@ func (s *Server) handleTaterUsenetItems(c *fiber.Ctx) error {
 		if !taterLocalMediaEnabled(cfg) {
 			return RespondServiceUnavailable(c, "Local media is not configured", "")
 		}
-		items, err := taterLocalDiscoverItems(cfg, resolveBaseURL(c, ""), playerToken, categoryID)
+		limit := 200
+		if c.QueryBool("full", false) {
+			limit = 0
+		}
+		items, err := taterLocalDiscoverItemsWithLimit(cfg, resolveBaseURL(c, ""), playerToken, categoryID, limit)
 		if err != nil {
 			return RespondValidationError(c, "Failed to load local discovery", err.Error())
 		}
@@ -786,13 +790,17 @@ func taterLocalDiscoverRows(cfg *config.Config) []taterUsenetCategory {
 }
 
 func taterLocalDiscoverItems(cfg *config.Config, baseURL, playerToken, discoverID string) ([]taterUsenetItem, error) {
+	return taterLocalDiscoverItemsWithLimit(cfg, baseURL, playerToken, discoverID, 200)
+}
+
+func taterLocalDiscoverItemsWithLimit(cfg *config.Config, baseURL, playerToken, discoverID string, limit int) ([]taterUsenetItem, error) {
 	items, err := taterLocalDiscoverLibraryItems(cfg, baseURL, playerToken)
 	if err != nil {
 		return nil, err
 	}
 	rows := taterFilterLocalDiscoverItems(items, discoverID)
-	if len(rows) > 200 {
-		rows = rows[:200]
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
 	}
 	return rows, nil
 }
