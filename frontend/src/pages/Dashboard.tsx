@@ -255,10 +255,19 @@ export function Dashboard() {
 		: 0;
 	const providerCount = providerMetrics.length || configuredProviders.length;
 	const hardwareOptions = transcodeDetection?.options?.filter((option) => option.available) ?? [];
+	const uniquePlayerNames = useMemo(() => {
+		const counts = new Map<string, number>();
+		for (const player of players) {
+			const key = playerNameKey(player.name);
+			if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+		}
+		return new Set([...counts.entries()].filter(([, count]) => count === 1).map(([key]) => key));
+	}, [players]);
 
 	const streamByPlayerName = useMemo(() => {
 		const map = new Map<string, ActiveStream>();
 		for (const stream of activeStreams) {
+			if (stream.player_id) continue;
 			const key = playerNameKey(stream.user_name);
 			if (key && !map.has(key)) {
 				map.set(key, stream);
@@ -280,6 +289,7 @@ export function Dashboard() {
 	const lastStreamByPlayerName = useMemo(() => {
 		const map = new Map<string, ActiveStream>();
 		for (const stream of streamHistory) {
+			if (stream.player_id) continue;
 			const key = playerNameKey(stream.user_name);
 			if (key && !map.has(key)) {
 				map.set(key, stream);
@@ -300,74 +310,7 @@ export function Dashboard() {
 
 	return (
 		<div className="space-y-6">
-			<section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)]">
-				<Panel title="Tater Tube Players" icon={Tv}>
-					<div className="space-y-3">
-						{players.length > 0 ? (
-							players.map((player) => {
-								const playerKey = playerNameKey(player.name);
-								const stream = streamByPlayerID.get(player.id) || streamByPlayerName.get(playerKey);
-								const lastStream =
-									lastStreamByPlayerID.get(player.id) || lastStreamByPlayerName.get(playerKey);
-								const mode = playbackMode(stream);
-								const playerOnline = Boolean(stream) || isOnline(player.last_seen_at);
-								return (
-									<div
-										key={player.id}
-										className="min-w-0 overflow-hidden rounded-md border border-base-300 bg-base-100/70 p-3"
-									>
-										<div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-											<div className="min-w-0 flex-1">
-												<div className="dashboard-line-clamp font-semibold">{player.name}</div>
-												<div className="text-base-content/60 text-sm">
-													Last seen {timeAgo(player.last_seen_at)}
-												</div>
-											</div>
-											<span
-												className={`badge ${stream ? "badge-primary" : playerOnline ? "badge-success" : "badge-ghost"}`}
-											>
-												{stream ? "Playing" : playerOnline ? "Online" : "Idle"}
-											</span>
-										</div>
-										<div className="mt-2 text-base-content/70 text-sm">
-											{stream ? (
-												<div className="flex min-w-0 flex-wrap items-center gap-2">
-													<span className="dashboard-line-clamp min-w-0 flex-1">
-														Playing {fileLabel(stream.file_path)}
-													</span>
-													{mode && (
-														<span className={`badge badge-sm ${mode.className}`}>{mode.label}</span>
-													)}
-												</div>
-											) : lastStream ? (
-												<div className="min-w-0">
-													<div className="dashboard-line-clamp">
-														Last played {fileLabel(lastStream.file_path)}
-													</div>
-													<div className="mt-1 text-base-content/50 text-xs">
-														Finished {timeAgo(streamActivityTime(lastStream))}
-													</div>
-												</div>
-											) : (
-												"No playback yet"
-											)}
-											{mode?.detail && (
-												<div className="dashboard-line-clamp mt-1 text-base-content/50 text-xs">
-													{mode.detail}
-												</div>
-											)}
-										</div>
-									</div>
-								);
-							})
-						) : (
-							<div className="rounded-md border border-base-300 border-dashed p-4 text-base-content/60 text-sm">
-								No paired Tater Tube players yet.
-							</div>
-						)}
-					</div>
-				</Panel>
-
+			<section className="min-w-0">
 				<Panel title="Active Streams" icon={Gauge}>
 					<div className="space-y-3">
 						{activeStreams.length > 0 ? (
@@ -616,6 +559,84 @@ export function Dashboard() {
 						detail={`${queueStats?.total_failed ?? 0} failed items`}
 					/>
 				</div>
+			</section>
+
+			<section className="min-w-0">
+				<Panel title="Tater Tube Players" icon={Tv}>
+					<div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+						{players.length > 0 ? (
+							players.map((player) => {
+								const playerKey = playerNameKey(player.name);
+								const canUseLegacyName = uniquePlayerNames.has(playerKey);
+								const stream =
+									streamByPlayerID.get(player.id) ||
+									(canUseLegacyName ? streamByPlayerName.get(playerKey) : undefined);
+								const lastStream =
+									lastStreamByPlayerID.get(player.id) ||
+									(canUseLegacyName ? lastStreamByPlayerName.get(playerKey) : undefined);
+								const mode = playbackMode(stream);
+								const playerOnline = Boolean(stream) || isOnline(player.last_seen_at);
+								return (
+									<div
+										key={player.id}
+										className="min-w-0 overflow-hidden rounded-lg border border-base-300 bg-base-100/70 p-4"
+									>
+										<div className="flex min-w-0 items-start justify-between gap-3">
+											<div className="min-w-0 flex-1">
+												<div className="dashboard-line-clamp font-semibold">
+													{player.name || "Tater Tube Player"}
+												</div>
+												<div className="mt-0.5 text-base-content/45 text-xs uppercase tracking-wide">
+													Device {player.id.slice(0, 8)}
+												</div>
+												<div className="mt-1 text-base-content/60 text-sm">
+													Last seen {timeAgo(player.last_seen_at)}
+												</div>
+											</div>
+											<span
+												className={`badge ${stream ? "badge-primary" : playerOnline ? "badge-success" : "badge-ghost"}`}
+											>
+												{stream ? "Playing" : playerOnline ? "Online" : "Idle"}
+											</span>
+										</div>
+										<div className="mt-3 border-base-300 border-t pt-3 text-base-content/70 text-sm">
+											{stream ? (
+												<div className="flex min-w-0 flex-wrap items-center gap-2">
+													<span className="dashboard-line-clamp min-w-0 flex-1">
+														Playing {fileLabel(stream.file_path)}
+													</span>
+													{mode && (
+														<span className={`badge badge-sm ${mode.className}`}>{mode.label}</span>
+													)}
+												</div>
+											) : lastStream ? (
+												<div className="min-w-0">
+													<div className="dashboard-line-clamp">
+														Last played {fileLabel(lastStream.file_path)}
+													</div>
+													<div className="mt-1 text-base-content/50 text-xs">
+														Finished {timeAgo(streamActivityTime(lastStream))}
+													</div>
+												</div>
+											) : (
+												"No playback yet"
+											)}
+											{mode?.detail && (
+												<div className="dashboard-line-clamp mt-1 text-base-content/50 text-xs">
+													{mode.detail}
+												</div>
+											)}
+										</div>
+									</div>
+								);
+							})
+						) : (
+							<div className="rounded-md border border-base-300 border-dashed p-4 text-base-content/60 text-sm md:col-span-2 2xl:col-span-3">
+								No paired Tater Tube players yet.
+							</div>
+						)}
+					</div>
+				</Panel>
 			</section>
 		</div>
 	);

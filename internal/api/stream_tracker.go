@@ -718,7 +718,8 @@ func (t *StreamTracker) KillStreamsForPlayer(playerID, userName string) int {
 		internal := valueToInternal(value)
 		stream := internal.ActiveStream
 		playerMatches := playerID != "" && strings.EqualFold(strings.TrimSpace(stream.PlayerID), playerID)
-		nameMatches := userName != "" && strings.EqualFold(strings.TrimSpace(stream.UserName), userName)
+		nameMatches := strings.TrimSpace(stream.PlayerID) == "" && userName != "" &&
+			strings.EqualFold(strings.TrimSpace(stream.UserName), userName)
 		if playerMatches || nameMatches {
 			if streamID, ok := key.(string); ok {
 				ids = append(ids, streamID)
@@ -770,9 +771,12 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 		s := internal.ActiveStream
 
 		// Create a composite key for grouping
-		// We group by FilePath, UserName, Source, ClientIP and UserAgent to aggregate parallel connections
-		// for the same playback session while keeping different devices separate
+		// We group by FilePath, UserName, Source, ClientIP and UserAgent to aggregate parallel connections.
+		// A paired player ID keeps devices separate even when they share the default display name.
 		groupKey := s.FilePath + "|" + s.UserName + "|" + s.Source + "|" + s.ClientIP + "|" + s.UserAgent
+		if playerID := strings.ToLower(strings.TrimSpace(s.PlayerID)); playerID != "" {
+			groupKey += "|player:" + playerID
+		}
 
 		if existing, ok := grouped[groupKey]; ok {
 			// Aggregate with existing group

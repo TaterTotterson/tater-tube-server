@@ -298,7 +298,10 @@ func (s *Server) handleTaterActiveStreams(c *fiber.Ctx) error {
 	streams := s.streamTracker.GetAll()
 	filtered := make([]any, 0, len(streams))
 	for _, stream := range streams {
-		if strings.EqualFold(strings.TrimSpace(stream.UserName), playerName) {
+		playerMatches := strings.EqualFold(strings.TrimSpace(stream.PlayerID), player.ID)
+		legacyNameMatches := strings.TrimSpace(stream.PlayerID) == "" &&
+			strings.EqualFold(strings.TrimSpace(stream.UserName), playerName)
+		if playerMatches || legacyNameMatches {
 			filtered = append(filtered, stream)
 		}
 	}

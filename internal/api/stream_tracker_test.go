@@ -98,6 +98,26 @@ func TestStreamTracker_GetAll_Sorting(t *testing.T) {
 	assert.Equal(t, "/old.mkv", streams[1].FilePath)
 }
 
+func TestStreamTracker_GetAll_SeparatesPairedPlayersWithSameName(t *testing.T) {
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+
+	first := tracker.AddStream("/movies/movie.mkv", "Local", "Tater Tube Player", "127.0.0.1", "TestAgent", 1000)
+	tracker.SetPlayerID(first.ID, "player-1")
+	second := tracker.AddStream("/movies/movie.mkv", "Local", "Tater Tube Player", "127.0.0.1", "TestAgent", 1000)
+	tracker.SetPlayerID(second.ID, "player-2")
+
+	streams := tracker.GetAll()
+
+	assert.Len(t, streams, 2)
+	playerIDs := map[string]bool{}
+	for _, stream := range streams {
+		playerIDs[stream.PlayerID] = true
+	}
+	assert.True(t, playerIDs["player-1"])
+	assert.True(t, playerIDs["player-2"])
+}
+
 func TestStreamTracker_GetAll_IncludesTranscodingInfo(t *testing.T) {
 	tracker := NewStreamTracker(nil)
 	defer tracker.Stop()
@@ -146,7 +166,7 @@ func TestStreamTracker_KillStreamsForPlayer(t *testing.T) {
 	owned := tracker.AddStream("/movies/owned.mkv", "Local", "Xbox", "127.0.0.1", "TestAgent", 1000)
 	tracker.SetPlayerID(owned.ID, "player-1")
 	fallback := tracker.AddStream("/movies/fallback.mkv", "Local", "Xbox", "127.0.0.1", "TestAgent", 1000)
-	other := tracker.AddStream("/movies/other.mkv", "Local", "Other", "127.0.0.1", "TestAgent", 1000)
+	other := tracker.AddStream("/movies/other.mkv", "Local", "Xbox", "127.0.0.1", "TestAgent", 1000)
 	tracker.SetPlayerID(other.ID, "player-2")
 
 	stopped := tracker.KillStreamsForPlayer("player-1", "Xbox")
