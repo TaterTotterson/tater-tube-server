@@ -888,7 +888,13 @@ func buildFFmpegAudioOnlyVideoArgs(audioBitrate, inputPath string, startSeconds 
 	}
 	if strings.TrimSpace(inputPath) != "" {
 		if startSeconds > 0 {
-			args = append(args, "-ss", strconv.FormatFloat(startSeconds, 'f', 3, 64))
+			// Keep copied video and transcoded audio on the same seek point. With
+			// accurate seeking FFmpeg retains the video keyframe pre-roll but
+			// discards the matching transcoded audio, creating a silent lead-in.
+			args = append(args,
+				"-noaccurate_seek",
+				"-ss", strconv.FormatFloat(startSeconds, 'f', 3, 64),
+			)
 		}
 		args = append(args, "-i", inputPath)
 	} else {
