@@ -30,6 +30,9 @@ const (
 	taterTVHLSPlaylistLimit     = 12
 	taterTVHLSFirstWait         = 10 * time.Second
 	taterTVHLSIdleTimeout       = 15 * time.Second
+	// Leave slightly more than one 48 kHz AAC/video frame between independently
+	// muxed items so encoder padding cannot make the next DTS overlap the last.
+	taterTVHLSTimestampGuardSeconds = 0.050
 )
 
 var errTaterTVHLSIdle = errors.New("Tube TV HLS session idle")
@@ -425,7 +428,17 @@ func (s *taterTVHLSSession) transcodeProgramSegments(ctx context.Context, items 
 		}
 		playlistPath := filepath.Join(itemDir, "index.m3u8")
 		segmentPattern := filepath.Join(itemDir, "seg-%05d.ts")
-		args := buildTaterTVChannelHLSArgsWithCodec(s.transcodeCfg, s.profile, s.accel, s.preferredCodec, item.Path, item.StartSeconds, item.DurationSeconds, taterTVLogoForItem(item, logoFile), s.channel.LogoPosition, playlistPath, segmentPattern)
+		// Every schedule item is encoded by a separate FFmpeg process. Keep the
+		// MPEG-TS clock continuous across those processes; resetting it to zero at
+		// an ad or bumper boundary can leave stricter TV players waiting forever
+		// for timestamps that have already passed.
+		timelineOffset := s.nextTimestampOffsetSeconds()
+		args := buildTaterTVChannelHLSArgsWithTimeline(
+			s.transcodeCfg, s.profile, s.accel, s.preferredCodec,
+			item.Path, item.StartSeconds, item.DurationSeconds,
+			timelineOffset, taterTVLogoForItem(item, logoFile),
+			s.channel.LogoPosition, playlistPath, segmentPattern,
+		)
 		var stderr limitedBuffer
 		cmd := exec.CommandContext(ctx, s.ffmpegPath, args...)
 		cmd.Stderr = &stderr
@@ -440,6 +453,7 @@ func (s *taterTVHLSSession) transcodeProgramSegments(ctx context.Context, items 
 			"path", item.Path,
 			"start_seconds", item.StartSeconds,
 			"duration_seconds", item.DurationSeconds,
+			"timeline_offset", timelineOffset,
 			"profile", s.profileID,
 			"hardware_acceleration", s.accel,
 			"video_codec", s.videoCodec)
@@ -637,6 +651,27 @@ func (s *taterTVHLSSession) segmentCount() int {
 	return len(s.segments)
 }
 
+func (s *taterTVHLSSession) nextTimestampOffsetSeconds() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	total := 0.0
+	validSegments := 0
+	discontinuities := 0
+	for _, segment := range s.segments {
+		if segment.Duration > 0 && !math.IsNaN(segment.Duration) && !math.IsInf(segment.Duration, 0) {
+			total += segment.Duration
+			validSegments++
+		}
+		if segment.Discontinuity {
+			discontinuities++
+		}
+	}
+	if validSegments > 0 {
+		total += float64(discontinuities+1) * taterTVHLSTimestampGuardSeconds
+	}
+	return total
+}
+
 func (s *taterTVHLSSession) finished() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -709,6 +744,13 @@ func buildTaterTVChannelHLSArgs(cfg config.TranscodingConfig, profile transcodeP
 }
 
 func buildTaterTVChannelHLSArgsWithCodec(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, inputPath string, startSeconds, durationSeconds float64, logoFile, logoPosition, outputPlaylist, segmentPattern string) []string {
+	return buildTaterTVChannelHLSArgsWithTimeline(
+		cfg, profile, accel, preferredCodec, inputPath, startSeconds,
+		durationSeconds, 0, logoFile, logoPosition, outputPlaylist, segmentPattern,
+	)
+}
+
+func buildTaterTVChannelHLSArgsWithTimeline(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, inputPath string, startSeconds, durationSeconds, timelineOffset float64, logoFile, logoPosition, outputPlaylist, segmentPattern string) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
@@ -770,12 +812,25 @@ func buildTaterTVChannelHLSArgsWithCodec(cfg config.TranscodingConfig, profile t
 		"-b:a", profile.AudioBitrate,
 		"-ac", "2",
 		"-ar", "48000",
+		// Keep decoder-visible video parameters stable when a channel moves
+		// between HDR/SDR programs, older commercials, and generated bumpers.
+		"-color_primaries", "bt709",
+		"-color_trc", "bt709",
+		"-colorspace", "bt709",
+		"-color_range", "tv",
 		"-fflags", "+genpts",
 		"-avoid_negative_ts", "make_zero",
 		"-force_key_frames", "expr:gte(t,n_forced*"+strconv.Itoa(taterTVHLSSegmentSeconds)+")",
 		"-bsf:v", "dump_extra=freq=keyframe",
 		"-muxdelay", "0",
 		"-muxpreload", "0",
+	)
+	if timelineOffset > 0 && !math.IsNaN(timelineOffset) && !math.IsInf(timelineOffset, 0) {
+		args = append(args,
+			"-output_ts_offset", strconv.FormatFloat(timelineOffset, 'f', 6, 64),
+		)
+	}
+	args = append(args,
 		"-f", "hls",
 		"-hls_time", strconv.Itoa(taterTVHLSSegmentSeconds),
 		"-hls_segment_type", "mpegts",
