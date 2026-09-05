@@ -79,12 +79,33 @@ EOF
 		},
 	}
 
-	first, err := scanTaterLocalLibrary(context.Background(), cfg, taterLocalLibraryIndex{}, nil)
+	progressEvents := []taterLocalLibraryScanProgress{}
+	first, err := scanTaterLocalLibrary(
+		context.Background(),
+		cfg,
+		taterLocalLibraryIndex{},
+		func(progress taterLocalLibraryScanProgress) {
+			progressEvents = append(progressEvents, progress)
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(first.Files) != 3 || len(first.Albums) != 1 {
 		t.Fatalf("unexpected local index: files=%d albums=%d", len(first.Files), len(first.Albums))
+	}
+	sawCompleteScanProgress := false
+	sawCompleteDurationProgress := false
+	for _, progress := range progressEvents {
+		if progress.Phase == "scanning" && progress.Current == 3 && progress.Total == 3 {
+			sawCompleteScanProgress = true
+		}
+		if progress.Phase == "durations" && progress.Current == 2 && progress.Total == 2 && progress.FilesTotal == 3 {
+			sawCompleteDurationProgress = true
+		}
+	}
+	if !sawCompleteScanProgress || !sawCompleteDurationProgress {
+		t.Fatalf("expected determinate scan and duration progress, got %#v", progressEvents)
 	}
 	album := first.Albums[0]
 	if album.Title != "Exodus" || album.Artist != "Bob Marley & The Wailers" || album.TrackCount != 1 {
@@ -155,6 +176,36 @@ EOF
 	loaded, err := readTaterLocalLibraryIndex(cfg)
 	if err != nil || len(loaded.Albums) != 1 || loaded.ConfigFingerprint != taterLocalLibraryFingerprint(cfg) {
 		t.Fatalf("persistent index did not round-trip: %#v error=%v", loaded, err)
+	}
+}
+
+func TestTaterLocalLibraryMissingAttentionIncludesArtworkAndMetadata(t *testing.T) {
+	if taterLocalMusicAlbumNeedsAttention(taterLocalMusicAlbumIndex{
+		HasArtwork: true, MetadataAvailable: true, HasMetadata: true,
+		ArtistMetadataAvailable: true, HasArtistMetadata: true,
+	}) {
+		t.Fatal("complete music album should not need attention")
+	}
+	if !taterLocalMusicAlbumNeedsAttention(taterLocalMusicAlbumIndex{
+		HasArtwork: true, MetadataAvailable: true, HasMetadata: false,
+	}) {
+		t.Fatal("music album missing metadata should need attention")
+	}
+	if !taterLocalVideoNeedsAttention(taterLocalVideoIndex{HasArtwork: false, HasMetadata: true}) {
+		t.Fatal("video missing artwork should need attention")
+	}
+	if taterLocalVideoNeedsAttention(taterLocalVideoIndex{HasArtwork: true, HasMetadata: true}) {
+		t.Fatal("complete video should not need attention")
+	}
+
+	status := taterLocalLibraryScanStatus{}
+	setTaterLocalLibraryProgress(&status, 37, 100)
+	if status.ProgressCurrent != 37 || status.ProgressTotal != 100 || status.ProgressPercent != 37 {
+		t.Fatalf("unexpected progress calculation: %#v", status)
+	}
+	setTaterLocalLibraryProgress(&status, 100, 100)
+	if status.ProgressPercent != 99 {
+		t.Fatalf("running work should reserve 100 percent for completion: %#v", status)
 	}
 }
 

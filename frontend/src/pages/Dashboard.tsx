@@ -6,6 +6,7 @@ import {
 	Gauge,
 	HardDrive,
 	List,
+	ListChecks,
 	Radio,
 	Server,
 	Tv,
@@ -14,8 +15,10 @@ import {
 } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 import { apiClient } from "../api/client";
+import { LocalMediaScanProgress } from "../components/system/LocalMediaScanProgress";
 import {
 	useActiveStreams,
+	useLocalMediaScanStatus,
 	usePoolMetrics,
 	useQueueStats,
 	useStreamHistory,
@@ -207,6 +210,7 @@ function Panel({
 
 export function Dashboard() {
 	const { data: config } = useConfig();
+	const { data: localMediaScan } = useLocalMediaScanStatus();
 	const { data: queueStats } = useQueueStats(10000);
 	const { data: poolMetrics } = usePoolMetrics();
 	const { data: activeStreamData } = useActiveStreams();
@@ -366,6 +370,14 @@ export function Dashboard() {
 					</div>
 				</Panel>
 			</section>
+
+			{localMediaScan?.running && (
+				<section className="min-w-0">
+					<Panel title="Background Tasks" icon={ListChecks}>
+						<LocalMediaScanProgress status={localMediaScan} compact />
+					</Panel>
+				</section>
+			)}
 
 			<section className="grid gap-4 xl:grid-cols-3">
 				<Panel title="Server Specs" icon={Server}>

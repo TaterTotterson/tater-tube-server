@@ -565,6 +565,7 @@ export const useLocalMediaLibrary = (params?: {
 	type?: LocalMediaLibraryType;
 	category_id?: string;
 	q?: string;
+	missing_only?: boolean;
 	limit?: number;
 	offset?: number;
 }) => {

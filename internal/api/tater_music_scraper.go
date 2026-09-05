@@ -55,6 +55,7 @@ type taterMusicArtworkCandidate struct {
 
 type taterMusicEnrichmentProgress struct {
 	AlbumsProcessed int
+	AlbumsTotal     int
 	ArtworkFound    int
 	MetadataFound   int
 	GenreMatches    int
@@ -1058,7 +1059,22 @@ func scrapeTaterMissingAlbumArtwork(
 	if index == nil {
 		return nil
 	}
-	status := taterMusicEnrichmentProgress{}
+	totalAlbums := 0
+	for i := range index.Albums {
+		album := &index.Albums[i]
+		applyTaterLocalMusicNFO(cfg, album)
+		needsArtwork := !album.HasArtwork && !album.ArtworkLocked
+		needsGenres := len(album.Genres) == 0
+		needsMetadata := album.MetadataAvailable && (!album.HasMetadata ||
+			(album.ArtistMetadataAvailable && !album.HasArtistMetadata))
+		if needsArtwork || needsGenres || needsMetadata {
+			totalAlbums++
+		}
+	}
+	status := taterMusicEnrichmentProgress{AlbumsTotal: totalAlbums}
+	if progress != nil {
+		progress(status)
+	}
 	unmatchedAlbumIndexes := []int{}
 	processedAlbums := map[string]bool{}
 	for i := range index.Albums {
