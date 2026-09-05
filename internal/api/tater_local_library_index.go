@@ -19,7 +19,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-const taterLocalLibraryIndexSchema = 1
+const taterLocalLibraryIndexSchema = 2
 
 type taterLocalLibraryStats struct {
 	Files          int   `json:"files"`
@@ -88,6 +88,28 @@ type taterLocalMusicAlbumIndex struct {
 	ArtworkLocked  bool     `json:"artwork_locked"`
 	MusicBrainzID  string   `json:"musicbrainz_id,omitempty"`
 	ArtworkUpdated int64    `json:"artwork_updated,omitempty"`
+	ArtworkStorage string   `json:"artwork_storage,omitempty"`
+}
+
+type taterLocalVideoIndex struct {
+	ID             string `json:"id"`
+	CategoryID     string `json:"category_id"`
+	CategoryName   string `json:"category_name"`
+	LibraryType    string `json:"library_type"`
+	MediaType      string `json:"media_type"`
+	SourceIndex    int    `json:"source_index"`
+	Path           string `json:"path"`
+	Title          string `json:"title"`
+	Year           string `json:"year,omitempty"`
+	SizeBytes      int64  `json:"size_bytes"`
+	ModifiedUnix   int64  `json:"modified_unix"`
+	HasArtwork     bool   `json:"has_artwork"`
+	ArtworkSource  string `json:"artwork_source,omitempty"`
+	ArtworkRef     string `json:"artwork_ref,omitempty"`
+	ArtworkURL     string `json:"artwork_url,omitempty"`
+	ArtworkLocked  bool   `json:"artwork_locked"`
+	TMDBID         int64  `json:"tmdb_id,omitempty"`
+	ArtworkUpdated int64  `json:"artwork_updated,omitempty"`
 }
 
 type taterLocalLibraryIndex struct {
@@ -97,6 +119,7 @@ type taterLocalLibraryIndex struct {
 	VideoDurationsScanned bool                             `json:"video_durations_scanned,omitempty"`
 	Categories            []taterLocalLibraryCategoryIndex `json:"categories"`
 	Albums                []taterLocalMusicAlbumIndex      `json:"albums"`
+	Videos                []taterLocalVideoIndex           `json:"videos"`
 	Files                 []taterLocalLibraryFileIndex     `json:"files"`
 }
 
@@ -109,6 +132,7 @@ type taterMusicArtworkOverride struct {
 	Genres        []string  `json:"genres,omitempty"`
 	Locked        bool      `json:"locked"`
 	UpdatedAt     time.Time `json:"updated_at"`
+	Storage       string    `json:"storage,omitempty"`
 }
 
 type taterMusicArtworkStore struct {
@@ -124,6 +148,7 @@ type taterLocalLibraryScanStatus struct {
 	FinishedAt      time.Time `json:"finished_at,omitempty"`
 	FilesScanned    int       `json:"files_scanned"`
 	AlbumsProcessed int       `json:"albums_processed"`
+	VideosProcessed int       `json:"videos_processed"`
 	ArtworkFound    int       `json:"artwork_found"`
 	GenreMatches    int       `json:"genre_matches"`
 	GenreUnmatched  int       `json:"genre_unmatched"`
@@ -131,7 +156,8 @@ type taterLocalLibraryScanStatus struct {
 }
 
 type taterLocalLibraryScanRequest struct {
-	ScrapeMissingArtwork bool `json:"scrape_missing_artwork"`
+	ScrapeMissingArtwork bool   `json:"scrape_missing_artwork"`
+	ArtworkLibraryType   string `json:"artwork_library_type,omitempty"`
 }
 
 type taterLocalDurationProbeJob struct {
@@ -148,6 +174,11 @@ type taterLocalMusicArtworkRequest struct {
 	AlbumID string `json:"album_id"`
 	Force   bool   `json:"force"`
 	Locked  *bool  `json:"locked,omitempty"`
+}
+
+type taterLocalVideoArtworkRequest struct {
+	MediaID string `json:"media_id"`
+	Force   bool   `json:"force"`
 }
 
 var taterLocalLibraryScans = struct {
@@ -226,6 +257,9 @@ func readTaterLocalLibraryIndex(cfg *config.Config) (taterLocalLibraryIndex, err
 	}
 	if index.Albums == nil {
 		index.Albums = []taterLocalMusicAlbumIndex{}
+	}
+	if index.Videos == nil {
+		index.Videos = []taterLocalVideoIndex{}
 	}
 	if index.Files == nil {
 		index.Files = []taterLocalLibraryFileIndex{}
@@ -344,6 +378,7 @@ func scanTaterLocalLibrary(
 		VideoDurationsScanned: true,
 		Categories:            []taterLocalLibraryCategoryIndex{},
 		Albums:                []taterLocalMusicAlbumIndex{},
+		Videos:                []taterLocalVideoIndex{},
 		Files:                 []taterLocalLibraryFileIndex{},
 	}
 	if cfg == nil {
@@ -433,6 +468,16 @@ func scanTaterLocalLibrary(
 						file.Disc = metadata.Disc
 						file.DurationSeconds = metadata.Duration
 						file.HasEmbeddedArtwork = metadata.HasArtwork
+					} else {
+						mediaType := "movie"
+						if category.LibraryType == "tv" {
+							mediaType = "episode"
+						}
+						item := taterUsenetItem{MediaType: mediaType}
+						taterApplyLocalMetadata(path, &item)
+						file.Title = cleanTaterText(item.Title)
+						file.Year = strings.TrimSpace(item.Date)
+						file.Genres = append([]string(nil), item.Genres...)
 					}
 				}
 				index.Files = append(index.Files, file)
@@ -632,6 +677,16 @@ func buildTaterLocalLibraryStats(cfg *config.Config, index *taterLocalLibraryInd
 			category.Stats.Shows = len(shows)
 		}
 	}
+	index.Videos = buildTaterLocalVideoArtworkIndex(cfg, index.Files, index.Categories)
+	for _, video := range index.Videos {
+		if category := categoryByID[video.CategoryID]; category != nil {
+			if video.HasArtwork {
+				category.Stats.Artwork++
+			} else {
+				category.Stats.MissingArtwork++
+			}
+		}
+	}
 	overrides := readTaterMusicArtworkStore(cfg)
 	index.Albums = make([]taterLocalMusicAlbumIndex, 0, len(albums))
 	for _, build := range albums {
@@ -694,18 +749,22 @@ func applyTaterMusicAlbumArtwork(
 	validOverride := override.AlbumID == album.ID && taterMusicArtworkOverrideExists(cfg, cat, override)
 	if validOverride && override.Locked {
 		setTaterMusicAlbumArtwork(album, override.Source, override.Ref, true, override.MusicBrainzID, override.UpdatedAt)
+		album.ArtworkStorage = override.Storage
 		return
 	}
 	if album.ArtworkSource == "embedded" && album.ArtworkRef != "" {
 		album.HasArtwork = true
+		album.ArtworkStorage = "library"
 	}
 	if !album.HasArtwork {
 		if localRef := findTaterLocalAlbumArtwork(cat, album.SourceIndex, album.Path); localRef != "" {
 			setTaterMusicAlbumArtwork(album, "local", localRef, false, "", time.Time{})
+			album.ArtworkStorage = "library"
 		}
 	}
 	if !album.HasArtwork && validOverride {
 		setTaterMusicAlbumArtwork(album, override.Source, override.Ref, override.Locked, override.MusicBrainzID, override.UpdatedAt)
+		album.ArtworkStorage = override.Storage
 	}
 }
 
@@ -721,6 +780,7 @@ func setTaterMusicAlbumArtwork(
 	album.ArtworkRef = strings.TrimSpace(ref)
 	album.ArtworkLocked = locked
 	album.MusicBrainzID = strings.TrimSpace(mbid)
+	album.ArtworkStorage = ""
 	if !updated.IsZero() {
 		album.ArtworkUpdated = updated.Unix()
 	}
@@ -733,6 +793,17 @@ func taterMusicArtworkOverrideExists(
 ) bool {
 	switch override.Source {
 	case "scraped", "manual":
+		if override.Storage == "library" {
+			for _, root := range taterLocalMediaCategoryPaths(cat) {
+				path, err := safeLocalPath(root, override.Ref)
+				if err == nil {
+					if info, statErr := os.Stat(path); statErr == nil && info != nil && !info.IsDir() {
+						return true
+					}
+				}
+			}
+			return false
+		}
 		path, err := safeTaterMusicArtworkCachePath(cfg, override.Ref)
 		if err != nil {
 			return false
@@ -857,6 +928,7 @@ func (s *Server) handleLocalMediaLibrary(c *fiber.Ctx) error {
 			Schema:     taterLocalLibraryIndexSchema,
 			Categories: []taterLocalLibraryCategoryIndex{},
 			Albums:     []taterLocalMusicAlbumIndex{},
+			Videos:     []taterLocalVideoIndex{},
 			Files:      []taterLocalLibraryFileIndex{},
 		}
 		for _, cat := range cfg.LocalMedia.Categories {
@@ -882,6 +954,9 @@ func (s *Server) handleLocalMediaLibrary(c *fiber.Ctx) error {
 	}
 	albums := make([]taterLocalMusicAlbumIndex, 0, len(index.Albums))
 	for _, album := range index.Albums {
+		if libraryType != "" && libraryType != "music" {
+			continue
+		}
 		if categoryID != "" && album.CategoryID != categoryID {
 			continue
 		}
@@ -893,21 +968,46 @@ func (s *Server) handleLocalMediaLibrary(c *fiber.Ctx) error {
 		album.ArtworkURL = taterLocalMusicAdminArtworkURL(album)
 		albums = append(albums, album)
 	}
+	videos := make([]taterLocalVideoIndex, 0, len(index.Videos))
+	for _, video := range index.Videos {
+		if libraryType != "" && video.LibraryType != libraryType {
+			continue
+		}
+		if categoryID != "" && video.CategoryID != categoryID {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(strings.Join([]string{
+			video.Title, video.Year, video.CategoryName, video.Path,
+		}, " ")), query) {
+			continue
+		}
+		video.ArtworkURL = taterLocalVideoAdminArtworkURL(video)
+		videos = append(videos, video)
+	}
 	totalAlbums := len(albums)
-	offset := queryInt(c, "offset", 0, 0, max(totalAlbums, 1))
+	totalVideos := len(videos)
+	totalResults := max(totalAlbums, totalVideos)
+	offset := queryInt(c, "offset", 0, 0, max(totalResults, 1))
 	limit := queryInt(c, "limit", 120, 1, 500)
-	end := min(totalAlbums, offset+limit)
-	page := []taterLocalMusicAlbumIndex{}
+	albumEnd := min(totalAlbums, offset+limit)
+	albumPage := []taterLocalMusicAlbumIndex{}
 	if offset < totalAlbums {
-		page = albums[offset:end]
+		albumPage = albums[offset:albumEnd]
+	}
+	videoEnd := min(totalVideos, offset+limit)
+	videoPage := []taterLocalVideoIndex{}
+	if offset < totalVideos {
+		videoPage = videos[offset:videoEnd]
 	}
 	return RespondSuccess(c, fiber.Map{
 		"generated_at": index.GeneratedAt,
 		"stale":        missing || index.ConfigFingerprint != taterLocalLibraryFingerprint(cfg),
 		"categories":   filteredCategories,
 		"stats":        aggregateTaterLocalLibraryStats(filteredCategories, ""),
-		"albums":       page,
+		"albums":       albumPage,
 		"total_albums": totalAlbums,
+		"videos":       videoPage,
+		"total_videos": totalVideos,
 		"offset":       offset,
 		"limit":        limit,
 		"scan":         getTaterLocalLibraryScanStatus(cfg),
@@ -970,19 +1070,40 @@ func runTaterLocalLibraryScan(
 		})
 	})
 	if err == nil && request.ScrapeMissingArtwork {
-		updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
-			status.Phase = "artwork"
-			status.Message = "Finding album artwork and genres"
-		})
-		err = scrapeTaterMissingAlbumArtwork(context.Background(), cfg, &index, func(progress taterMusicEnrichmentProgress) {
+		artworkType := strings.ToLower(strings.TrimSpace(request.ArtworkLibraryType))
+		if artworkType == "" {
+			artworkType = "all"
+		}
+		musicArtworkFound := 0
+		if artworkType == "all" || artworkType == "music" {
 			updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
-				status.AlbumsProcessed = progress.AlbumsProcessed
-				status.ArtworkFound = progress.ArtworkFound
-				status.GenreMatches = progress.GenreMatches
-				status.GenreUnmatched = progress.GenreUnmatched
-				status.Message = progress.Message
+				status.Phase = "artwork"
+				status.Message = "Finding album artwork and genres"
 			})
-		})
+			err = scrapeTaterMissingAlbumArtwork(context.Background(), cfg, &index, func(progress taterMusicEnrichmentProgress) {
+				musicArtworkFound = progress.ArtworkFound
+				updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
+					status.AlbumsProcessed = progress.AlbumsProcessed
+					status.ArtworkFound = progress.ArtworkFound
+					status.GenreMatches = progress.GenreMatches
+					status.GenreUnmatched = progress.GenreUnmatched
+					status.Message = progress.Message
+				})
+			})
+		}
+		if err == nil && (artworkType == "all" || artworkType == "movies" || artworkType == "tv") {
+			updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
+				status.Phase = "artwork"
+				status.Message = "Finding movie and TV artwork"
+			})
+			err = scrapeTaterMissingVideoArtwork(context.Background(), cfg, &index, artworkType, func(progress taterVideoArtworkProgress) {
+				updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
+					status.VideosProcessed = progress.VideosProcessed
+					status.ArtworkFound = musicArtworkFound + progress.ArtworkFound
+					status.Message = progress.Message
+				})
+			})
+		}
 	}
 	if err == nil {
 		index.GeneratedAt = time.Now().UTC()
@@ -999,11 +1120,12 @@ func runTaterLocalLibraryScan(
 		} else {
 			status.Phase = "complete"
 			status.FilesScanned = len(index.Files)
-			if status.AlbumsProcessed > 0 {
+			if status.AlbumsProcessed > 0 || status.VideosProcessed > 0 {
 				status.Message = fmt.Sprintf(
-					"Library updated: %d genre matches, %d albums still unmatched",
-					status.GenreMatches,
-					status.GenreUnmatched,
+					"Library updated: %d artwork found, %d albums and %d videos checked",
+					status.ArtworkFound,
+					status.AlbumsProcessed,
+					status.VideosProcessed,
 				)
 			} else {
 				status.Message = "Local media library is up to date"
@@ -1164,7 +1286,16 @@ func serveTaterIndexedMusicArtwork(c *fiber.Ctx, cfg *config.Config, albumID str
 	var path string
 	switch album.ArtworkSource {
 	case "scraped", "manual":
-		path, err = safeTaterMusicArtworkCachePath(cfg, album.ArtworkRef)
+		if album.ArtworkStorage == "library" {
+			paths := taterLocalMediaCategoryPaths(cat)
+			if album.SourceIndex < 0 || album.SourceIndex >= len(paths) {
+				err = fmt.Errorf("music source is unavailable")
+			} else {
+				path, err = safeLocalPath(paths[album.SourceIndex], album.ArtworkRef)
+			}
+		} else {
+			path, err = safeTaterMusicArtworkCachePath(cfg, album.ArtworkRef)
+		}
 	case "embedded", "local":
 		paths := taterLocalMediaCategoryPaths(cat)
 		if album.SourceIndex < 0 || album.SourceIndex >= len(paths) {
@@ -1178,7 +1309,7 @@ func serveTaterIndexedMusicArtwork(c *fiber.Ctx, cfg *config.Config, albumID str
 	if err != nil {
 		return RespondNotFound(c, "Album artwork", albumID)
 	}
-	if album.ArtworkSource == "scraped" || album.ArtworkSource == "manual" {
+	if (album.ArtworkSource == "scraped" || album.ArtworkSource == "manual") && album.ArtworkStorage != "library" {
 		raw, readErr := os.ReadFile(path)
 		if readErr != nil {
 			return RespondNotFound(c, "Album artwork", albumID)

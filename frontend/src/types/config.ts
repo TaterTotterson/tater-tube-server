@@ -533,6 +533,9 @@ export interface LocalMediaConfig {
 	audiodb_enabled?: boolean;
 	audiodb_api_key?: string;
 	audiodb_api_key_set?: boolean;
+	tmdb_enabled?: boolean;
+	tmdb_api_key?: string;
+	tmdb_api_key_set?: boolean;
 	categories: LocalMediaCategory[];
 }
 
@@ -583,6 +586,27 @@ export interface LocalMediaMusicAlbum {
 	artwork_locked: boolean;
 	musicbrainz_id?: string;
 	artwork_updated?: number;
+	artwork_storage?: "library" | "cache" | string;
+}
+
+export interface LocalMediaVideo {
+	id: string;
+	category_id: string;
+	category_name: string;
+	library_type: "movies" | "tv" | string;
+	media_type: "movie" | "show" | string;
+	source_index: number;
+	path: string;
+	title: string;
+	year?: string;
+	size_bytes: number;
+	modified_unix: number;
+	has_artwork: boolean;
+	artwork_source?: "local" | "scraped" | "manual" | string;
+	artwork_url?: string;
+	artwork_locked: boolean;
+	tmdb_id?: number;
+	artwork_updated?: number;
 }
 
 export interface LocalMediaScanStatus {
@@ -593,6 +617,7 @@ export interface LocalMediaScanStatus {
 	finished_at?: string;
 	files_scanned: number;
 	albums_processed: number;
+	videos_processed: number;
 	artwork_found: number;
 	genre_matches: number;
 	genre_unmatched: number;
@@ -606,6 +631,8 @@ export interface LocalMediaLibraryResponse {
 	stats: LocalMediaLibraryStats;
 	albums: LocalMediaMusicAlbum[];
 	total_albums: number;
+	videos: LocalMediaVideo[];
+	total_videos: number;
 	offset: number;
 	limit: number;
 	scan: LocalMediaScanStatus;

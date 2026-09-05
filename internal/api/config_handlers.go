@@ -225,6 +225,10 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 			case "", "********":
 				newConfig.LocalMedia.AudioDBAPIKey = currentConfig.LocalMedia.AudioDBAPIKey
 			}
+			switch strings.TrimSpace(newConfig.LocalMedia.TMDBAPIKey) {
+			case "", "********":
+				newConfig.LocalMedia.TMDBAPIKey = currentConfig.LocalMedia.TMDBAPIKey
+			}
 		}
 	case "server", "api", "auth", "database", "metadata", "streaming", "transcoding", "health", "import", "log", "sabnzbd", "arrs", "segment_cache", "system", "stremio", "tube_tv", "tater_bumpers":
 		err = c.BodyParser(newConfig)

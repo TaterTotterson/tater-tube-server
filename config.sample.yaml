@@ -51,6 +51,10 @@ local_media:
   # Public API access is used when no key is supplied; a personal key can improve access.
   audiodb_enabled: true
   audiodb_api_key: ''
+  # Reuse local Emby/Jellyfin sidecar images first, then use TMDB for missing movie/show posters.
+  # A TMDB API key or read-access token is required for remote poster matching.
+  tmdb_enabled: true
+  tmdb_api_key: ''
   categories: []
   # library_type can be:
   # - movies: recursively scans video files and shows clean movie titles

@@ -27,6 +27,7 @@ import {
 	useLocalMediaLibrary,
 	useLocalMediaScanStatus,
 	useRefreshLocalMediaAlbumArtwork,
+	useRefreshLocalMediaVideoArtwork,
 	useStartLocalMediaScan,
 	useUpdateLocalMediaAlbumArtwork,
 } from "../../hooks/useApi";
@@ -53,6 +54,9 @@ const DEFAULT_LOCAL_MEDIA: LocalMediaConfig = {
 	audiodb_enabled: true,
 	audiodb_api_key: "",
 	audiodb_api_key_set: false,
+	tmdb_enabled: true,
+	tmdb_api_key: "",
+	tmdb_api_key_set: false,
 	categories: [],
 };
 
@@ -117,6 +121,9 @@ function normalize(config: ConfigResponse): LocalMediaConfig {
 		audiodb_enabled: source.audiodb_enabled ?? true,
 		audiodb_api_key: "",
 		audiodb_api_key_set: source.audiodb_api_key_set ?? false,
+		tmdb_enabled: source.tmdb_enabled ?? true,
+		tmdb_api_key: "",
+		tmdb_api_key_set: source.tmdb_api_key_set ?? false,
 		categories: (source.categories ?? []).map((category) => ({
 			id: category.id || slug(category.name || "local"),
 			name: category.name || "Local",
@@ -185,9 +192,14 @@ function statCards(type: LocalMediaLibraryType, stats: LocalMediaLibraryStats) {
 				icon: <Film className="h-4 w-4" />,
 			},
 			{
-				label: "Files",
-				value: stats.files.toLocaleString(),
-				icon: <Library className="h-4 w-4" />,
+				label: "With Art",
+				value: stats.artwork.toLocaleString(),
+				icon: <Image className="h-4 w-4" />,
+			},
+			{
+				label: "Missing Art",
+				value: stats.missing_artwork.toLocaleString(),
+				icon: <ImageOff className="h-4 w-4" />,
 			},
 			size,
 		];
@@ -196,9 +208,14 @@ function statCards(type: LocalMediaLibraryType, stats: LocalMediaLibraryStats) {
 		return [
 			{ label: "Movies", value: stats.movies.toLocaleString(), icon: <Film className="h-4 w-4" /> },
 			{
-				label: "Files",
-				value: stats.files.toLocaleString(),
-				icon: <Library className="h-4 w-4" />,
+				label: "With Art",
+				value: stats.artwork.toLocaleString(),
+				icon: <Image className="h-4 w-4" />,
+			},
+			{
+				label: "Missing Art",
+				value: stats.missing_artwork.toLocaleString(),
+				icon: <ImageOff className="h-4 w-4" />,
 			},
 			size,
 		];
@@ -225,7 +242,7 @@ export function LocalMediaConfigSection({
 	const [activeTab, setActiveTab] = useState<LocalMediaLibraryType>("music");
 	const [search, setSearch] = useState("");
 	const [missingOnly, setMissingOnly] = useState(false);
-	const [albumOffset, setAlbumOffset] = useState(0);
+	const [libraryOffset, setLibraryOffset] = useState(0);
 	const [folderPicker, setFolderPicker] = useState<{
 		categoryIndex: number;
 		pathIndex: number;
@@ -234,23 +251,20 @@ export function LocalMediaConfigSection({
 
 	const library = useLocalMediaLibrary({
 		type: activeTab,
-		q: activeTab === "music" ? search.trim() : undefined,
+		q: activeTab !== "folders" ? search.trim() : undefined,
 		limit: 120,
-		offset: activeTab === "music" ? albumOffset : 0,
+		offset: activeTab !== "folders" ? libraryOffset : 0,
 	});
 	const scan = useLocalMediaScanStatus();
 	const startScan = useStartLocalMediaScan();
 	const refreshArtwork = useRefreshLocalMediaAlbumArtwork();
+	const refreshVideoArtwork = useRefreshLocalMediaVideoArtwork();
 	const updateArtwork = useUpdateLocalMediaAlbumArtwork();
 
 	useEffect(() => {
 		setFormData(normalize(config));
 		setHasChanges(false);
 	}, [config]);
-
-	useEffect(() => {
-		setAlbumOffset(0);
-	}, []);
 
 	const update = (next: LocalMediaConfig) => {
 		setFormData(next);
@@ -319,6 +333,8 @@ export function LocalMediaConfigSection({
 			enabled: formData.enabled,
 			audiodb_enabled: formData.audiodb_enabled ?? true,
 			audiodb_api_key: formData.audiodb_api_key?.trim() ?? "",
+			tmdb_enabled: formData.tmdb_enabled ?? true,
+			tmdb_api_key: formData.tmdb_api_key?.trim() ?? "",
 			categories: formData.categories.map((category) => ({
 				...category,
 				id: slug(category.id || category.name),
@@ -335,9 +351,11 @@ export function LocalMediaConfigSection({
 				audiodb_api_key: "",
 				audiodb_api_key_set:
 					formData.audiodb_api_key_set || (formData.audiodb_api_key?.trim() ?? "") !== "",
+				tmdb_api_key: "",
+				tmdb_api_key_set: formData.tmdb_api_key_set || (formData.tmdb_api_key?.trim() ?? "") !== "",
 			});
 			setHasChanges(false);
-			await startScan.mutateAsync(false);
+			await startScan.mutateAsync({ scrapeMissingArtwork: false });
 			showToast({ type: "success", title: "Local media saved", message: "Library scan started." });
 		} catch (error) {
 			showToast({
@@ -351,12 +369,17 @@ export function LocalMediaConfigSection({
 
 	const beginScan = async (withArtwork: boolean) => {
 		try {
-			await startScan.mutateAsync(withArtwork);
+			await startScan.mutateAsync({
+				scrapeMissingArtwork: withArtwork,
+				artworkLibraryType: withArtwork ? activeTab : undefined,
+			});
 			showToast({
 				type: "info",
-				title: withArtwork ? "Music matching started" : "Library scan started",
+				title: withArtwork ? "Artwork matching started" : "Library scan started",
 				message: withArtwork
-					? "Albums will be matched carefully for missing artwork and genre details in the background."
+					? activeTab === "music"
+						? "Albums will be matched carefully for missing artwork and genre details in the background."
+						: "Missing posters will be matched carefully and saved beside the media."
 					: "Tater Tube is updating the local media index.",
 			});
 		} catch (error) {
@@ -364,6 +387,26 @@ export function LocalMediaConfigSection({
 				type: "error",
 				title: "Could not start scan",
 				message: error instanceof Error ? error.message : "Unknown error",
+			});
+		}
+	};
+
+	const handleVideoArtworkRefresh = async (mediaId: string, hasArtwork: boolean) => {
+		try {
+			await refreshVideoArtwork.mutateAsync({ mediaId, force: hasArtwork });
+			showToast({
+				type: "success",
+				title: hasArtwork ? "Artwork replaced" : "Artwork found",
+				message: "The poster was saved beside the media for Tater Tube, Emby, and Jellyfin.",
+			});
+		} catch (error) {
+			showToast({
+				type: "warning",
+				title: "No confident artwork match",
+				message:
+					error instanceof Error
+						? error.message
+						: "Try adding the release year to the folder name.",
 			});
 		}
 	};
@@ -397,6 +440,12 @@ export function LocalMediaConfigSection({
 	const albumRows = (library.data?.albums ?? []).filter(
 		(album) => !missingOnly || !album.has_artwork,
 	);
+	const videoRows = (library.data?.videos ?? []).filter(
+		(video) => !missingOnly || !video.has_artwork,
+	);
+	const tmdbConfigured =
+		formData.tmdb_enabled !== false &&
+		(formData.tmdb_api_key_set || (formData.tmdb_api_key?.trim() ?? "") !== "");
 	const tabInfo = LIBRARY_TABS.find((tab) => tab.id === activeTab) ?? LIBRARY_TABS[0];
 
 	return (
@@ -457,24 +506,24 @@ export function LocalMediaConfigSection({
 								<div className="mt-1 text-base-content/55 text-xs">
 									{(scanStatus?.files_scanned ?? 0).toLocaleString()} files scanned
 									{scanStatus?.phase === "artwork"
-										? ` · ${(scanStatus.albums_processed ?? 0).toLocaleString()} albums checked · ${(scanStatus.artwork_found ?? 0).toLocaleString()} covers found · ${(scanStatus.genre_matches ?? 0).toLocaleString()} genre matches · ${(scanStatus.genre_unmatched ?? 0).toLocaleString()} unmatched`
+										? ` · ${(scanStatus.albums_processed ?? 0).toLocaleString()} albums checked · ${(scanStatus.videos_processed ?? 0).toLocaleString()} movies/shows checked · ${(scanStatus.artwork_found ?? 0).toLocaleString()} images found`
 										: ""}
 								</div>
 							</div>
 						</div>
 					</div>
 				)}
-				{scanStatus?.phase === "complete" && (scanStatus.albums_processed ?? 0) > 0 && (
-					<div className="alert alert-success mt-5 py-3 text-sm">
-						<CircleCheck className="h-4 w-4" />
-						<span>
-							{(scanStatus.albums_processed ?? 0).toLocaleString()} albums checked ·{" "}
-							{(scanStatus.genre_matches ?? 0).toLocaleString()} genre matches ·{" "}
-							{(scanStatus.genre_unmatched ?? 0).toLocaleString()} still unmatched ·{" "}
-							{(scanStatus.artwork_found ?? 0).toLocaleString()} covers found
-						</span>
-					</div>
-				)}
+				{scanStatus?.phase === "complete" &&
+					((scanStatus.albums_processed ?? 0) > 0 || (scanStatus.videos_processed ?? 0) > 0) && (
+						<div className="alert alert-success mt-5 py-3 text-sm">
+							<CircleCheck className="h-4 w-4" />
+							<span>
+								{(scanStatus.albums_processed ?? 0).toLocaleString()} albums checked ·{" "}
+								{(scanStatus.videos_processed ?? 0).toLocaleString()} movies/shows checked ·{" "}
+								{(scanStatus.artwork_found ?? 0).toLocaleString()} images found
+							</span>
+						</div>
+					)}
 			</section>
 
 			<section className="space-y-5 rounded-2xl border border-base-300 bg-base-100/60 p-4 sm:p-5">
@@ -488,7 +537,12 @@ export function LocalMediaConfigSection({
 						).length,
 					}))}
 					activeTab={activeTab}
-					onChange={setActiveTab}
+					onChange={(nextTab) => {
+						setActiveTab(nextTab);
+						setSearch("");
+						setMissingOnly(false);
+						setLibraryOffset(0);
+					}}
 				/>
 
 				<div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -570,6 +624,66 @@ export function LocalMediaConfigSection({
 								</span>
 							</label>
 						)}
+					</div>
+				)}
+
+				{(activeTab === "movies" || activeTab === "tv") && (
+					<div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+						<div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+							<div className="flex min-w-0 gap-3">
+								<div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
+									<WandSparkles className="h-4 w-4" />
+								</div>
+								<div>
+									<div className="font-bold text-sm">Movie & TV Artwork</div>
+									<p className="mt-1 max-w-2xl text-base-content/55 text-xs leading-relaxed">
+										Existing Emby and Jellyfin artwork is always used first. When art is missing,
+										TMDB can find a confident title and year match and save the poster beside your
+										media as a compatible sidecar file.
+									</p>
+								</div>
+							</div>
+							<label className="flex shrink-0 items-center gap-3 rounded-lg border border-base-300 bg-base-100/75 px-3 py-2">
+								<span className="font-bold text-xs">Use TMDB</span>
+								<input
+									type="checkbox"
+									className="toggle toggle-primary toggle-sm"
+									checked={formData.tmdb_enabled ?? true}
+									disabled={isReadOnly}
+									onChange={(event) => update({ ...formData, tmdb_enabled: event.target.checked })}
+								/>
+							</label>
+						</div>
+						{formData.tmdb_enabled !== false && (
+							<label className="mt-4 block max-w-xl">
+								<span className="font-bold text-base-content/65 text-xs">
+									TMDB API Key or Read Access Token
+								</span>
+								<input
+									type="password"
+									className="input input-bordered input-sm mt-1.5 w-full bg-base-100"
+									placeholder={
+										formData.tmdb_api_key_set
+											? "Saved - leave blank to keep"
+											: "Required for missing movie and TV posters"
+									}
+									value={formData.tmdb_api_key ?? ""}
+									disabled={isReadOnly}
+									onChange={(event) => update({ ...formData, tmdb_api_key: event.target.value })}
+								/>
+								<span className="mt-1.5 block text-[11px] text-base-content/45">
+									Automatic matching stays off until a key is saved; local artwork needs no key.
+								</span>
+							</label>
+						)}
+						<div className="mt-4 flex max-w-2xl items-center gap-3 border-primary/10 border-t pt-3">
+							<a href="https://www.themoviedb.org" target="_blank" rel="noreferrer">
+								<img src="/tmdb-logo.svg" alt="TMDB" className="h-5 w-auto" />
+							</a>
+							<span className="text-[10px] text-base-content/45">
+								This product uses the TMDB API but is not endorsed or certified by TMDB.
+							</span>
+						</div>
 					</div>
 				)}
 
@@ -699,6 +813,178 @@ export function LocalMediaConfigSection({
 				</div>
 			</section>
 
+			{(activeTab === "movies" || activeTab === "tv") && (
+				<section className="space-y-4 rounded-2xl border border-base-300 bg-base-100/70 p-4 sm:p-5">
+					<div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+						<div>
+							<div className="flex items-center gap-2">
+								{activeTab === "movies" ? (
+									<Film className="h-5 w-5 text-primary" />
+								) : (
+									<Tv className="h-5 w-5 text-primary" />
+								)}
+								<h4 className="font-bold text-lg">
+									Your {activeTab === "movies" ? "Movie" : "TV Show"} Library
+								</h4>
+							</div>
+							<p className="mt-1 text-base-content/55 text-sm">
+								Browse poster coverage and fill only the artwork that is still missing.
+							</p>
+						</div>
+						<div className="flex flex-col gap-2 sm:flex-row">
+							<label className="input input-bordered flex items-center gap-2 bg-base-100">
+								<Search className="h-4 w-4 text-base-content/40" />
+								<input
+									type="search"
+									className="grow"
+									placeholder={`Search ${activeTab === "movies" ? "movies" : "TV shows"}`}
+									value={search}
+									onChange={(event) => {
+										setSearch(event.target.value);
+										setLibraryOffset(0);
+									}}
+								/>
+							</label>
+							<button
+								type="button"
+								className={`btn ${missingOnly ? "btn-primary" : "btn-outline"}`}
+								onClick={() => setMissingOnly((value) => !value)}
+							>
+								<ImageOff className="h-4 w-4" />
+								Missing Art
+							</button>
+							<button
+								type="button"
+								className="btn btn-secondary"
+								disabled={
+									hasChanges || scanRunning || !tmdbConfigured || stats.missing_artwork === 0
+								}
+								onClick={() => beginScan(true)}
+							>
+								<WandSparkles className="h-4 w-4" />
+								Find Missing Art
+							</button>
+						</div>
+					</div>
+
+					{library.isLoading && (
+						<div className="flex h-52 items-center justify-center">
+							<span className="loading loading-spinner loading-lg text-primary" />
+						</div>
+					)}
+					{library.error && (
+						<div className="alert alert-error">
+							<AlertTriangle className="h-5 w-5" />
+							<span>
+								{library.error instanceof Error
+									? library.error.message
+									: "Unable to load the video library"}
+							</span>
+						</div>
+					)}
+					{!library.isLoading && !library.error && videoRows.length === 0 && (
+						<div className="rounded-xl border border-base-300 border-dashed py-14 text-center">
+							<ImageOff className="mx-auto h-10 w-10 text-base-content/25" />
+							<div className="mt-3 font-bold">
+								{library.data?.stale ? "Scan your local library" : "No titles match this view"}
+							</div>
+							<p className="mt-1 text-base-content/50 text-sm">
+								{library.data?.stale
+									? "Save your folders, then scan to build the artwork index."
+									: "Try a different search or turn off the missing-art filter."}
+							</p>
+						</div>
+					)}
+					<div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6">
+						{videoRows.map((video) => (
+							<article
+								key={video.id}
+								className="group min-w-0 overflow-hidden rounded-xl border border-base-300 bg-base-200/45"
+							>
+								<div className="relative aspect-[2/3] overflow-hidden bg-base-300/60">
+									{video.artwork_url ? (
+										<img
+											src={video.artwork_url}
+											alt={`${video.title} poster`}
+											className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+											loading="lazy"
+										/>
+									) : (
+										<div className="flex h-full flex-col items-center justify-center gap-2 text-base-content/25">
+											{video.media_type === "show" ? (
+												<Tv className="h-14 w-14" />
+											) : (
+												<Film className="h-14 w-14" />
+											)}
+											<span className="text-xs">No artwork</span>
+										</div>
+									)}
+									{video.has_artwork && (
+										<span className="badge badge-sm absolute top-2 left-2 border-0 bg-black/70 text-white capitalize">
+											{video.artwork_source === "local" ? "Library file" : video.artwork_source}
+										</span>
+									)}
+								</div>
+								<div className="space-y-3 p-3">
+									<div className="min-w-0">
+										<div className="truncate font-bold text-sm" title={video.title}>
+											{video.title}
+										</div>
+										<div className="truncate text-base-content/55 text-xs">
+											{video.media_type === "show" ? "TV Show" : "Movie"}
+											{video.year ? ` · ${video.year}` : ""}
+										</div>
+									</div>
+									<button
+										type="button"
+										className="btn btn-outline btn-xs w-full"
+										disabled={refreshVideoArtwork.isPending || !tmdbConfigured || hasChanges}
+										onClick={() => handleVideoArtworkRefresh(video.id, video.has_artwork)}
+									>
+										<WandSparkles className="h-3 w-3" />
+										{video.has_artwork ? "Replace" : "Find Art"}
+									</button>
+									<div
+										className="truncate font-mono text-[10px] text-base-content/35"
+										title={video.path}
+									>
+										{video.category_name} / {video.path || "."}
+									</div>
+								</div>
+							</article>
+						))}
+					</div>
+
+					{(library.data?.total_videos ?? 0) > 120 && (
+						<div className="flex items-center justify-between border-base-300 border-t pt-4">
+							<div className="text-base-content/50 text-xs">
+								Titles {libraryOffset + 1}–
+								{Math.min(libraryOffset + 120, library.data?.total_videos ?? 0)} of{" "}
+								{(library.data?.total_videos ?? 0).toLocaleString()}
+							</div>
+							<div className="join">
+								<button
+									type="button"
+									className="btn join-item btn-sm"
+									disabled={libraryOffset === 0}
+									onClick={() => setLibraryOffset(Math.max(0, libraryOffset - 120))}
+								>
+									Previous
+								</button>
+								<button
+									type="button"
+									className="btn join-item btn-sm"
+									disabled={libraryOffset + 120 >= (library.data?.total_videos ?? 0)}
+									onClick={() => setLibraryOffset(libraryOffset + 120)}
+								>
+									Next
+								</button>
+							</div>
+						</div>
+					)}
+				</section>
+			)}
+
 			{activeTab === "music" && (
 				<section className="space-y-4 rounded-2xl border border-base-300 bg-base-100/70 p-4 sm:p-5">
 					<div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -708,7 +994,7 @@ export function LocalMediaConfigSection({
 								<h4 className="font-bold text-lg">Your Music Library</h4>
 							</div>
 							<p className="mt-1 text-base-content/55 text-sm">
-								Browse albums, inspect artwork sources, and enrich missing music details.
+								Browse albums, inspect artwork sources, and save new covers beside your music.
 							</p>
 						</div>
 						<div className="flex flex-col gap-2 sm:flex-row">
@@ -719,7 +1005,10 @@ export function LocalMediaConfigSection({
 									className="grow"
 									placeholder="Search albums or artists"
 									value={search}
-									onChange={(event) => setSearch(event.target.value)}
+									onChange={(event) => {
+										setSearch(event.target.value);
+										setLibraryOffset(0);
+									}}
 								/>
 							</label>
 							<button
@@ -859,24 +1148,24 @@ export function LocalMediaConfigSection({
 					{(library.data?.total_albums ?? 0) > 120 && (
 						<div className="flex items-center justify-between border-base-300 border-t pt-4">
 							<div className="text-base-content/50 text-xs">
-								Albums {albumOffset + 1}–
-								{Math.min(albumOffset + 120, library.data?.total_albums ?? 0)} of{" "}
+								Albums {libraryOffset + 1}–
+								{Math.min(libraryOffset + 120, library.data?.total_albums ?? 0)} of{" "}
 								{(library.data?.total_albums ?? 0).toLocaleString()}
 							</div>
 							<div className="join">
 								<button
 									type="button"
 									className="btn join-item btn-sm"
-									disabled={albumOffset === 0}
-									onClick={() => setAlbumOffset(Math.max(0, albumOffset - 120))}
+									disabled={libraryOffset === 0}
+									onClick={() => setLibraryOffset(Math.max(0, libraryOffset - 120))}
 								>
 									Previous
 								</button>
 								<button
 									type="button"
 									className="btn join-item btn-sm"
-									disabled={albumOffset + 120 >= (library.data?.total_albums ?? 0)}
-									onClick={() => setAlbumOffset(albumOffset + 120)}
+									disabled={libraryOffset + 120 >= (library.data?.total_albums ?? 0)}
+									onClick={() => setLibraryOffset(libraryOffset + 120)}
 								>
 									Next
 								</button>

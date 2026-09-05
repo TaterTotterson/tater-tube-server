@@ -173,6 +173,9 @@ type LocalMediaAPIResponse struct {
 	AudioDBEnabled   bool                        `json:"audiodb_enabled"`
 	AudioDBAPIKey    string                      `json:"audiodb_api_key"`
 	AudioDBAPIKeySet bool                        `json:"audiodb_api_key_set"`
+	TMDBEnabled      bool                        `json:"tmdb_enabled"`
+	TMDBAPIKey       string                      `json:"tmdb_api_key"`
+	TMDBAPIKeySet    bool                        `json:"tmdb_api_key_set"`
 	Categories       []config.LocalMediaCategory `json:"categories"`
 }
 
@@ -305,10 +308,15 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		Enabled:          cfg.LocalMedia.Enabled != nil && *cfg.LocalMedia.Enabled,
 		AudioDBEnabled:   cfg.LocalMedia.AudioDBEnabled == nil || *cfg.LocalMedia.AudioDBEnabled,
 		AudioDBAPIKeySet: strings.TrimSpace(cfg.LocalMedia.AudioDBAPIKey) != "",
+		TMDBEnabled:      cfg.LocalMedia.TMDBEnabled == nil || *cfg.LocalMedia.TMDBEnabled,
+		TMDBAPIKeySet:    strings.TrimSpace(cfg.LocalMedia.TMDBAPIKey) != "",
 		Categories:       cfg.LocalMedia.Categories,
 	}
 	if localMediaResp.AudioDBAPIKeySet {
 		localMediaResp.AudioDBAPIKey = "********"
+	}
+	if localMediaResp.TMDBAPIKeySet {
+		localMediaResp.TMDBAPIKey = "********"
 	}
 	if localMediaResp.Categories == nil {
 		localMediaResp.Categories = []config.LocalMediaCategory{}
