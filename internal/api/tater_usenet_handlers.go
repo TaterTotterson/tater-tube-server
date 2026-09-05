@@ -48,60 +48,64 @@ type taterUsenetCategory struct {
 }
 
 type taterUsenetItem struct {
-	Title           string   `json:"title"`
-	Key             string   `json:"key,omitempty"`
-	RatingKey       string   `json:"ratingKey,omitempty"`
-	PartKey         string   `json:"partKey,omitempty"`
-	NzbURL          string   `json:"nzbUrl"`
-	Type            string   `json:"type,omitempty"`
-	MediaType       string   `json:"mediaType,omitempty"`
-	Artist          string   `json:"artist,omitempty"`
-	AlbumArtist     string   `json:"albumArtist,omitempty"`
-	Album           string   `json:"album,omitempty"`
-	Genre           string   `json:"genre,omitempty"`
-	Genres          []string `json:"genres,omitempty"`
-	SearchQuery     string   `json:"searchQuery,omitempty"`
-	CategoryID      string   `json:"categoryId,omitempty"`
-	SourceIndex     int      `json:"sourceIndex,omitempty"`
-	Path            string   `json:"path,omitempty"`
-	StreamURL       string   `json:"streamUrl,omitempty"`
-	SeekMode        string   `json:"seekMode,omitempty"`
-	GUID            string   `json:"guid,omitempty"`
-	Date            string   `json:"date,omitempty"`
-	Description     string   `json:"description,omitempty"`
-	OriginalTitle   string   `json:"originalTitle,omitempty"`
-	Tagline         string   `json:"tagline,omitempty"`
-	ContentRating   string   `json:"contentRating,omitempty"`
-	CommunityRating float64  `json:"communityRating,omitempty"`
-	Studios         []string `json:"studios,omitempty"`
-	Countries       []string `json:"countries,omitempty"`
-	Actors          []string `json:"actors,omitempty"`
-	Directors       []string `json:"directors,omitempty"`
-	Writers         []string `json:"writers,omitempty"`
-	IMDbID          string   `json:"imdbId,omitempty"`
-	TMDBID          int64    `json:"tmdbId,omitempty"`
-	TVDBID          int64    `json:"tvdbId,omitempty"`
-	Category        string   `json:"category,omitempty"`
-	Poster          string   `json:"poster,omitempty"`
-	HasArtwork      bool     `json:"hasArtwork,omitempty"`
-	Files           string   `json:"files,omitempty"`
-	Grabs           string   `json:"grabs,omitempty"`
-	Index           int      `json:"index,omitempty"`
-	Duration        int64    `json:"duration,omitempty"`
-	DurationSeconds float64  `json:"durationSeconds,omitempty"`
-	PlayStateID     string   `json:"playStateId,omitempty"`
-	SeriesStateID   string   `json:"seriesStateId,omitempty"`
-	ViewOffset      int64    `json:"viewOffset,omitempty"`
-	ViewOffsetSec   float64  `json:"viewOffsetSeconds,omitempty"`
-	ProgressPercent float64  `json:"progressPercent,omitempty"`
-	LeafCount       int      `json:"leafCount,omitempty"`
-	SizeBytes       int64    `json:"sizeBytes,omitempty"`
-	SizeText        string   `json:"sizeText,omitempty"`
-	DurationDisplay string   `json:"durationDisplay,omitempty"`
-	ModifiedUnix    int64    `json:"modifiedUnix,omitempty"`
-	ModuleID        string   `json:"moduleId,omitempty"`
-	ChannelNumber   string   `json:"channelNumber,omitempty"`
-	ChannelName     string   `json:"channelName,omitempty"`
+	Title           string           `json:"title"`
+	Key             string           `json:"key,omitempty"`
+	RatingKey       string           `json:"ratingKey,omitempty"`
+	PartKey         string           `json:"partKey,omitempty"`
+	NzbURL          string           `json:"nzbUrl"`
+	Type            string           `json:"type,omitempty"`
+	MediaType       string           `json:"mediaType,omitempty"`
+	Artist          string           `json:"artist,omitempty"`
+	AlbumArtist     string           `json:"albumArtist,omitempty"`
+	Album           string           `json:"album,omitempty"`
+	Genre           string           `json:"genre,omitempty"`
+	Genres          []string         `json:"genres,omitempty"`
+	SearchQuery     string           `json:"searchQuery,omitempty"`
+	CategoryID      string           `json:"categoryId,omitempty"`
+	SourceIndex     int              `json:"sourceIndex,omitempty"`
+	Path            string           `json:"path,omitempty"`
+	StreamURL       string           `json:"streamUrl,omitempty"`
+	SeekMode        string           `json:"seekMode,omitempty"`
+	GUID            string           `json:"guid,omitempty"`
+	Date            string           `json:"date,omitempty"`
+	Description     string           `json:"description,omitempty"`
+	OriginalTitle   string           `json:"originalTitle,omitempty"`
+	Tagline         string           `json:"tagline,omitempty"`
+	ContentRating   string           `json:"contentRating,omitempty"`
+	CommunityRating float64          `json:"communityRating,omitempty"`
+	Studios         []string         `json:"studios,omitempty"`
+	Countries       []string         `json:"countries,omitempty"`
+	Actors          []string         `json:"actors,omitempty"`
+	Directors       []string         `json:"directors,omitempty"`
+	Writers         []string         `json:"writers,omitempty"`
+	IMDbID          string           `json:"imdbId,omitempty"`
+	TMDBID          int64            `json:"tmdbId,omitempty"`
+	TVDBID          int64            `json:"tvdbId,omitempty"`
+	Category        string           `json:"category,omitempty"`
+	Poster          string           `json:"poster,omitempty"`
+	HasArtwork      bool             `json:"hasArtwork,omitempty"`
+	Files           string           `json:"files,omitempty"`
+	Grabs           string           `json:"grabs,omitempty"`
+	Index           int              `json:"index,omitempty"`
+	Duration        int64            `json:"duration,omitempty"`
+	DurationSeconds float64          `json:"durationSeconds,omitempty"`
+	PlayStateID     string           `json:"playStateId,omitempty"`
+	SeriesStateID   string           `json:"seriesStateId,omitempty"`
+	ViewOffset      int64            `json:"viewOffset,omitempty"`
+	ViewOffsetSec   float64          `json:"viewOffsetSeconds,omitempty"`
+	ProgressPercent float64          `json:"progressPercent,omitempty"`
+	LeafCount       int              `json:"leafCount,omitempty"`
+	SeasonCount     int              `json:"seasonCount,omitempty"`
+	EpisodeCount    int              `json:"episodeCount,omitempty"`
+	ResumeTitle     string           `json:"resumeTitle,omitempty"`
+	ResumeItem      *taterUsenetItem `json:"resumeItem,omitempty"`
+	SizeBytes       int64            `json:"sizeBytes,omitempty"`
+	SizeText        string           `json:"sizeText,omitempty"`
+	DurationDisplay string           `json:"durationDisplay,omitempty"`
+	ModifiedUnix    int64            `json:"modifiedUnix,omitempty"`
+	ModuleID        string           `json:"moduleId,omitempty"`
+	ChannelNumber   string           `json:"channelNumber,omitempty"`
+	ChannelName     string           `json:"channelName,omitempty"`
 }
 
 type taterUsenetPlayRequest struct {
@@ -264,6 +268,8 @@ func (s *Server) handleTaterUsenetItems(c *fiber.Ctx) error {
 			return RespondValidationError(c, "Failed to load local media", err.Error())
 		}
 		items = taterAttachLocalPlayStates(cfg, items)
+		decorateTaterPlayerHomeItems(cfg, resolveBaseURL(c, ""), playerToken, items)
+		items = taterAttachLocalFolderProgress(cfg, resolveBaseURL(c, ""), playerToken, items)
 		title := strings.TrimSpace(c.Query("title"))
 		if title == "" {
 			title = "Local"
@@ -283,6 +289,8 @@ func (s *Server) handleTaterUsenetItems(c *fiber.Ctx) error {
 			return RespondValidationError(c, "Failed to load local discovery", err.Error())
 		}
 		items = taterAttachLocalPlayStates(cfg, items)
+		decorateTaterPlayerHomeItems(cfg, resolveBaseURL(c, ""), playerToken, items)
+		items = taterAttachLocalFolderProgress(cfg, resolveBaseURL(c, ""), playerToken, items)
 		title := strings.TrimSpace(c.Query("title"))
 		if title == "" {
 			title = "Local Discover"
@@ -1493,6 +1501,8 @@ func taterIndexedLocalTVItems(cfg *config.Config, cat config.LocalMediaCategory,
 	cleanRel := cleanLocalRelativePath(relPath)
 	items := []taterUsenetItem{}
 	folders := map[string]taterUsenetItem{}
+	folderEpisodeCounts := map[string]int{}
+	folderSeasonPaths := map[string]map[string]struct{}{}
 
 	for _, file := range files {
 		fileRel := cleanLocalRelativePath(file.Path)
@@ -1533,9 +1543,23 @@ func taterIndexedLocalTVItems(cfg *config.Config, cat config.LocalMediaCategory,
 				Path:        childPath,
 				SizeText:    sizeText,
 			}
+			folderEpisodeCounts[key]++
+			if mediaType == "show" && len(parts) > 2 && strings.TrimSpace(parts[1]) != "" {
+				if folderSeasonPaths[key] == nil {
+					folderSeasonPaths[key] = map[string]struct{}{}
+				}
+				folderSeasonPaths[key][parts[1]] = struct{}{}
+			}
 			continue
 		}
 		items = append(items, taterIndexedLocalVideoItem(cfg, cat, file, baseURL, playerToken, "episode"))
+	}
+
+	for key, folder := range folders {
+		folder.EpisodeCount = folderEpisodeCounts[key]
+		folder.LeafCount = folder.EpisodeCount
+		folder.SeasonCount = len(folderSeasonPaths[key])
+		folders[key] = folder
 	}
 
 	for _, folder := range folders {

@@ -482,6 +482,9 @@ func TestTaterLocalTVItemsUsesFreshLibraryIndex(t *testing.T) {
 	if len(shows) != 1 || shows[0].Title != "Some Show" || shows[0].MediaType != "show" {
 		t.Fatalf("unexpected indexed show rows: %#v", shows)
 	}
+	if shows[0].SeasonCount != 1 || shows[0].EpisodeCount != 2 || shows[0].LeafCount != 2 {
+		t.Fatalf("expected show counts on indexed row: %#v", shows[0])
+	}
 
 	seasons, err := taterLocalTVItems(cfg, cat, taterLocalMediaCategoryPaths(cat), "http://server", "token", -1, "Some.Show.2020")
 	if err != nil {
@@ -489,6 +492,9 @@ func TestTaterLocalTVItemsUsesFreshLibraryIndex(t *testing.T) {
 	}
 	if len(seasons) != 1 || seasons[0].Title != "Season 1" || seasons[0].MediaType != "season" {
 		t.Fatalf("unexpected indexed season rows: %#v", seasons)
+	}
+	if seasons[0].EpisodeCount != 2 || seasons[0].LeafCount != 2 {
+		t.Fatalf("expected episode count on season row: %#v", seasons[0])
 	}
 
 	episodes, err := taterLocalTVItems(cfg, cat, taterLocalMediaCategoryPaths(cat), "http://server", "token", -1, "Some.Show.2020/Season 01")
@@ -500,6 +506,68 @@ func TestTaterLocalTVItemsUsesFreshLibraryIndex(t *testing.T) {
 	}
 	if !strings.Contains(episodes[0].StreamURL, "category_id=tv") || !strings.Contains(episodes[0].StreamURL, "source=0") {
 		t.Fatalf("unexpected indexed episode stream URL: %q", episodes[0].StreamURL)
+	}
+}
+
+func TestTaterAttachLocalFolderProgressAddsArtworkAndResumeItem(t *testing.T) {
+	root := t.TempDir()
+	showDir := filepath.Join(root, "Some.Show.2020")
+	seasonDir := filepath.Join(showDir, "Season 01")
+	if err := os.MkdirAll(seasonDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(showDir, "poster.jpg"), []byte("poster"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig(t.TempDir())
+	cfg.LocalMedia.Enabled = boolPtr(true)
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID:          "tv",
+		Name:        "TV",
+		LibraryType: "tv",
+		Paths:       []string{root},
+		Enabled:     boolPtr(true),
+	}}
+	episodePath := "Some.Show.2020/Season 01/Some.Show.S01E02.Next.mkv"
+	seriesID := taterLocalSeriesStateID("local:tv", 0, episodePath)
+	if err := saveTaterPlayStateStore(cfg, taterPlayStateStore{Items: map[string]taterPlayState{
+		seriesID: {
+			ID:          seriesID,
+			SeriesID:    seriesID,
+			Title:       "S01E02 Next",
+			SeriesTitle: "Some Show",
+			MediaType:   "episode",
+			CategoryID:  "local:tv",
+			SourceIndex: 0,
+			Path:        episodePath,
+			PositionMS:  300_000,
+			DurationMS:  1_200_000,
+			UpdatedAt:   time.Now().UTC(),
+		},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	items := []taterUsenetItem{{
+		Title:       "Some Show",
+		Type:        "localFolder",
+		MediaType:   "show",
+		CategoryID:  "local:tv",
+		SourceIndex: 0,
+		Path:        "Some.Show.2020",
+	}}
+	decorateTaterPlayerHomeItems(cfg, "http://server", "player-token", items)
+	items = taterAttachLocalFolderProgress(cfg, "http://server", "player-token", items)
+
+	if !items[0].HasArtwork || !strings.Contains(items[0].Poster, "/api/v1/player/artwork/local") {
+		t.Fatalf("expected show artwork: %#v", items[0])
+	}
+	if items[0].ResumeTitle != "S01E02 Next" || items[0].ResumeItem == nil {
+		t.Fatalf("expected show resume context: %#v", items[0])
+	}
+	if items[0].ProgressPercent != 25 || items[0].ResumeItem.StreamURL == "" {
+		t.Fatalf("expected playable 25%% resume item: %#v", items[0].ResumeItem)
 	}
 }
 

@@ -207,6 +207,57 @@ func taterAttachLocalPlayStates(cfg *config.Config, items []taterUsenetItem) []t
 	return items
 }
 
+func taterAttachLocalFolderProgress(cfg *config.Config, baseURL, playerToken string, items []taterUsenetItem) []taterUsenetItem {
+	if len(items) == 0 {
+		return items
+	}
+	store, err := loadTaterPlayStateStore(cfg)
+	if err != nil {
+		return items
+	}
+	for i := range items {
+		item := &items[i]
+		if item.Type != "localFolder" ||
+			(!strings.EqualFold(item.MediaType, "show") && !strings.EqualFold(item.MediaType, "season")) {
+			continue
+		}
+		seriesID := taterLocalSeriesStateID(item.CategoryID, item.SourceIndex, item.Path)
+		state, ok := store.Items[seriesID]
+		if !ok {
+			continue
+		}
+		displayState, ok := taterContinueDisplayState(cfg, state)
+		if !ok || taterSeriesKeyFromPath(displayState.Path) != taterSeriesKeyFromPath(item.Path) {
+			continue
+		}
+		if strings.EqualFold(item.MediaType, "season") {
+			seasonPrefix := cleanLocalRelativePath(item.Path) + "/"
+			if !strings.HasPrefix(cleanLocalRelativePath(displayState.Path), seasonPrefix) {
+				continue
+			}
+		}
+
+		resume := taterPlayStateToItem(displayState, baseURL, playerToken)
+		resumeRows := []taterUsenetItem{resume}
+		decorateTaterPlayerHomeItems(cfg, baseURL, playerToken, resumeRows)
+		resume = resumeRows[0]
+		if strings.TrimSpace(resume.Poster) == "" {
+			resume.Poster = item.Poster
+			resume.HasArtwork = resume.Poster != ""
+		}
+		item.SeriesStateID = seriesID
+		item.ResumeTitle = resume.Title
+		item.ResumeItem = &resume
+		item.ViewOffset = resume.ViewOffset
+		item.ViewOffsetSec = resume.ViewOffsetSec
+		item.ProgressPercent = resume.ProgressPercent
+		item.Duration = resume.Duration
+		item.DurationSeconds = resume.DurationSeconds
+		item.DurationDisplay = resume.DurationDisplay
+	}
+	return items
+}
+
 func taterSetLocalPlayStateIDs(item *taterUsenetItem) {
 	if item == nil {
 		return
@@ -377,6 +428,21 @@ func taterLocalSeriesEpisodeItems(cfg *config.Config, cat config.LocalMediaCateg
 	showPath = cleanLocalRelativePath(showPath)
 	if showPath == "" {
 		return nil, fmt.Errorf("series path is required")
+	}
+	if indexed, ok := taterIndexedLocalFiles(cfg, cat, sourceIndex); ok {
+		prefix := showPath + "/"
+		items := make([]taterUsenetItem, 0)
+		for _, file := range indexed {
+			filePath := cleanLocalRelativePath(file.Path)
+			if file.SourceIndex != sourceIndex || !strings.HasPrefix(filePath, prefix) {
+				continue
+			}
+			items = append(items, taterIndexedLocalVideoItem(cfg, cat, file, baseURL, playerToken, "episode"))
+		}
+		sort.SliceStable(items, func(i, j int) bool {
+			return taterEpisodeSortKey(items[i].Path) < taterEpisodeSortKey(items[j].Path)
+		})
+		return items, nil
 	}
 	showAbs, err := safeLocalPath(root, showPath)
 	if err != nil {
