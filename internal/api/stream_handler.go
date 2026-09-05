@@ -273,6 +273,7 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 
 			// Register cancel function in tracker
 			h.streamTracker.SetCancelFunc(streamID, cancel)
+			applyTaterRequestedTrackInfo(h.streamTracker, streamID, r)
 
 			streamObj := h.streamTracker.GetStream(streamID)
 			if streamObj != nil {
@@ -325,6 +326,42 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, filename, stat.ModTime(), file)
 }
 
+func applyTaterRequestedTrackInfo(tracker *StreamTracker, streamID string, r *http.Request) {
+	if tracker == nil || strings.TrimSpace(streamID) == "" || r == nil {
+		return
+	}
+	videoMode := requestedTaterTrackMode(r, "tater_video_mode", "")
+	audioMode := requestedTaterTrackMode(r, "tater_audio_mode", "")
+	if videoMode == "" && audioMode == "" {
+		return
+	}
+	if videoMode == "" {
+		videoMode = "direct"
+	}
+	if audioMode == "" {
+		audioMode = "direct"
+	}
+	audioCodec := cleanTaterCodecName(r.URL.Query().Get("tater_audio_codec"))
+	status := "Streaming"
+	if audioMode == "bitstream" {
+		status = "Bitstreaming audio"
+	}
+	tracker.SetTrackProcessingInfo(streamID, videoMode, audioMode, audioCodec, status)
+}
+
+func requestedTaterTrackMode(r *http.Request, key, fallback string) string {
+	if r == nil {
+		return fallback
+	}
+	mode := cleanTaterCodecName(r.URL.Query().Get(key))
+	switch mode {
+	case "direct", "transcode", "bitstream", "none":
+		return mode
+	default:
+		return fallback
+	}
+}
+
 type transcodeProfile struct {
 	Name         string
 	MaxWidth     int
@@ -343,6 +380,8 @@ const (
 	audioSyncProfileName = "Audio Sync PCM"
 	audioOnlyProfileID   = "audio_aac"
 	audioOnlyProfileName = "Video Direct / Audio AAC"
+	videoOnlyProfileID   = "video_only"
+	videoOnlyProfileName = "Video Transcode / Audio Direct"
 )
 
 var transcodeProfiles = map[string]transcodeProfile{
@@ -420,7 +459,8 @@ func (h *StreamHandler) shouldTranscode(r *http.Request, path string) bool {
 		transcodeValue == "true" ||
 		transcodeValue == "on" ||
 		transcodeValue == "yes" ||
-		isAudioOnlyTranscodeRequest(r)
+		isAudioOnlyTranscodeRequest(r) ||
+		isVideoOnlyTranscodeRequest(r)
 	if !forceTranscode {
 		return false
 	}
@@ -455,6 +495,18 @@ func isAudioOnlyTranscodeRequest(r *http.Request) bool {
 	}
 }
 
+func isVideoOnlyTranscodeRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("transcode"))) {
+	case "video", "video-only", "video_only":
+		return true
+	default:
+		return false
+	}
+}
+
 func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, ctx context.Context, path string, file afero.File) {
 	cfg := h.configGetter()
 	if cfg == nil {
@@ -470,6 +522,10 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	}
 	if isAudioOnlyTranscodeRequest(r) {
 		h.serveAudioOnlyVideoTranscoded(w, r, ctx, path, file, ffmpegPath, cfg)
+		return
+	}
+	if isVideoOnlyTranscodeRequest(r) {
+		h.serveVideoOnlyTranscoded(w, r, ctx, path, file, ffmpegPath, cfg)
 		return
 	}
 
@@ -622,6 +678,122 @@ func (h *StreamHandler) serveAudioOnlyVideoTranscoded(
 	if err := cmd.Run(); err != nil && r.Context().Err() == nil {
 		slog.ErrorContext(ctx, "FFmpeg audio-only transcode failed",
 			"path", path,
+			"start_seconds", startSeconds,
+			"error", err,
+			"stderr", stderr.String())
+	}
+}
+
+func (h *StreamHandler) serveVideoOnlyTranscoded(
+	w http.ResponseWriter,
+	r *http.Request,
+	ctx context.Context,
+	path string,
+	file afero.File,
+	ffmpegPath string,
+	cfg *config.Config,
+) {
+	profileID := strings.TrimSpace(r.URL.Query().Get("profile"))
+	if profileID == "" {
+		profileID = strings.TrimSpace(cfg.Transcoding.Profile)
+	}
+	profile, ok := transcodeProfiles[profileID]
+	if !ok {
+		profileID = "hdmi_1080p"
+		profile = transcodeProfiles[profileID]
+	}
+	requestedCodec := requestedTranscodeCodec(r)
+	accel := strings.TrimSpace(r.URL.Query().Get("hwaccel"))
+	if accel == "" {
+		accel = strings.TrimSpace(cfg.Transcoding.HardwareAcceleration)
+	}
+	if accel == "" {
+		accel = "none"
+	}
+
+	accel, selectedHardwareDevice, videoCodecPreference := h.selectTranscodeAccelerationAndCodec(
+		r.Context(), ffmpegPath, cfg.Transcoding, profile, accel, requestedCodec,
+	)
+	if requestedCodec == transcodeCodecHEVC && videoCodecPreference != transcodeCodecHEVC {
+		if fallbackID, fallbackProfile, found := requestedFallbackTranscodeProfile(r); found {
+			profileID = fallbackID
+			profile = fallbackProfile
+			accel, selectedHardwareDevice = h.selectTranscodeAcceleration(
+				r.Context(), ffmpegPath, cfg.Transcoding, profile, accel,
+			)
+		}
+	}
+	transcodeCfg := cfg.Transcoding
+	if selectedHardwareDevice != "" {
+		transcodeCfg.HardwareDevice = selectedHardwareDevice
+	}
+	startSeconds := parseTranscodeStartSeconds(r.URL.Query().Get("start"))
+	inputPath := ""
+	if startSeconds > 0 {
+		inputPath = path
+	}
+	args := buildFFmpegVideoOnlyArgs(
+		transcodeCfg, profile, accel, videoCodecPreference, inputPath, startSeconds,
+	)
+	videoCodec, _ := transcodeVideoSettingsForCodec(
+		accel, transcodeCfg.HardwareDevice, profile, videoCodecPreference,
+	)
+	effectiveAccel := effectiveTranscodeHardwareAccel(videoCodec)
+	hardwareDevice := effectiveTranscodeHardwareDevice(
+		effectiveAccel, transcodeCfg.HardwareDevice,
+	)
+	durationSeconds := h.probeMediaDuration(ctx, path)
+	streamID := h.markTranscodedStream(
+		w, file, videoOnlyProfileID, videoOnlyProfileName,
+		effectiveAccel, hardwareDevice, videoCodec, startSeconds, durationSeconds,
+	)
+	audioCodec := cleanTaterCodecName(r.URL.Query().Get("audio_codec"))
+	if audioCodec == "" {
+		audioCodec = "copy"
+	}
+	audioMode := requestedTaterTrackMode(r, "tater_audio_mode", "direct")
+	if h.streamTracker != nil && streamID != "" {
+		h.streamTracker.SetTrackProcessingInfo(
+			streamID, "transcode", audioMode, audioCodec, "Transcoding video",
+		)
+	}
+
+	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
+	if inputPath == "" {
+		cmd.Stdin = file
+	}
+
+	var stderr limitedBuffer
+	cmd.Stderr = &stderr
+	cmd.Stdout = flushWriter{w: w}
+
+	w.Header().Set("Content-Type", "video/x-matroska")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Disposition", `inline; filename="`+filepath.Base(path)+`.video.mkv"`)
+	w.Header().Set("X-Tater-Transcode-Profile", videoOnlyProfileID)
+	w.Header().Set("X-Tater-Video-Mode", "transcode")
+	w.Header().Set("X-Tater-Audio-Mode", audioMode)
+	w.Header().Set("X-Tater-Audio-Codec", audioCodec)
+	w.Header().Del("Accept-Ranges")
+	w.WriteHeader(http.StatusOK)
+
+	slog.InfoContext(ctx, "Starting FFmpeg video-only transcode stream",
+		"path", path,
+		"profile", profileID,
+		"profile_name", profile.Name,
+		"video_mode", "transcode",
+		"video_codec", videoCodec,
+		"audio_mode", audioMode,
+		"audio_codec", audioCodec,
+		"hardware_acceleration", effectiveAccel,
+		"start_seconds", startSeconds)
+
+	if err := cmd.Run(); err != nil && r.Context().Err() == nil {
+		slog.ErrorContext(ctx, "FFmpeg video-only transcode failed",
+			"path", path,
+			"profile", profileID,
+			"video_codec", videoCodec,
+			"audio_codec", audioCodec,
 			"start_seconds", startSeconds,
 			"error", err,
 			"stderr", stderr.String())
@@ -910,6 +1082,50 @@ func buildFFmpegAudioOnlyVideoArgs(audioBitrate, inputPath string, startSeconds 
 		"-b:a", audioBitrate,
 		"-ac", "2",
 		"-ar", "48000",
+		"-fflags", "+genpts",
+		"-f", "matroska",
+		"pipe:1",
+	)
+	return args
+}
+
+func buildFFmpegVideoOnlyArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec, inputPath string, startSeconds float64) []string {
+	args := []string{
+		"-hide_banner",
+		"-loglevel", "warning",
+		"-nostdin",
+	}
+	args = append(args, transcodeHardwareInitArgs(cfg, accel)...)
+	if strings.TrimSpace(inputPath) != "" {
+		if startSeconds > 0 {
+			args = append(args, "-ss", strconv.FormatFloat(startSeconds, 'f', 3, 64))
+		}
+		args = append(args, "-i", inputPath)
+	} else {
+		args = append(args, "-i", "pipe:0")
+	}
+
+	videoCodec, filters := transcodeVideoSettingsForCodec(
+		accel, cfg.HardwareDevice, profile, preferredCodec,
+	)
+	args = append(args,
+		"-map", "0:v:0",
+		"-map", "0:a:0?",
+		"-sn",
+		"-dn",
+	)
+	if filters != "" {
+		args = append(args, "-vf", filters)
+	}
+	args = append(args,
+		"-c:v", videoCodec,
+		"-b:v", profile.VideoBitrate,
+		"-maxrate", profile.MaxRate,
+		"-bufsize", profile.BufferSize,
+	)
+	args = appendVideoEncoderOptions(args, videoCodec, profile)
+	args = append(args,
+		"-c:a", "copy",
 		"-fflags", "+genpts",
 		"-f", "matroska",
 		"pipe:1",
