@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/database"
 	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -35,6 +38,13 @@ func TestTaterPlayerLibraryRequiresPairedPlayer(t *testing.T) {
 	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/api/v1/player/library", nil))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusUnauthorized, response.StatusCode)
+}
+
+func TestTaterPlayerLinkedHeroFallsBackWithoutTaterLink(t *testing.T) {
+	server := &Server{}
+	connected, hero := server.taterPlayerLinkedHero(context.Background(), time.Now().UTC())
+	require.False(t, connected)
+	require.Nil(t, hero)
 }
 
 func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
@@ -64,6 +74,34 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 		Name:      "Living Room",
 		TokenHash: hashTaterSecret("home-token"),
 	}}
+	queueDB, err := database.NewDB(database.Config{
+		Type: "sqlite", DatabasePath: filepath.Join(configDir, "player-home.db"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = queueDB.Close() })
+	queueRepo := database.NewRepository(queueDB.Connection(), database.DialectSQLite)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	require.NoError(t, queueRepo.CreateTaterCorePairingCode(ctx, database.TaterCorePairingCode{
+		ID: "hero-code", Name: "Living Room Tater", CodeHash: "hero-pin",
+		CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute),
+	}))
+	paired, err := queueRepo.PairTaterCore(ctx, "hero-pin", now, database.TaterCoreConnection{
+		ID: "hero-core", Name: "Living Room Tater", AssistantName: "Totty",
+		TokenHash: "hero-token", CreatedAt: now,
+		LastSeenAt: sql.NullTime{Time: now, Valid: true},
+	})
+	require.NoError(t, err)
+	require.True(t, paired)
+	require.NoError(t, queueRepo.SaveTaterRecommendations(ctx, database.TaterRecommendationBatch{
+		ID: "hero-batch", ProfileID: taterDefaultProfileID, CoreID: "hero-core",
+		Summary:     "It is a cozy Friday night, and Moonrise Manor fits the mood.",
+		GeneratedAt: now, ExpiresAt: now.Add(24 * time.Hour),
+	}, []database.TaterRecommendation{{
+		ID: "hero-pick", BatchID: "hero-batch", Rank: 1, CandidateID: "hero-movie",
+		Title: "Moonrise Manor", MediaType: "movie", Source: "local_media",
+		Reason: "A cozy next watch.", LaunchJSON: `{}`, CreatedAt: now,
+	}}))
 
 	relPath := "Modern.Movie.2026/Modern.Movie.2026.mkv"
 	stateID := taterLocalPlayStateID("local:movies", 0, relPath)
@@ -81,7 +119,7 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 		},
 	}}))
 
-	server := &Server{configManager: &mockConfigManager{cfg: cfg}}
+	server := &Server{configManager: &mockConfigManager{cfg: cfg}, queueRepo: queueRepo}
 	app := fiber.New()
 	app.Get("/api/v1/player/home", server.handleTaterPlayerHome)
 	app.Get("/api/v1/player/library", server.handleTaterPlayerLibrary)
@@ -99,6 +137,11 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 	require.Equal(t, taterPlayerHomeProtocolVersion, envelope.Data.ProtocolVersion)
 	require.True(t, envelope.Data.Capabilities.LocalMedia)
 	require.False(t, envelope.Data.Capabilities.TubeTV)
+	require.True(t, envelope.Data.Capabilities.TaterLink)
+	require.NotNil(t, envelope.Data.Hero)
+	require.True(t, envelope.Data.Hero.Personalized)
+	require.Equal(t, "Totty", envelope.Data.Hero.Assistant)
+	require.Contains(t, envelope.Data.Hero.Message, "Moonrise Manor")
 	require.Len(t, envelope.Data.ContinueWatching, 1)
 	require.NotEmpty(t, envelope.Data.RecentlyAdded)
 	require.NotEmpty(t, envelope.Data.Libraries)
