@@ -56,6 +56,7 @@ type taterMusicArtworkCandidate struct {
 type taterMusicEnrichmentProgress struct {
 	AlbumsProcessed int
 	ArtworkFound    int
+	MetadataFound   int
 	GenreMatches    int
 	GenreUnmatched  int
 	Message         string
@@ -878,6 +879,13 @@ func refreshTaterLibraryArtworkStats(index *taterLocalLibraryIndex) {
 			} else {
 				index.Categories[i].Stats.MissingArtwork++
 			}
+			if album.MetadataAvailable {
+				if album.HasMetadata && (!album.ArtistMetadataAvailable || album.HasArtistMetadata) {
+					index.Categories[i].Stats.Metadata++
+				} else {
+					index.Categories[i].Stats.MissingMetadata++
+				}
+			}
 			break
 		}
 	}
@@ -951,6 +959,7 @@ func refreshTaterAlbumArtwork(
 	override.Ref = ref
 	override.ContentType = contentType
 	override.MusicBrainzID = candidate.MusicBrainzID
+	override.MusicBrainzArtistID = candidate.ArtistID
 	override.Genres = mergeTaterMusicGenres(override.Genres, genres)
 	override.Storage = storage
 	override.Locked = force
@@ -960,6 +969,7 @@ func refreshTaterAlbumArtwork(
 		return err
 	}
 	album.Genres = mergeTaterMusicGenres(album.Genres, override.Genres)
+	album.MusicBrainzArtistID = candidate.ArtistID
 	setTaterMusicAlbumArtwork(album, "scraped", ref, force, candidate.MusicBrainzID, updatedAt)
 	album.ArtworkStorage = storage
 	album.ArtworkURL = taterLocalMusicAdminArtworkURL(*album)
@@ -972,6 +982,7 @@ func persistTaterAlbumGenres(
 	album *taterLocalMusicAlbumIndex,
 	genres []string,
 	releaseGroupID string,
+	artistIDs ...string,
 ) error {
 	if album == nil || len(genres) == 0 {
 		return os.ErrNotExist
@@ -982,6 +993,12 @@ func persistTaterAlbumGenres(
 	if releaseGroupID = strings.TrimSpace(releaseGroupID); releaseGroupID != "" {
 		override.MusicBrainzID = releaseGroupID
 		album.MusicBrainzID = releaseGroupID
+	}
+	if len(artistIDs) > 0 {
+		if artistID := strings.TrimSpace(artistIDs[0]); artistID != "" {
+			override.MusicBrainzArtistID = artistID
+			album.MusicBrainzArtistID = artistID
+		}
 	}
 	override.Genres = mergeTaterMusicGenres(override.Genres, genres)
 	override.UpdatedAt = time.Now().UTC()
@@ -1020,7 +1037,7 @@ func refreshTaterAlbumGenres(
 		if genreErr != nil || len(genres) == 0 {
 			continue
 		}
-		if err := persistTaterAlbumGenres(cfg, album, genres, candidate.MusicBrainzID); err != nil {
+		if err := persistTaterAlbumGenres(cfg, album, genres, candidate.MusicBrainzID, candidate.ArtistID); err != nil {
 			return err
 		}
 		return nil
@@ -1043,17 +1060,20 @@ func scrapeTaterMissingAlbumArtwork(
 	}
 	status := taterMusicEnrichmentProgress{}
 	unmatchedAlbumIndexes := []int{}
+	processedAlbums := map[string]bool{}
 	for i := range index.Albums {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		album := &index.Albums[i]
+		applyTaterLocalMusicNFO(cfg, album)
 		needsArtwork := !album.HasArtwork && !album.ArtworkLocked
 		needsGenres := len(album.Genres) == 0
 		if !needsArtwork && !needsGenres {
 			continue
 		}
 		status.AlbumsProcessed++
+		processedAlbums[album.ID] = true
 		message := fmt.Sprintf("Finding artwork and genres for %s", album.Title)
 		status.Message = message
 		if progress != nil {
@@ -1110,6 +1130,39 @@ func scrapeTaterMissingAlbumArtwork(
 			progress(status)
 		}
 	}
+	for i := range index.Albums {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		album := &index.Albums[i]
+		applyTaterLocalMusicNFO(cfg, album)
+		needsMetadata := album.MetadataAvailable && (!album.HasMetadata ||
+			(album.ArtistMetadataAvailable && !album.HasArtistMetadata))
+		if !needsMetadata {
+			continue
+		}
+		if !processedAlbums[album.ID] {
+			status.AlbumsProcessed++
+			processedAlbums[album.ID] = true
+		}
+		status.Message = fmt.Sprintf("Creating album and artist metadata for %s", album.Title)
+		if progress != nil {
+			progress(status)
+		}
+		created, metadataErr := ensureTaterMusicNFO(ctx, cfg, album)
+		status.MetadataFound += created
+		if metadataErr != nil {
+			slog.Debug(
+				"Music NFO enrichment did not find a confident match",
+				"album", album.Title,
+				"artist", album.Artist,
+				"error", metadataErr,
+			)
+		}
+		if progress != nil {
+			progress(status)
+		}
+	}
 	refreshTaterLibraryArtworkStats(index)
 	if status.GenreUnmatched > 0 {
 		slog.Warn(
@@ -1118,6 +1171,7 @@ func scrapeTaterMissingAlbumArtwork(
 			"genre_matches", status.GenreMatches,
 			"genre_unmatched", status.GenreUnmatched,
 			"artwork_found", status.ArtworkFound,
+			"metadata_found", status.MetadataFound,
 		)
 	} else if status.AlbumsProcessed > 0 {
 		slog.Info(
@@ -1125,6 +1179,7 @@ func scrapeTaterMissingAlbumArtwork(
 			"albums_processed", status.AlbumsProcessed,
 			"genre_matches", status.GenreMatches,
 			"artwork_found", status.ArtworkFound,
+			"metadata_found", status.MetadataFound,
 		)
 	}
 	return nil

@@ -19,7 +19,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-const taterLocalLibraryIndexSchema = 3
+const taterLocalLibraryIndexSchema = 4
 
 type taterLocalLibraryStats struct {
 	Files           int   `json:"files"`
@@ -82,28 +82,38 @@ type taterLocalLibraryFileIndex struct {
 }
 
 type taterLocalMusicAlbumIndex struct {
-	ID             string   `json:"id"`
-	CategoryID     string   `json:"category_id"`
-	CategoryName   string   `json:"category_name"`
-	SourceIndex    int      `json:"source_index"`
-	Path           string   `json:"path"`
-	Title          string   `json:"title"`
-	Artist         string   `json:"artist"`
-	AlbumArtist    string   `json:"album_artist,omitempty"`
-	Genres         []string `json:"genres,omitempty"`
-	Year           string   `json:"year,omitempty"`
-	TrackCount     int      `json:"track_count"`
-	DiscCount      int      `json:"disc_count"`
-	SizeBytes      int64    `json:"size_bytes"`
-	ModifiedUnix   int64    `json:"modified_unix"`
-	HasArtwork     bool     `json:"has_artwork"`
-	ArtworkSource  string   `json:"artwork_source,omitempty"`
-	ArtworkRef     string   `json:"artwork_ref,omitempty"`
-	ArtworkURL     string   `json:"artwork_url,omitempty"`
-	ArtworkLocked  bool     `json:"artwork_locked"`
-	MusicBrainzID  string   `json:"musicbrainz_id,omitempty"`
-	ArtworkUpdated int64    `json:"artwork_updated,omitempty"`
-	ArtworkStorage string   `json:"artwork_storage,omitempty"`
+	ID                      string   `json:"id"`
+	CategoryID              string   `json:"category_id"`
+	CategoryName            string   `json:"category_name"`
+	SourceIndex             int      `json:"source_index"`
+	Path                    string   `json:"path"`
+	Title                   string   `json:"title"`
+	Artist                  string   `json:"artist"`
+	AlbumArtist             string   `json:"album_artist,omitempty"`
+	Description             string   `json:"description,omitempty"`
+	Genres                  []string `json:"genres,omitempty"`
+	Styles                  []string `json:"styles,omitempty"`
+	Year                    string   `json:"year,omitempty"`
+	TrackCount              int      `json:"track_count"`
+	DiscCount               int      `json:"disc_count"`
+	SizeBytes               int64    `json:"size_bytes"`
+	ModifiedUnix            int64    `json:"modified_unix"`
+	HasArtwork              bool     `json:"has_artwork"`
+	ArtworkSource           string   `json:"artwork_source,omitempty"`
+	ArtworkRef              string   `json:"artwork_ref,omitempty"`
+	ArtworkURL              string   `json:"artwork_url,omitempty"`
+	ArtworkLocked           bool     `json:"artwork_locked"`
+	MusicBrainzID           string   `json:"musicbrainz_id,omitempty"`
+	MusicBrainzArtistID     string   `json:"musicbrainz_artist_id,omitempty"`
+	ArtworkUpdated          int64    `json:"artwork_updated,omitempty"`
+	ArtworkStorage          string   `json:"artwork_storage,omitempty"`
+	MetadataAvailable       bool     `json:"metadata_available"`
+	HasMetadata             bool     `json:"has_metadata"`
+	MetadataSource          string   `json:"metadata_source,omitempty"`
+	NFORef                  string   `json:"nfo_ref,omitempty"`
+	ArtistMetadataAvailable bool     `json:"artist_metadata_available"`
+	HasArtistMetadata       bool     `json:"has_artist_metadata"`
+	ArtistNFORef            string   `json:"artist_nfo_ref,omitempty"`
 }
 
 type taterLocalVideoIndex struct {
@@ -155,15 +165,16 @@ type taterLocalLibraryIndex struct {
 }
 
 type taterMusicArtworkOverride struct {
-	AlbumID       string    `json:"album_id"`
-	Source        string    `json:"source"`
-	Ref           string    `json:"ref"`
-	ContentType   string    `json:"content_type,omitempty"`
-	MusicBrainzID string    `json:"musicbrainz_id,omitempty"`
-	Genres        []string  `json:"genres,omitempty"`
-	Locked        bool      `json:"locked"`
-	UpdatedAt     time.Time `json:"updated_at"`
-	Storage       string    `json:"storage,omitempty"`
+	AlbumID             string    `json:"album_id"`
+	Source              string    `json:"source"`
+	Ref                 string    `json:"ref"`
+	ContentType         string    `json:"content_type,omitempty"`
+	MusicBrainzID       string    `json:"musicbrainz_id,omitempty"`
+	MusicBrainzArtistID string    `json:"musicbrainz_artist_id,omitempty"`
+	Genres              []string  `json:"genres,omitempty"`
+	Locked              bool      `json:"locked"`
+	UpdatedAt           time.Time `json:"updated_at"`
+	Storage             string    `json:"storage,omitempty"`
 }
 
 type taterMusicArtworkStore struct {
@@ -754,8 +765,10 @@ func buildTaterLocalLibraryStats(cfg *config.Config, index *taterLocalLibraryInd
 		override := overrides.Items[album.ID]
 		if override.AlbumID == album.ID {
 			album.Genres = mergeTaterMusicGenres(album.Genres, override.Genres)
+			album.MusicBrainzArtistID = strings.TrimSpace(override.MusicBrainzArtistID)
 		}
 		applyTaterMusicAlbumArtwork(cfg, cat, &album, override)
+		applyTaterLocalMusicNFO(cfg, &album)
 		album.ArtworkURL = taterLocalMusicAdminArtworkURL(album)
 		if category := categoryByID[album.CategoryID]; category != nil {
 			category.Stats.Albums++
@@ -763,6 +776,13 @@ func buildTaterLocalLibraryStats(cfg *config.Config, index *taterLocalLibraryInd
 				category.Stats.Artwork++
 			} else {
 				category.Stats.MissingArtwork++
+			}
+			if album.MetadataAvailable {
+				if album.HasMetadata && (!album.ArtistMetadataAvailable || album.HasArtistMetadata) {
+					category.Stats.Metadata++
+				} else {
+					category.Stats.MissingMetadata++
+				}
 			}
 			if artistSets[album.CategoryID] == nil {
 				artistSets[album.CategoryID] = map[string]bool{}
@@ -797,9 +817,11 @@ func applyTaterMusicAlbumArtwork(
 	album.HasArtwork = false
 	album.ArtworkLocked = false
 	album.MusicBrainzID = ""
+	album.MusicBrainzArtistID = ""
 	album.ArtworkUpdated = 0
 	if override.AlbumID == album.ID {
 		album.MusicBrainzID = strings.TrimSpace(override.MusicBrainzID)
+		album.MusicBrainzArtistID = strings.TrimSpace(override.MusicBrainzArtistID)
 	}
 	validOverride := override.AlbumID == album.ID && taterMusicArtworkOverrideExists(cfg, cat, override)
 	if validOverride && override.Locked {
@@ -1132,16 +1154,19 @@ func runTaterLocalLibraryScan(
 			artworkType = "all"
 		}
 		musicArtworkFound := 0
+		musicMetadataFound := 0
 		if artworkType == "all" || artworkType == "music" {
 			updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
 				status.Phase = "artwork"
-				status.Message = "Finding album artwork and genres"
+				status.Message = "Finding album artwork, genres, and NFO metadata"
 			})
 			err = scrapeTaterMissingAlbumArtwork(context.Background(), cfg, &index, func(progress taterMusicEnrichmentProgress) {
 				musicArtworkFound = progress.ArtworkFound
+				musicMetadataFound = progress.MetadataFound
 				updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
 					status.AlbumsProcessed = progress.AlbumsProcessed
 					status.ArtworkFound = progress.ArtworkFound
+					status.MetadataFound = progress.MetadataFound
 					status.GenreMatches = progress.GenreMatches
 					status.GenreUnmatched = progress.GenreUnmatched
 					status.Message = progress.Message
@@ -1151,13 +1176,13 @@ func runTaterLocalLibraryScan(
 		if err == nil && (artworkType == "all" || artworkType == "movies" || artworkType == "tv") {
 			updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
 				status.Phase = "artwork"
-				status.Message = "Finding movie and TV artwork"
+				status.Message = "Finding movie and TV artwork and metadata"
 			})
 			err = scrapeTaterMissingVideoArtwork(context.Background(), cfg, &index, artworkType, func(progress taterVideoArtworkProgress) {
 				updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
 					status.VideosProcessed = progress.VideosProcessed
 					status.ArtworkFound = musicArtworkFound + progress.ArtworkFound
-					status.MetadataFound = progress.MetadataFound
+					status.MetadataFound = musicMetadataFound + progress.MetadataFound
 					status.Message = progress.Message
 				})
 			})
@@ -1256,14 +1281,25 @@ func (s *Server) handleLocalMediaMusicArtworkRefresh(c *fiber.Ctx) error {
 	if !ok {
 		return RespondNotFound(c, "Music album", request.AlbumID)
 	}
-	if album.ArtworkLocked && !request.Force {
+	metadataComplete := album.HasMetadata &&
+		(!album.ArtistMetadataAvailable || album.HasArtistMetadata)
+	if album.ArtworkLocked && !request.Force && metadataComplete {
 		return RespondConflict(c, "Album artwork is locked", "Unlock it before finding another cover")
 	}
-	if err := refreshTaterAlbumArtwork(c.Context(), cfg, &index, album, request.Force); err != nil {
-		return RespondValidationError(c, "No matching album artwork was found", err.Error())
+	var artworkErr error
+	if !album.ArtworkLocked || request.Force {
+		artworkErr = refreshTaterAlbumArtwork(c.Context(), cfg, &index, album, request.Force)
+	}
+	_, metadataErr := ensureTaterMusicNFO(c.Context(), cfg, album)
+	refreshTaterLibraryArtworkStats(&index)
+	if metadataErr != nil && !album.HasMetadata {
+		return RespondValidationError(c, "No matching album metadata was found", metadataErr.Error())
+	}
+	if artworkErr != nil && !album.HasArtwork {
+		return RespondValidationError(c, "No matching album artwork was found", artworkErr.Error())
 	}
 	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), index); err != nil {
-		return RespondInternalError(c, "Failed to save album artwork", err.Error())
+		return RespondInternalError(c, "Failed to save album artwork and metadata", err.Error())
 	}
 	album.ArtworkURL = taterLocalMusicAdminArtworkURL(*album)
 	return RespondSuccess(c, album)
@@ -1299,6 +1335,7 @@ func (s *Server) handleLocalMediaMusicArtworkUpdate(c *fiber.Ctx) error {
 		existing.Source = album.ArtworkSource
 		existing.Ref = album.ArtworkRef
 		existing.MusicBrainzID = album.MusicBrainzID
+		existing.MusicBrainzArtistID = album.MusicBrainzArtistID
 		existing.Locked = true
 		existing.UpdatedAt = time.Now().UTC()
 		store.Items[album.ID] = existing

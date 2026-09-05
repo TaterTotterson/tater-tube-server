@@ -1856,6 +1856,7 @@ func taterLocalMusicAlbums(cfg *config.Config, baseURL, playerToken, categoryID 
 		indexedAlbum, indexed := indexedAlbums[album.ID]
 		if indexed {
 			album.Genres = mergeTaterMusicGenres(album.Genres, indexedAlbum.Genres)
+			album.Genres = mergeTaterMusicGenres(album.Genres, indexedAlbum.Styles)
 		}
 		item := taterUsenetItem{
 			Title:        album.Title,
@@ -1876,6 +1877,10 @@ func taterLocalMusicAlbums(cfg *config.Config, baseURL, playerToken, categoryID 
 			ModifiedUnix: album.ModifiedUnix,
 			Poster:       taterLocalMusicArtworkURL(baseURL, album.CategoryID, album.SourceIndex, album.ArtworkPath, playerToken),
 			HasArtwork:   album.ArtworkPath != "",
+		}
+		if indexed {
+			item.Date = indexedAlbum.Year
+			item.Description = indexedAlbum.Description
 		}
 		if indexed && indexedAlbum.HasArtwork {
 			item.Poster = taterLocalMusicIndexedArtworkURL(baseURL, album.ID, indexedAlbum.ArtworkUpdated, indexedAlbum.ModifiedUnix, playerToken)
