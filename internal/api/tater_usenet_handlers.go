@@ -1571,6 +1571,16 @@ func taterIndexedLocalTVItems(cfg *config.Config, cat config.LocalMediaCategory,
 		if leftFolder != rightFolder {
 			return leftFolder
 		}
+		if strings.EqualFold(items[i].MediaType, "season") && strings.EqualFold(items[j].MediaType, "season") {
+			leftSeason, leftOK := taterSeasonNumber(items[i].Path)
+			rightSeason, rightOK := taterSeasonNumber(items[j].Path)
+			if leftOK != rightOK {
+				return leftOK
+			}
+			if leftOK && leftSeason != rightSeason {
+				return leftSeason < rightSeason
+			}
+		}
 		if !leftFolder && items[i].MediaType == "episode" && items[j].MediaType == "episode" {
 			return taterEpisodeSortKey(items[i].Path) < taterEpisodeSortKey(items[j].Path)
 		}
@@ -1736,6 +1746,16 @@ func taterLocalTVItems(cfg *config.Config, cat config.LocalMediaCategory, paths 
 		items = append(items, item)
 	}
 	sort.SliceStable(items, func(i, j int) bool {
+		if strings.EqualFold(items[i].MediaType, "season") && strings.EqualFold(items[j].MediaType, "season") {
+			leftSeason, leftOK := taterSeasonNumber(items[i].Path)
+			rightSeason, rightOK := taterSeasonNumber(items[j].Path)
+			if leftOK != rightOK {
+				return leftOK
+			}
+			if leftOK && leftSeason != rightSeason {
+				return leftSeason < rightSeason
+			}
+		}
 		return strings.ToLower(items[i].Title) < strings.ToLower(items[j].Title)
 	})
 	return items, nil
@@ -2242,6 +2262,21 @@ func cleanSeasonTitle(value string) string {
 		}
 	}
 	return cleanLocalTitle(value)
+}
+
+func taterSeasonNumber(value string) (int, bool) {
+	name := filepath.Base(cleanLocalRelativePath(value))
+	name = cleanTaterText(localSeparatorPattern.ReplaceAllString(name, " "))
+	match := localSeasonPattern.FindStringSubmatch(name)
+	if len(match) == 0 {
+		return 0, false
+	}
+	season := match[1]
+	if season == "" && len(match) > 2 {
+		season = match[2]
+	}
+	number, err := strconv.Atoi(season)
+	return number, err == nil
 }
 
 func cleanEpisodeTitle(value string) string {
