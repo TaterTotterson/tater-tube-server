@@ -38,6 +38,7 @@ import type {
 	LocalMediaConfig,
 	LocalMediaLibraryStats,
 	LocalMediaLibraryType,
+	LocalMediaMusicAlbum,
 } from "../../types/config";
 import { BytesDisplay } from "../ui/BytesDisplay";
 import { ConfigMiniTabs } from "./ConfigMiniTabs";
@@ -150,6 +151,13 @@ function libraryIcon(type: LocalMediaLibraryType) {
 	}
 }
 
+function musicMetadataComplete(album: LocalMediaMusicAlbum) {
+	return (
+		!album.metadata_available ||
+		(album.has_metadata && (!album.artist_metadata_available || album.has_artist_metadata))
+	);
+}
+
 function statCards(type: LocalMediaLibraryType, stats: LocalMediaLibraryStats) {
 	const size = {
 		label: "Storage",
@@ -182,6 +190,16 @@ function statCards(type: LocalMediaLibraryType, stats: LocalMediaLibraryStats) {
 				label: "Missing Art",
 				value: stats.missing_artwork.toLocaleString(),
 				icon: <ImageOff className="h-4 w-4" />,
+			},
+			{
+				label: "With NFO",
+				value: stats.metadata.toLocaleString(),
+				icon: <FileText className="h-4 w-4" />,
+			},
+			{
+				label: "Missing NFO",
+				value: stats.missing_metadata.toLocaleString(),
+				icon: <FileText className="h-4 w-4" />,
 			},
 			size,
 		];
@@ -401,7 +419,7 @@ export function LocalMediaConfigSection({
 				title: withArtwork ? "Media matching started" : "Library scan started",
 				message: withArtwork
 					? activeTab === "music"
-						? "Albums will be matched carefully for missing artwork and genre details in the background."
+						? "Albums will be matched carefully for missing artwork, genres, and NFO metadata in the background."
 						: "Missing posters and NFO metadata will be matched carefully and saved beside the media."
 					: "Tater Tube is updating the local media index.",
 			});
@@ -439,12 +457,17 @@ export function LocalMediaConfigSection({
 		}
 	};
 
-	const handleArtworkRefresh = async (albumId: string, hasArtwork: boolean) => {
+	const handleArtworkRefresh = async (
+		albumId: string,
+		hasArtwork: boolean,
+		metadataComplete: boolean,
+	) => {
 		try {
-			await refreshArtwork.mutateAsync({ albumId, force: hasArtwork });
+			await refreshArtwork.mutateAsync({ albumId, force: hasArtwork && metadataComplete });
 			showToast({
 				type: "success",
-				title: hasArtwork ? "Album artwork replaced" : "Album artwork found",
+				title: hasArtwork && metadataComplete ? "Album artwork replaced" : "Album details found",
+				message: "Compatible album and artist NFO files are saved beside the music when possible.",
 			});
 		} catch (error) {
 			showToast({
@@ -466,7 +489,7 @@ export function LocalMediaConfigSection({
 	const scanStatus = scan.data ?? library.data?.scan;
 	const scanRunning = scanStatus?.running ?? false;
 	const albumRows = (library.data?.albums ?? []).filter(
-		(album) => !missingOnly || !album.has_artwork,
+		(album) => !missingOnly || !album.has_artwork || !musicMetadataComplete(album),
 	);
 	const videoRows = (library.data?.videos ?? []).filter(
 		(video) => !missingOnly || !video.has_artwork || !video.has_metadata,
@@ -590,7 +613,7 @@ export function LocalMediaConfigSection({
 					</button>
 				</div>
 
-				<div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-7">
+				<div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
 					{statCards(activeTab, stats).map((stat) => (
 						<div key={stat.label} className="rounded-xl border border-base-300 bg-base-200/55 p-3">
 							<div className="flex items-center gap-2 text-base-content/45 text-xs uppercase tracking-wide">
@@ -612,9 +635,10 @@ export function LocalMediaConfigSection({
 								<div>
 									<div className="font-bold text-sm">Music Metadata Enrichment</div>
 									<p className="mt-1 max-w-2xl text-base-content/55 text-xs leading-relaxed">
-										MusicBrainz identifies albums first. TheAudioDB can fill missing genre, style,
-										and cover details, then Tater Tube safely reuses broad genres from other albums
-										by the same exact artist.
+										MusicBrainz identifies albums and artists first. TheAudioDB can fill missing
+										genre, style, and cover details, then Tater Tube saves compatible album and
+										artist NFO files beside structured music folders without replacing existing
+										files.
 									</p>
 								</div>
 							</div>
@@ -1035,7 +1059,8 @@ export function LocalMediaConfigSection({
 								<h4 className="font-bold text-lg">Your Music Library</h4>
 							</div>
 							<p className="mt-1 text-base-content/55 text-sm">
-								Browse albums, inspect artwork sources, and save new covers beside your music.
+								Browse album artwork and NFO coverage and save compatible sidecars beside your
+								music.
 							</p>
 						</div>
 						<div className="flex flex-col gap-2 sm:flex-row">
@@ -1057,17 +1082,22 @@ export function LocalMediaConfigSection({
 								className={`btn ${missingOnly ? "btn-primary" : "btn-outline"}`}
 								onClick={() => setMissingOnly((value) => !value)}
 							>
-								<ImageOff className="h-4 w-4" />
-								Missing Art
+								<FileText className="h-4 w-4" />
+								Missing Art/Meta
 							</button>
 							<button
 								type="button"
 								className="btn btn-secondary"
-								disabled={hasChanges || scanRunning || stats.albums === 0}
+								disabled={
+									hasChanges ||
+									scanRunning ||
+									stats.albums === 0 ||
+									(stats.missing_artwork === 0 && stats.missing_metadata === 0)
+								}
 								onClick={() => beginScan(true)}
 							>
 								<WandSparkles className="h-4 w-4" />
-								Find Art & Genres
+								Find Art & Metadata
 							</button>
 						</div>
 					</div>
@@ -1096,7 +1126,7 @@ export function LocalMediaConfigSection({
 							<p className="mt-1 text-base-content/50 text-sm">
 								{library.data?.stale
 									? "Save your folders, then run a library scan to build the album index."
-									: "Try a different search or turn off the missing-art filter."}
+									: "Try a different search or turn off the missing art/meta filter."}
 							</p>
 						</div>
 					)}
@@ -1132,6 +1162,18 @@ export function LocalMediaConfigSection({
 											</span>
 										)}
 									</div>
+									<div className="absolute top-2 right-2 flex flex-col items-end gap-1">
+										{album.has_metadata && (
+											<span className="badge badge-sm border-0 bg-black/70 text-white">
+												<FileText className="h-3 w-3" /> Album NFO
+											</span>
+										)}
+										{album.has_artist_metadata && (
+											<span className="badge badge-sm border-0 bg-black/70 text-white">
+												<FileText className="h-3 w-3" /> Artist NFO
+											</span>
+										)}
+									</div>
 								</div>
 								<div className="space-y-3 p-3">
 									<div className="min-w-0">
@@ -1153,11 +1195,22 @@ export function LocalMediaConfigSection({
 										<button
 											type="button"
 											className="btn btn-outline btn-xs"
-											disabled={refreshArtwork.isPending || album.artwork_locked}
-											onClick={() => handleArtworkRefresh(album.id, album.has_artwork)}
+											disabled={
+												refreshArtwork.isPending ||
+												(album.artwork_locked && musicMetadataComplete(album))
+											}
+											onClick={() =>
+												handleArtworkRefresh(
+													album.id,
+													album.has_artwork,
+													musicMetadataComplete(album),
+												)
+											}
 										>
 											<WandSparkles className="h-3 w-3" />
-											{album.has_artwork ? "Replace" : "Find Art"}
+											{album.has_artwork && musicMetadataComplete(album)
+												? "Replace Art"
+												: "Find Art & Meta"}
 										</button>
 										<button
 											type="button"

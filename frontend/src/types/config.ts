@@ -587,8 +587,18 @@ export interface LocalMediaMusicAlbum {
 	artwork_url?: string;
 	artwork_locked: boolean;
 	musicbrainz_id?: string;
+	musicbrainz_artist_id?: string;
 	artwork_updated?: number;
 	artwork_storage?: "library" | "cache" | string;
+	metadata_available: boolean;
+	has_metadata: boolean;
+	metadata_source?: "nfo" | string;
+	nfo_ref?: string;
+	artist_metadata_available: boolean;
+	has_artist_metadata: boolean;
+	artist_nfo_ref?: string;
+	description?: string;
+	styles?: string[];
 }
 
 export interface LocalMediaVideo {
