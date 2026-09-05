@@ -318,6 +318,11 @@ func TestTaterLocalTVItemsBrowsesShowsSeasonsEpisodes(t *testing.T) {
 	if err := os.MkdirAll(seasonDir, 0755); err != nil {
 		t.Fatal(err)
 	}
+	for _, season := range []string{"Season 10", "Season 02", "Season 20", "Season 11"} {
+		if err := os.MkdirAll(filepath.Join(root, "Some.Show.2020", season), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
 	episodePath := filepath.Join(seasonDir, "Some.Show.S01E02.The.One.1080p.mkv")
 	if err := os.WriteFile(episodePath, []byte("media"), 0644); err != nil {
 		t.Fatal(err)
@@ -336,8 +341,14 @@ func TestTaterLocalTVItemsBrowsesShowsSeasonsEpisodes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(seasons) != 1 || seasons[0].Title != "Season 1" || seasons[0].MediaType != "season" {
+	expectedSeasons := []string{"Season 1", "Season 2", "Season 10", "Season 11", "Season 20"}
+	if len(seasons) != len(expectedSeasons) {
 		t.Fatalf("unexpected season rows: %#v", seasons)
+	}
+	for index, title := range expectedSeasons {
+		if seasons[index].Title != title || seasons[index].MediaType != "season" {
+			t.Fatalf("expected numeric season order %v, got %#v", expectedSeasons, seasons)
+		}
 	}
 
 	episodes, err := taterLocalTVItems(nil, cat, []string{root}, "http://server", "token", 0, "Some.Show.2020/Season 01")
@@ -469,6 +480,27 @@ func TestTaterLocalTVItemsUsesFreshLibraryIndex(t *testing.T) {
 				Title:           "The One",
 				DurationSeconds: 1201,
 			},
+			{
+				CategoryID:  "tv",
+				LibraryType: "tv",
+				SourceIndex: 0,
+				Path:        "Some.Show.2020/Season 02/Some.Show.S02E01.Second.mkv",
+				Title:       "Second",
+			},
+			{
+				CategoryID:  "tv",
+				LibraryType: "tv",
+				SourceIndex: 0,
+				Path:        "Some.Show.2020/Season 10/Some.Show.S10E01.Tenth.mkv",
+				Title:       "Tenth",
+			},
+			{
+				CategoryID:  "tv",
+				LibraryType: "tv",
+				SourceIndex: 0,
+				Path:        "Some.Show.2020/Season 20/Some.Show.S20E01.Twentieth.mkv",
+				Title:       "Twentieth",
+			},
 		},
 	}
 	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), index); err != nil {
@@ -482,7 +514,7 @@ func TestTaterLocalTVItemsUsesFreshLibraryIndex(t *testing.T) {
 	if len(shows) != 1 || shows[0].Title != "Some Show" || shows[0].MediaType != "show" {
 		t.Fatalf("unexpected indexed show rows: %#v", shows)
 	}
-	if shows[0].SeasonCount != 1 || shows[0].EpisodeCount != 2 || shows[0].LeafCount != 2 {
+	if shows[0].SeasonCount != 4 || shows[0].EpisodeCount != 5 || shows[0].LeafCount != 5 {
 		t.Fatalf("expected show counts on indexed row: %#v", shows[0])
 	}
 
@@ -490,8 +522,14 @@ func TestTaterLocalTVItemsUsesFreshLibraryIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(seasons) != 1 || seasons[0].Title != "Season 1" || seasons[0].MediaType != "season" {
+	expectedIndexedSeasons := []string{"Season 1", "Season 2", "Season 10", "Season 20"}
+	if len(seasons) != len(expectedIndexedSeasons) {
 		t.Fatalf("unexpected indexed season rows: %#v", seasons)
+	}
+	for index, title := range expectedIndexedSeasons {
+		if seasons[index].Title != title || seasons[index].MediaType != "season" {
+			t.Fatalf("expected numeric indexed season order %v, got %#v", expectedIndexedSeasons, seasons)
+		}
 	}
 	if seasons[0].EpisodeCount != 2 || seasons[0].LeafCount != 2 {
 		t.Fatalf("expected episode count on season row: %#v", seasons[0])
