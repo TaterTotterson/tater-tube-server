@@ -778,9 +778,9 @@ export function LocalMediaConfigSection({
 									</button>
 								</div>
 								<p className="mt-2 text-[11px] text-base-content/50 leading-relaxed">
-									Use your own TMDB key so you stay in control. Metadata searches go straight from
-									your server to TMDB—Tater never proxies or receives what you’re looking up.
-									Existing local artwork and NFO files never require a key.
+									Use your own TMDB key for better privacy. Your lookups aren’t tied to a shared
+									app-wide key controlled by someone else, so Tater can’t view or use your TMDB
+									activity. Existing local artwork and NFO files never require a key.
 								</p>
 								{tmdbTestResult && (
 									<div
