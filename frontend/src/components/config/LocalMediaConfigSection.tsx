@@ -863,7 +863,9 @@ export function LocalMediaConfigSection({
 								</h4>
 							</div>
 							<p className="mt-1 text-base-content/55 text-sm">
-								Browse poster and NFO coverage and fill only the sidecars that are still missing.
+								{activeTab === "tv"
+									? "Browse show coverage and add compatible backdrops, season posters, episode stills, and NFO sidecars."
+									: "Browse poster and NFO coverage and fill only the sidecars that are still missing."}
 							</p>
 						</div>
 						<div className="grid w-full gap-3 sm:grid-cols-2 2xl:w-auto 2xl:grid-cols-[minmax(18rem,22rem)_auto_auto]">
@@ -910,7 +912,9 @@ export function LocalMediaConfigSection({
 									hasChanges ||
 									scanRunning ||
 									!tmdbConfigured ||
-									(stats.missing_artwork === 0 && stats.missing_metadata === 0)
+									(activeTab === "tv"
+										? stats.shows === 0
+										: stats.missing_artwork === 0 && stats.missing_metadata === 0)
 								}
 								onClick={() => beginScan(true)}
 							>

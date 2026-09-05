@@ -780,7 +780,7 @@ func refreshTaterVideoArtwork(ctx context.Context, cfg *config.Config, index *ta
 	if video == nil {
 		return fmt.Errorf("movie or TV show is unavailable")
 	}
-	if video.HasArtwork && video.HasMetadata && !force {
+	if !force && !taterVideoArtworkNeedsRefresh(cfg, index, *video) {
 		return nil
 	}
 	candidate, details, err := resolveTaterTMDBVideoMetadata(ctx, cfg, *video)
@@ -794,39 +794,47 @@ func refreshTaterVideoArtwork(ctx context.Context, cfg *config.Config, index *ta
 		}
 		updateTaterIndexedVideoMetadata(index, *video)
 	}
+	var posterErr error
 	if (!video.HasArtwork || force) && (!video.ArtworkLocked || force) {
 		if strings.TrimSpace(candidate.PosterPath) == "" {
-			refreshTaterLibraryArtworkStats(index)
-			if video.HasMetadata {
-				return nil
+			candidate.PosterPath = strings.TrimSpace(details.PosterPath)
+		}
+		if strings.TrimSpace(candidate.PosterPath) == "" {
+			posterErr = fmt.Errorf("TMDB metadata did not include a poster")
+		} else {
+			_, raw, contentType, err := downloadTaterVideoArtworkCandidate(ctx, candidate)
+			if err != nil {
+				posterErr = err
+			} else {
+				ref, writeErr := writeTaterVideoArtworkSidecar(cfg, *video, raw, contentType)
+				if writeErr != nil {
+					posterErr = writeErr
+				} else {
+					updatedAt := time.Now().UTC()
+					store := readTaterVideoArtworkStore(cfg)
+					store.Items[video.ID] = taterVideoArtworkOverride{
+						MediaID: video.ID, Source: "scraped", Ref: ref, TMDBID: candidate.TMDBID,
+						Locked: false, UpdatedAt: updatedAt,
+					}
+					if writeErr = writeTaterVideoArtworkStore(cfg, store); writeErr != nil {
+						posterErr = writeErr
+					} else {
+						video.HasArtwork = true
+						video.ArtworkSource = "scraped"
+						video.ArtworkRef = ref
+						video.ArtworkUpdated = updatedAt.Unix()
+						video.ArtworkURL = taterLocalVideoAdminArtworkURL(*video)
+					}
+				}
 			}
-			return fmt.Errorf("TMDB metadata did not include a poster")
 		}
-		_, raw, contentType, err := downloadTaterVideoArtworkCandidate(ctx, candidate)
-		if err != nil {
-			return err
-		}
-		ref, err := writeTaterVideoArtworkSidecar(cfg, *video, raw, contentType)
-		if err != nil {
-			return err
-		}
-		updatedAt := time.Now().UTC()
-		store := readTaterVideoArtworkStore(cfg)
-		store.Items[video.ID] = taterVideoArtworkOverride{
-			MediaID: video.ID, Source: "scraped", Ref: ref, TMDBID: candidate.TMDBID,
-			Locked: false, UpdatedAt: updatedAt,
-		}
-		if err := writeTaterVideoArtworkStore(cfg, store); err != nil {
-			return err
-		}
-		video.HasArtwork = true
-		video.ArtworkSource = "scraped"
-		video.ArtworkRef = ref
-		video.ArtworkUpdated = updatedAt.Unix()
-		video.ArtworkURL = taterLocalVideoAdminArtworkURL(*video)
 	}
+	supplementalErr := refreshTaterTVSupplementalArtwork(ctx, cfg, index, *video, details, force)
 	refreshTaterLibraryArtworkStats(index)
-	return nil
+	if posterErr != nil {
+		return posterErr
+	}
+	return supplementalErr
 }
 
 func scrapeTaterMissingVideoArtwork(ctx context.Context, cfg *config.Config, index *taterLocalLibraryIndex, libraryType string, progress func(taterVideoArtworkProgress)) error {
@@ -840,7 +848,7 @@ func scrapeTaterMissingVideoArtwork(ctx context.Context, cfg *config.Config, ind
 		if (wantedType == "movies" || wantedType == "tv") && video.LibraryType != wantedType {
 			continue
 		}
-		if (video.HasArtwork && video.HasMetadata) || (video.ArtworkLocked && video.HasMetadata) {
+		if !taterVideoArtworkNeedsRefresh(cfg, index, *video) {
 			continue
 		}
 		totalVideos++
@@ -857,7 +865,7 @@ func scrapeTaterMissingVideoArtwork(ctx context.Context, cfg *config.Config, ind
 		if (wantedType == "movies" || wantedType == "tv") && video.LibraryType != wantedType {
 			continue
 		}
-		if (video.HasArtwork && video.HasMetadata) || (video.ArtworkLocked && video.HasMetadata) {
+		if !taterVideoArtworkNeedsRefresh(cfg, index, *video) {
 			continue
 		}
 		status.VideosProcessed++

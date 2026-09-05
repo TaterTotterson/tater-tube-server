@@ -354,18 +354,54 @@ func taterPlayerHomeProgramFromSchedule(cfg *config.Config, baseURL, playerToken
 
 func decorateTaterPlayerHomeItems(cfg *config.Config, baseURL, playerToken string, items []taterUsenetItem) {
 	for index := range items {
-		if strings.TrimSpace(items[index].Poster) != "" {
+		item := &items[index]
+		if cfg == nil {
+			item.HasArtwork = strings.TrimSpace(item.Poster) != ""
 			continue
 		}
-		if _, ok := taterPlayerLocalArtworkPath(cfg, items[index].CategoryID, items[index].SourceIndex, items[index].Path); !ok {
-			continue
+		category, categoryFound := taterLocalMediaCategory(cfg, taterRawLocalCategoryID(item.CategoryID))
+		isTV := categoryFound && strings.EqualFold(strings.TrimSpace(category.LibraryType), "tv")
+		if isTV {
+			item.SeriesPoster = taterPlayerAvailableLocalArtworkURL(
+				cfg, baseURL, playerToken, item.CategoryID, item.SourceIndex, item.Path, "series-poster",
+			)
+			item.Backdrop = taterPlayerAvailableLocalArtworkURL(
+				cfg, baseURL, playerToken, item.CategoryID, item.SourceIndex, item.Path, "backdrop",
+			)
+			mediaType := strings.ToLower(strings.TrimSpace(item.MediaType))
+			if mediaType == "season" || mediaType == "episode" {
+				item.SeasonPoster = taterPlayerAvailableLocalArtworkURL(
+					cfg, baseURL, playerToken, item.CategoryID, item.SourceIndex, item.Path, "season-poster",
+				)
+			}
+			if mediaType == "episode" {
+				item.EpisodeStill = taterPlayerAvailableLocalArtworkURL(
+					cfg, baseURL, playerToken, item.CategoryID, item.SourceIndex, item.Path, "episode-still",
+				)
+			}
+			if strings.TrimSpace(item.Poster) == "" {
+				for _, candidate := range []string{item.EpisodeStill, item.SeasonPoster, item.SeriesPoster} {
+					if strings.TrimSpace(candidate) != "" {
+						item.Poster = candidate
+						break
+					}
+				}
+			}
 		}
-		items[index].Poster = taterPlayerLocalArtworkURL(baseURL, playerToken, items[index].CategoryID, items[index].SourceIndex, items[index].Path)
+		if strings.TrimSpace(item.Poster) == "" {
+			item.Poster = taterPlayerAvailableLocalArtworkURL(
+				cfg, baseURL, playerToken, item.CategoryID, item.SourceIndex, item.Path, "poster",
+			)
+		}
 		items[index].HasArtwork = items[index].Poster != ""
 	}
 }
 
 func taterPlayerLocalArtworkURL(baseURL, playerToken, categoryID string, sourceIndex int, relPath string) string {
+	return taterPlayerLocalArtworkURLForKind(baseURL, playerToken, categoryID, sourceIndex, relPath, "poster")
+}
+
+func taterPlayerLocalArtworkURLForKind(baseURL, playerToken, categoryID string, sourceIndex int, relPath, kind string) string {
 	u, err := url.Parse(strings.TrimRight(baseURL, "/") + "/api/v1/player/artwork/local")
 	if err != nil {
 		return ""
@@ -375,11 +411,52 @@ func taterPlayerLocalArtworkURL(baseURL, playerToken, categoryID string, sourceI
 	query.Set("source", strconv.Itoa(sourceIndex))
 	query.Set("path", cleanLocalRelativePath(relPath))
 	query.Set("player_token", playerToken)
+	if normalizedKind := taterPlayerArtworkKind(kind); normalizedKind != "poster" {
+		query.Set("kind", normalizedKind)
+	}
 	u.RawQuery = query.Encode()
 	return u.String()
 }
 
 func taterPlayerLocalArtworkPath(cfg *config.Config, categoryID string, sourceIndex int, relPath string) (string, bool) {
+	return taterPlayerLocalArtworkPathForKind(cfg, categoryID, sourceIndex, relPath, "poster")
+}
+
+func taterPlayerArtworkKind(kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "backdrop", "series-poster", "season-poster", "episode-still":
+		return strings.ToLower(strings.TrimSpace(kind))
+	default:
+		return "poster"
+	}
+}
+
+func taterPlayerAvailableLocalArtworkURL(
+	cfg *config.Config,
+	baseURL, playerToken, categoryID string,
+	sourceIndex int,
+	relPath, kind string,
+) string {
+	if cfg == nil {
+		return ""
+	}
+	normalizedKind := taterPlayerArtworkKind(kind)
+	found := false
+	if normalizedKind == "poster" || normalizedKind == "series-poster" {
+		if category, ok := taterLocalMediaCategory(cfg, taterRawLocalCategoryID(categoryID)); ok {
+			_, found = taterStoredVideoArtworkPath(cfg, category, sourceIndex, relPath)
+		}
+	}
+	if !found {
+		_, found = taterPlayerLocalArtworkPathForKind(cfg, categoryID, sourceIndex, relPath, normalizedKind)
+	}
+	if !found {
+		return ""
+	}
+	return taterPlayerLocalArtworkURLForKind(baseURL, playerToken, categoryID, sourceIndex, relPath, normalizedKind)
+}
+
+func taterPlayerLocalArtworkPathForKind(cfg *config.Config, categoryID string, sourceIndex int, relPath, kind string) (string, bool) {
 	if cfg == nil || strings.TrimSpace(categoryID) == "" {
 		return "", false
 	}
@@ -399,23 +476,53 @@ func taterPlayerLocalArtworkPath(cfg *config.Config, categoryID string, sourceIn
 	if err != nil || info == nil {
 		return "", false
 	}
+	kind = taterPlayerArtworkKind(kind)
 	directory := target
 	base := filepath.Base(target)
 	if !info.IsDir() {
 		directory = filepath.Dir(target)
 		base = strings.TrimSuffix(filepath.Base(target), filepath.Ext(target))
 	}
+	parts := strings.Split(cleanLocalRelativePath(relPath), "/")
+	showDirectory := directory
+	if strings.EqualFold(strings.TrimSpace(category.LibraryType), "tv") && len(parts) > 0 && strings.TrimSpace(parts[0]) != "" {
+		if resolved, showErr := safeLocalPath(paths[sourceIndex], parts[0]); showErr == nil {
+			showDirectory = resolved
+		}
+	}
+	switch kind {
+	case "backdrop":
+		return taterPlayerArtworkNamedInDirectory(showDirectory, []string{
+			"backdrop", "fanart", "background", "landscape", "thumb", "banner",
+		})
+	case "series-poster":
+		return taterPlayerArtworkInDirectory(showDirectory, filepath.Base(showDirectory))
+	case "season-poster":
+		seasonDirectory := directory
+		if len(parts) >= 2 {
+			if resolved, seasonErr := safeLocalPath(paths[sourceIndex], filepath.ToSlash(filepath.Join(parts[0], parts[1]))); seasonErr == nil {
+				seasonDirectory = resolved
+			}
+		}
+		return taterPlayerArtworkInDirectory(seasonDirectory, filepath.Base(seasonDirectory))
+	case "episode-still":
+		if info.IsDir() {
+			return "", false
+		}
+		return taterPlayerArtworkNamedInDirectory(directory, []string{
+			strings.ToLower(base) + "-thumb",
+			strings.ToLower(base) + "-landscape",
+			strings.ToLower(base) + "-still",
+			strings.ToLower(base),
+		})
+	}
 	if path, found := taterPlayerArtworkInDirectory(directory, base); found {
 		return path, true
 	}
 	if strings.EqualFold(strings.TrimSpace(category.LibraryType), "tv") {
-		parts := strings.Split(cleanLocalRelativePath(relPath), "/")
-		if len(parts) > 0 && strings.TrimSpace(parts[0]) != "" {
-			showDirectory, showErr := safeLocalPath(paths[sourceIndex], parts[0])
-			if showErr == nil && showDirectory != directory {
-				if path, found := taterPlayerArtworkInDirectory(showDirectory, filepath.Base(showDirectory)); found {
-					return path, true
-				}
+		if showDirectory != directory {
+			if path, found := taterPlayerArtworkInDirectory(showDirectory, filepath.Base(showDirectory)); found {
+				return path, true
 			}
 		}
 	}
@@ -437,6 +544,10 @@ func taterPlayerArtworkInDirectory(directory, base string) (string, bool) {
 		"movie",
 		"show",
 	}
+	return taterPlayerArtworkNamedInDirectory(directory, desired)
+}
+
+func taterPlayerArtworkNamedInDirectory(directory string, desired []string) (string, bool) {
 	entries, err := os.ReadDir(directory)
 	if err != nil {
 		return "", false
@@ -471,13 +582,17 @@ func (s *Server) handleTaterPlayerLocalArtwork(c *fiber.Ctx) error {
 	categoryID := strings.TrimSpace(c.Query("category_id"))
 	sourceIndex := parseTaterInt(c.Query("source"), -1)
 	relPath := cleanLocalRelativePath(c.Query("path"))
+	kind := taterPlayerArtworkKind(c.Query("kind"))
 	artworkPath := ""
 	found := false
-	if category, categoryFound := taterLocalMediaCategory(cfg, taterRawLocalCategoryID(categoryID)); categoryFound {
-		artworkPath, found = taterStoredVideoArtworkPath(cfg, category, sourceIndex, relPath)
+	if kind == "poster" || kind == "series-poster" {
+		category, categoryFound := taterLocalMediaCategory(cfg, taterRawLocalCategoryID(categoryID))
+		if categoryFound {
+			artworkPath, found = taterStoredVideoArtworkPath(cfg, category, sourceIndex, relPath)
+		}
 	}
 	if !found {
-		artworkPath, found = taterPlayerLocalArtworkPath(cfg, categoryID, sourceIndex, relPath)
+		artworkPath, found = taterPlayerLocalArtworkPathForKind(cfg, categoryID, sourceIndex, relPath, kind)
 	}
 	if !found {
 		return RespondNotFound(c, "Local media artwork", fmt.Sprintf("%s:%d:%s", categoryID, sourceIndex, relPath))

@@ -83,6 +83,10 @@ type taterUsenetItem struct {
 	TVDBID          int64            `json:"tvdbId,omitempty"`
 	Category        string           `json:"category,omitempty"`
 	Poster          string           `json:"poster,omitempty"`
+	Backdrop        string           `json:"backdrop,omitempty"`
+	SeriesPoster    string           `json:"seriesPoster,omitempty"`
+	SeasonPoster    string           `json:"seasonPoster,omitempty"`
+	EpisodeStill    string           `json:"episodeStill,omitempty"`
 	HasArtwork      bool             `json:"hasArtwork,omitempty"`
 	Files           string           `json:"files,omitempty"`
 	Grabs           string           `json:"grabs,omitempty"`

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
@@ -71,6 +72,169 @@ func TestTaterVideoArtworkIndexReusesCompatibleMovieAndShowSidecars(t *testing.T
 	episodeArt, found := taterPlayerLocalArtworkPath(cfg, "tv", 0, "Severance (2022)/Season 01/Severance S01E01.mkv")
 	if !found || episodeArt != filepath.Join(showDir, "cover.png") {
 		t.Fatalf("episode did not inherit show artwork: path=%q found=%v", episodeArt, found)
+	}
+}
+
+func TestTaterPlayerTVArtworkUsesSpecificSidecarsWithPosterFallback(t *testing.T) {
+	root := t.TempDir()
+	showDir := filepath.Join(root, "Severance (2022)")
+	seasonDir := filepath.Join(showDir, "Season 01")
+	episodePath := filepath.Join(seasonDir, "Severance S01E01.mkv")
+	for path, contents := range map[string]string{
+		episodePath:                                             "episode",
+		filepath.Join(showDir, "poster.jpg"):                    "show-poster",
+		filepath.Join(showDir, "backdrop.jpg"):                  "show-backdrop",
+		filepath.Join(seasonDir, "poster.png"):                  "season-poster",
+		filepath.Join(seasonDir, "Severance S01E01-thumb.webp"): "episode-still",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	enabled := true
+	cfg := &config.Config{LocalMedia: config.LocalMediaConfig{Categories: []config.LocalMediaCategory{{
+		ID: "tv", Name: "TV", LibraryType: "tv", Paths: []string{root}, Enabled: &enabled,
+	}}}}
+	relEpisode := "Severance (2022)/Season 01/Severance S01E01.mkv"
+	checks := map[string]string{
+		"series-poster": filepath.Join(showDir, "poster.jpg"),
+		"backdrop":      filepath.Join(showDir, "backdrop.jpg"),
+		"season-poster": filepath.Join(seasonDir, "poster.png"),
+		"episode-still": filepath.Join(seasonDir, "Severance S01E01-thumb.webp"),
+	}
+	for kind, expected := range checks {
+		got, found := taterPlayerLocalArtworkPathForKind(cfg, "local:tv", 0, relEpisode, kind)
+		if !found || got != expected {
+			t.Fatalf("%s path=%q found=%v, want %q", kind, got, found, expected)
+		}
+	}
+
+	items := []taterUsenetItem{{
+		Title: "Good News About Hell", MediaType: "episode", CategoryID: "local:tv", SourceIndex: 0, Path: relEpisode,
+	}}
+	decorateTaterPlayerHomeItems(cfg, "http://tube.local", "player-token", items)
+	if items[0].Backdrop == "" || items[0].SeriesPoster == "" || items[0].SeasonPoster == "" || items[0].EpisodeStill == "" {
+		t.Fatalf("specific TV artwork URLs were not attached: %#v", items[0])
+	}
+	if items[0].Poster != items[0].EpisodeStill {
+		t.Fatalf("episode still should be the compatible poster fallback: %#v", items[0])
+	}
+	for field, rawURL := range map[string]string{
+		"backdrop": items[0].Backdrop, "series-poster": items[0].SeriesPoster,
+		"season-poster": items[0].SeasonPoster, "episode-still": items[0].EpisodeStill,
+	} {
+		parsed, err := url.Parse(rawURL)
+		if err != nil || parsed.Query().Get("kind") != field {
+			t.Fatalf("unexpected %s URL: %q error=%v", field, rawURL, err)
+		}
+	}
+
+	if err := os.Remove(filepath.Join(seasonDir, "Severance S01E01-thumb.webp")); err != nil {
+		t.Fatal(err)
+	}
+	items[0] = taterUsenetItem{
+		Title: "Good News About Hell", MediaType: "episode", CategoryID: "local:tv", SourceIndex: 0, Path: relEpisode,
+	}
+	decorateTaterPlayerHomeItems(cfg, "http://tube.local", "player-token", items)
+	if items[0].EpisodeStill != "" || items[0].Poster != items[0].SeasonPoster {
+		t.Fatalf("missing episode art did not fall back to the season poster: %#v", items[0])
+	}
+}
+
+func TestTaterTMDBTVArtworkScraperWritesBackdropSeasonAndEpisodeSidecars(t *testing.T) {
+	oldBaseURL := taterTMDBBaseURL
+	oldImageBaseURL := taterTMDBImageBaseURL
+	oldClient := taterTMDBHTTPClient
+	t.Cleanup(func() {
+		taterTMDBBaseURL = oldBaseURL
+		taterTMDBImageBaseURL = oldImageBaseURL
+		taterTMDBHTTPClient = oldClient
+	})
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requests.Add(1)
+		switch request.URL.Path {
+		case "/3/tv/95396":
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = response.Write([]byte(`{"id":95396,"name":"Severance","poster_path":"/show-poster.jpg","backdrop_path":"/show-backdrop.jpg"}`))
+		case "/3/tv/95396/season/1":
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = response.Write([]byte(`{"id":121591,"season_number":1,"poster_path":"/season-1.jpg","episodes":[{"episode_number":1,"still_path":"/episode-1.jpg"}]}`))
+		case "/image/show-backdrop.jpg":
+			response.Header().Set("Content-Type", "image/jpeg")
+			_, _ = response.Write([]byte("\xff\xd8show-backdrop\xff\xd9"))
+		case "/image/season-1.jpg":
+			response.Header().Set("Content-Type", "image/jpeg")
+			_, _ = response.Write([]byte("\xff\xd8season-poster\xff\xd9"))
+		case "/image/episode-1.jpg":
+			response.Header().Set("Content-Type", "image/jpeg")
+			_, _ = response.Write([]byte("\xff\xd8episode-still\xff\xd9"))
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	taterTMDBBaseURL = server.URL + "/3"
+	taterTMDBImageBaseURL = server.URL + "/image"
+	taterTMDBHTTPClient = server.Client()
+
+	root := t.TempDir()
+	showDir := filepath.Join(root, "Severance (2022)")
+	seasonDir := filepath.Join(showDir, "Season 01")
+	episodePath := filepath.Join(seasonDir, "Severance S01E01.mkv")
+	if err := os.MkdirAll(seasonDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for path, contents := range map[string]string{
+		episodePath:                          "episode",
+		filepath.Join(showDir, "poster.jpg"): "existing-show-poster",
+	} {
+		if err := os.WriteFile(path, []byte(contents), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	enabled := true
+	cfg := &config.Config{LocalMedia: config.LocalMediaConfig{
+		Enabled: &enabled, TMDBEnabled: &enabled, TMDBAPIKey: "tmdb-test-key",
+		Categories: []config.LocalMediaCategory{{
+			ID: "tv", Name: "TV", LibraryType: "tv", Paths: []string{root}, Enabled: &enabled,
+		}},
+	}}
+	video := taterLocalVideoIndex{
+		ID: taterVideoMediaID("tv", 0, "show", "Severance (2022)"), CategoryID: "tv", CategoryName: "TV",
+		LibraryType: "tv", MediaType: "show", SourceIndex: 0, Path: "Severance (2022)", Title: "Severance",
+		TMDBID: 95396, HasArtwork: true, HasMetadata: true,
+	}
+	index := taterLocalLibraryIndex{
+		Videos: []taterLocalVideoIndex{video},
+		Files: []taterLocalLibraryFileIndex{{
+			CategoryID: "tv", LibraryType: "tv", SourceIndex: 0,
+			Path: "Severance (2022)/Season 01/Severance S01E01.mkv",
+		}},
+	}
+	if err := refreshTaterVideoArtwork(context.Background(), cfg, &index, &index.Videos[0], false); err != nil {
+		t.Fatal(err)
+	}
+	for path, expected := range map[string]string{
+		filepath.Join(showDir, "backdrop.jpg"):                 "show-backdrop",
+		filepath.Join(seasonDir, "poster.jpg"):                 "season-poster",
+		filepath.Join(seasonDir, "Severance S01E01-thumb.jpg"): "episode-still",
+	} {
+		raw, err := os.ReadFile(path)
+		if err != nil || !strings.Contains(string(raw), expected) {
+			t.Fatalf("sidecar %s did not contain %q: %q error=%v", path, expected, raw, err)
+		}
+	}
+	requestCount := requests.Load()
+	if err := refreshTaterVideoArtwork(context.Background(), cfg, &index, &index.Videos[0], false); err != nil {
+		t.Fatal(err)
+	}
+	if requests.Load() != requestCount {
+		t.Fatalf("complete TV artwork was fetched again: before=%d after=%d", requestCount, requests.Load())
 	}
 }
 

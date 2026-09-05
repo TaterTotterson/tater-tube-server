@@ -82,6 +82,7 @@ type taterTMDBVideoDetails struct {
 	EpisodeRunTime      []int                   `json:"episode_run_time"`
 	VoteAverage         float64                 `json:"vote_average"`
 	PosterPath          string                  `json:"poster_path"`
+	BackdropPath        string                  `json:"backdrop_path"`
 	IMDbID              string                  `json:"imdb_id"`
 	Genres              []taterTMDBNamedValue   `json:"genres"`
 	ProductionCompanies []taterTMDBNamedValue   `json:"production_companies"`
