@@ -2,6 +2,7 @@ import {
 	AlertTriangle,
 	CircleCheck,
 	Disc3,
+	ExternalLink,
 	FileText,
 	Film,
 	Folder,
@@ -9,6 +10,7 @@ import {
 	HardDrive,
 	Image,
 	ImageOff,
+	KeyRound,
 	Library,
 	ListMusic,
 	Lock,
@@ -22,7 +24,7 @@ import {
 	Tv,
 	WandSparkles,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "../../contexts/ToastContext";
 import {
 	useLocalMediaLibrary,
@@ -30,6 +32,7 @@ import {
 	useRefreshLocalMediaAlbumArtwork,
 	useRefreshLocalMediaVideoArtwork,
 	useStartLocalMediaScan,
+	useTestLocalMediaTMDBKey,
 	useUpdateLocalMediaAlbumArtwork,
 } from "../../hooks/useApi";
 import type {
@@ -106,7 +109,7 @@ const EMPTY_STATS: LocalMediaLibraryStats = {
 	size_bytes: 0,
 };
 
-const LIBRARY_PAGE_SIZE = 36;
+const LIBRARY_PAGE_SIZE = 24;
 
 function slug(value: string) {
 	return value
@@ -287,6 +290,11 @@ export function LocalMediaConfigSection({
 	const [search, setSearch] = useState("");
 	const [missingOnly, setMissingOnly] = useState(false);
 	const [libraryOffset, setLibraryOffset] = useState(0);
+	const [tmdbTestResult, setTmdbTestResult] = useState<{
+		type: "success" | "error";
+		message: string;
+	} | null>(null);
+	const scanWasRunning = useRef(false);
 	const [folderPicker, setFolderPicker] = useState<{
 		categoryIndex: number;
 		pathIndex: number;
@@ -304,12 +312,22 @@ export function LocalMediaConfigSection({
 	const startScan = useStartLocalMediaScan();
 	const refreshArtwork = useRefreshLocalMediaAlbumArtwork();
 	const refreshVideoArtwork = useRefreshLocalMediaVideoArtwork();
+	const testTMDBKey = useTestLocalMediaTMDBKey();
 	const updateArtwork = useUpdateLocalMediaAlbumArtwork();
 
 	useEffect(() => {
 		setFormData(normalize(config));
 		setHasChanges(false);
+		setTmdbTestResult(null);
 	}, [config]);
+
+	useEffect(() => {
+		const running = scan.data?.running ?? false;
+		if (scanWasRunning.current && !running) {
+			void library.refetch();
+		}
+		scanWasRunning.current = running;
+	}, [library.refetch, scan.data?.running]);
 
 	const update = (next: LocalMediaConfig) => {
 		setFormData(next);
@@ -433,6 +451,28 @@ export function LocalMediaConfigSection({
 				title: "Could not start scan",
 				message: error instanceof Error ? error.message : "Unknown error",
 			});
+		}
+	};
+
+	const handleTMDBTest = async () => {
+		try {
+			const result = await testTMDBKey.mutateAsync(formData.tmdb_api_key?.trim() ?? "");
+			setTmdbTestResult({
+				type: "success",
+				message:
+					(formData.tmdb_api_key?.trim() ?? "")
+						? "The key works — save your changes to start using it."
+						: result.message,
+			});
+			showToast({
+				type: "success",
+				title: "TMDB is connected",
+				message: "This server can privately request movie and TV metadata directly from TMDB.",
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "TMDB connection failed";
+			setTmdbTestResult({ type: "error", message });
+			showToast({ type: "error", title: "TMDB key did not work", message });
 		}
 	};
 
@@ -689,27 +729,73 @@ export function LocalMediaConfigSection({
 							</label>
 						</div>
 						{formData.tmdb_enabled !== false && (
-							<label className="mt-4 block max-w-xl">
-								<span className="font-bold text-base-content/65 text-xs">
-									TMDB API Key or Read Access Token
-								</span>
-								<input
-									type="password"
-									className="input input-bordered input-sm mt-1.5 w-full bg-base-100"
-									placeholder={
-										formData.tmdb_api_key_set
-											? "Saved - leave blank to keep"
-											: "Required for missing movie, TV art, and metadata"
-									}
-									value={formData.tmdb_api_key ?? ""}
-									disabled={isReadOnly}
-									onChange={(event) => update({ ...formData, tmdb_api_key: event.target.value })}
-								/>
-								<span className="mt-1.5 block text-[11px] text-base-content/45">
-									Automatic matching stays off until a key is saved; existing local sidecars need no
-									key.
-								</span>
-							</label>
+							<div className="mt-4 max-w-3xl rounded-xl border border-base-300 bg-base-100/55 p-3.5">
+								<div className="flex flex-wrap items-center justify-between gap-2">
+									<div className="flex items-center gap-2 font-bold text-base-content/70 text-xs">
+										<KeyRound className="h-4 w-4 text-primary" />
+										TMDB API Key or Read Access Token
+									</div>
+									<a
+										href="https://www.themoviedb.org/settings/api"
+										target="_blank"
+										rel="noreferrer"
+										className="inline-flex items-center gap-1.5 font-bold text-primary text-xs hover:underline"
+									>
+										Get a free TMDB key
+										<ExternalLink className="h-3.5 w-3.5" />
+									</a>
+								</div>
+								<div className="mt-2.5 grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+									<input
+										type="password"
+										className="input input-bordered input-sm min-w-0 bg-base-100"
+										placeholder={
+											formData.tmdb_api_key_set
+												? "Key is saved - leave blank to keep it"
+												: "Paste your API key or Read Access Token"
+										}
+										value={formData.tmdb_api_key ?? ""}
+										disabled={isReadOnly}
+										onChange={(event) => {
+											setTmdbTestResult(null);
+											update({ ...formData, tmdb_api_key: event.target.value });
+										}}
+									/>
+									<button
+										type="button"
+										className="btn btn-outline btn-sm min-w-28"
+										disabled={
+											isReadOnly ||
+											testTMDBKey.isPending ||
+											(!formData.tmdb_api_key_set && !(formData.tmdb_api_key?.trim() ?? ""))
+										}
+										onClick={handleTMDBTest}
+									>
+										<RefreshCw
+											className={`h-3.5 w-3.5 ${testTMDBKey.isPending ? "animate-spin" : ""}`}
+										/>
+										{testTMDBKey.isPending ? "Testing…" : "Test Key"}
+									</button>
+								</div>
+								<p className="mt-2 text-[11px] text-base-content/50 leading-relaxed">
+									Your key stays on this server. Lookup requests go directly from it to TMDB; Tater
+									does not receive either. Existing local artwork and NFO files never require a key.
+								</p>
+								{tmdbTestResult && (
+									<div
+										className={`mt-2 flex items-center gap-2 text-xs ${
+											tmdbTestResult.type === "success" ? "text-success" : "text-error"
+										}`}
+									>
+										{tmdbTestResult.type === "success" ? (
+											<CircleCheck className="h-4 w-4" />
+										) : (
+											<AlertTriangle className="h-4 w-4" />
+										)}
+										<span>{tmdbTestResult.message}</span>
+									</div>
+								)}
+							</div>
 						)}
 						<div className="mt-4 flex max-w-2xl items-center gap-3 border-primary/10 border-t pt-3">
 							<a href="https://www.themoviedb.org" target="_blank" rel="noreferrer">
@@ -850,7 +936,7 @@ export function LocalMediaConfigSection({
 
 			{(activeTab === "movies" || activeTab === "tv") && (
 				<section className="space-y-4 rounded-2xl border border-base-300 bg-base-100/70 p-4 sm:p-5">
-					<div className="flex flex-col gap-4 2xl:flex-row 2xl:items-end 2xl:justify-between">
+					<div className="space-y-4">
 						<div>
 							<div className="flex items-center gap-2">
 								{activeTab === "movies" ? (
@@ -868,12 +954,12 @@ export function LocalMediaConfigSection({
 									: "Browse poster and NFO coverage and fill only the sidecars that are still missing."}
 							</p>
 						</div>
-						<div className="grid w-full gap-3 sm:grid-cols-2 2xl:w-auto 2xl:grid-cols-[minmax(18rem,22rem)_auto_auto]">
-							<label className="input input-bordered flex min-w-0 items-center gap-2 bg-base-100 sm:col-span-2 2xl:col-span-1">
+						<div className="grid w-full min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(16rem,1fr)_minmax(11rem,auto)_minmax(13rem,auto)]">
+							<label className="input input-bordered flex min-w-0 items-center gap-2 bg-base-100 md:col-span-2 xl:col-span-1">
 								<Search className="h-4 w-4 text-base-content/40" />
 								<input
 									type="search"
-									className="grow"
+									className="min-w-0 grow"
 									placeholder={`Search ${activeTab === "movies" ? "movies" : "TV shows"}`}
 									value={search}
 									onChange={(event) => {
@@ -882,7 +968,10 @@ export function LocalMediaConfigSection({
 									}}
 								/>
 							</label>
-							<fieldset className="grid grid-cols-2 gap-2" aria-label="Artwork coverage filter">
+							<fieldset
+								className="grid min-w-0 grid-cols-2 gap-2"
+								aria-label="Artwork coverage filter"
+							>
 								<button
 									type="button"
 									className={`btn ${!missingOnly ? "btn-primary" : "btn-outline"}`}
@@ -907,7 +996,7 @@ export function LocalMediaConfigSection({
 							</fieldset>
 							<button
 								type="button"
-								className="btn btn-secondary w-full whitespace-nowrap"
+								className="btn btn-secondary h-auto min-h-10 w-full min-w-0 whitespace-normal py-2 leading-tight"
 								disabled={
 									hasChanges ||
 									scanRunning ||
@@ -919,7 +1008,7 @@ export function LocalMediaConfigSection({
 								onClick={() => beginScan(true)}
 							>
 								<WandSparkles className="h-4 w-4" />
-								Find Missing Art & Meta
+								Find Missing
 							</button>
 						</div>
 					</div>
@@ -956,15 +1045,17 @@ export function LocalMediaConfigSection({
 						{videoRows.map((video) => (
 							<article
 								key={video.id}
-								className="group min-w-0 overflow-hidden rounded-xl border border-base-300 bg-base-200/45"
+								className="min-w-0 overflow-hidden rounded-xl border border-base-300 bg-base-200/45 [contain-intrinsic-size:24rem] [content-visibility:auto]"
 							>
 								<div className="relative aspect-[2/3] overflow-hidden bg-base-300/60">
 									{video.artwork_url ? (
 										<img
 											src={video.artwork_url}
 											alt={`${video.title} poster`}
-											className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+											className="h-full w-full object-cover"
 											loading="lazy"
+											decoding="async"
+											draggable={false}
 										/>
 									) : (
 										<div className="flex h-full flex-col items-center justify-center gap-2 text-base-content/25">
@@ -1050,7 +1141,7 @@ export function LocalMediaConfigSection({
 
 			{activeTab === "music" && (
 				<section className="space-y-4 rounded-2xl border border-base-300 bg-base-100/70 p-4 sm:p-5">
-					<div className="flex flex-col gap-4 2xl:flex-row 2xl:items-end 2xl:justify-between">
+					<div className="space-y-4">
 						<div>
 							<div className="flex items-center gap-2">
 								<Disc3 className="h-5 w-5 text-primary" />
@@ -1061,12 +1152,12 @@ export function LocalMediaConfigSection({
 								music.
 							</p>
 						</div>
-						<div className="grid w-full gap-3 sm:grid-cols-2 2xl:w-auto 2xl:grid-cols-[minmax(18rem,22rem)_auto_auto]">
-							<label className="input input-bordered flex min-w-0 items-center gap-2 bg-base-100 sm:col-span-2 2xl:col-span-1">
+						<div className="grid w-full min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(16rem,1fr)_minmax(11rem,auto)_minmax(13rem,auto)]">
+							<label className="input input-bordered flex min-w-0 items-center gap-2 bg-base-100 md:col-span-2 xl:col-span-1">
 								<Search className="h-4 w-4 text-base-content/40" />
 								<input
 									type="search"
-									className="grow"
+									className="min-w-0 grow"
 									placeholder="Search albums or artists"
 									value={search}
 									onChange={(event) => {
@@ -1075,7 +1166,10 @@ export function LocalMediaConfigSection({
 									}}
 								/>
 							</label>
-							<fieldset className="grid grid-cols-2 gap-2" aria-label="Artwork coverage filter">
+							<fieldset
+								className="grid min-w-0 grid-cols-2 gap-2"
+								aria-label="Artwork coverage filter"
+							>
 								<button
 									type="button"
 									className={`btn ${!missingOnly ? "btn-primary" : "btn-outline"}`}
@@ -1100,7 +1194,7 @@ export function LocalMediaConfigSection({
 							</fieldset>
 							<button
 								type="button"
-								className="btn btn-secondary w-full whitespace-nowrap"
+								className="btn btn-secondary h-auto min-h-10 w-full min-w-0 whitespace-normal py-2 leading-tight"
 								disabled={
 									hasChanges ||
 									scanRunning ||
@@ -1110,7 +1204,7 @@ export function LocalMediaConfigSection({
 								onClick={() => beginScan(true)}
 							>
 								<WandSparkles className="h-4 w-4" />
-								Find Missing Art & Meta
+								Find Missing
 							</button>
 						</div>
 					</div>
@@ -1147,15 +1241,17 @@ export function LocalMediaConfigSection({
 						{albumRows.map((album) => (
 							<article
 								key={album.id}
-								className="group min-w-0 overflow-hidden rounded-xl border border-base-300 bg-base-200/45"
+								className="min-w-0 overflow-hidden rounded-xl border border-base-300 bg-base-200/45 [contain-intrinsic-size:20rem] [content-visibility:auto]"
 							>
 								<div className="relative aspect-square overflow-hidden bg-base-300/60">
 									{album.artwork_url ? (
 										<img
 											src={album.artwork_url}
 											alt={`${album.title} cover`}
-											className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+											className="h-full w-full object-cover"
 											loading="lazy"
+											decoding="async"
+											draggable={false}
 										/>
 									) : (
 										<div className="flex h-full flex-col items-center justify-center gap-2 text-base-content/25">

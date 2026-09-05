@@ -392,7 +392,7 @@ func taterLocalVideoAdminArtworkURL(video taterLocalVideoIndex) string {
 	if version <= 0 {
 		version = video.ModifiedUnix
 	}
-	return fmt.Sprintf("/api/local-media/video/artwork?media_id=%s&v=%d", url.QueryEscape(video.ID), version)
+	return fmt.Sprintf("/api/local-media/video/artwork?media_id=%s&thumbnail=1&v=%d", url.QueryEscape(video.ID), version)
 }
 
 func findTaterLocalVideo(index *taterLocalLibraryIndex, mediaID string) (*taterLocalVideoIndex, bool) {
@@ -1095,6 +1095,14 @@ func (s *Server) handleLocalMediaVideoArtwork(c *fiber.Ctx) error {
 	path, err := safeLocalPath(roots[video.SourceIndex], video.ArtworkRef)
 	if err != nil {
 		return RespondNotFound(c, "Movie or TV artwork", mediaID)
+	}
+	if c.QueryBool("thumbnail", false) {
+		thumbnail, thumbnailErr := taterArtworkThumbnail(path)
+		if thumbnailErr == nil {
+			c.Set(fiber.HeaderContentType, "image/jpeg")
+			c.Set(fiber.HeaderCacheControl, "private, max-age=86400")
+			return c.Send(thumbnail)
+		}
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".png":

@@ -572,7 +572,8 @@ export const useLocalMediaLibrary = (params?: {
 	return useQuery({
 		queryKey: ["local-media", "library", params],
 		queryFn: () => apiClient.getLocalMediaLibrary(params),
-		refetchInterval: 5000,
+		staleTime: 30_000,
+		refetchOnWindowFocus: false,
 	});
 };
 
@@ -630,6 +631,12 @@ export const useRefreshLocalMediaVideoArtwork = () => {
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["local-media", "library"] });
 		},
+	});
+};
+
+export const useTestLocalMediaTMDBKey = () => {
+	return useMutation({
+		mutationFn: (apiKey: string) => apiClient.testLocalMediaTMDBKey(apiKey),
 	});
 };
 
