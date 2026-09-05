@@ -1884,7 +1884,7 @@ func DefaultConfig(configDir ...string) *Config {
 	newznabEnabled := false     // Player-facing Stream catalog disabled by default
 	localMediaEnabled := false  // Server-local media catalog disabled by default
 	audioDBEnabled := true      // Supplement MusicBrainz with album genre/style metadata
-	tmdbEnabled := true         // Fetch missing movie and series posters when a TMDB key is configured
+	tmdbEnabled := true         // Fetch missing movie and series posters and NFO metadata when a TMDB key is configured
 	tubeTVEnabled := true       // Tube TV is available when local media is configured
 	tubeTVAutoChannels := true  // Tube TV auto-generates channels by default
 	tubeTVCommercials := true   // Commercial breaks enabled when commercials exist

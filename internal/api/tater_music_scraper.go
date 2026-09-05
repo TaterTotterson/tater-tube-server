@@ -865,6 +865,8 @@ func refreshTaterLibraryArtworkStats(index *taterLocalLibraryIndex) {
 	for i := range index.Categories {
 		index.Categories[i].Stats.Artwork = 0
 		index.Categories[i].Stats.MissingArtwork = 0
+		index.Categories[i].Stats.Metadata = 0
+		index.Categories[i].Stats.MissingMetadata = 0
 	}
 	for _, album := range index.Albums {
 		for i := range index.Categories {
@@ -888,6 +890,11 @@ func refreshTaterLibraryArtworkStats(index *taterLocalLibraryIndex) {
 				index.Categories[i].Stats.Artwork++
 			} else {
 				index.Categories[i].Stats.MissingArtwork++
+			}
+			if video.HasMetadata {
+				index.Categories[i].Stats.Metadata++
+			} else {
+				index.Categories[i].Stats.MissingMetadata++
 			}
 			break
 		}

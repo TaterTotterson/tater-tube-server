@@ -2,6 +2,7 @@ import {
 	AlertTriangle,
 	CircleCheck,
 	Disc3,
+	FileText,
 	Film,
 	Folder,
 	FolderOpen,
@@ -97,6 +98,8 @@ const EMPTY_STATS: LocalMediaLibraryStats = {
 	songs: 0,
 	artwork: 0,
 	missing_artwork: 0,
+	metadata: 0,
+	missing_metadata: 0,
 	errors: 0,
 	size_bytes: 0,
 };
@@ -201,6 +204,16 @@ function statCards(type: LocalMediaLibraryType, stats: LocalMediaLibraryStats) {
 				value: stats.missing_artwork.toLocaleString(),
 				icon: <ImageOff className="h-4 w-4" />,
 			},
+			{
+				label: "With NFO",
+				value: stats.metadata.toLocaleString(),
+				icon: <FileText className="h-4 w-4" />,
+			},
+			{
+				label: "Missing NFO",
+				value: stats.missing_metadata.toLocaleString(),
+				icon: <FileText className="h-4 w-4" />,
+			},
 			size,
 		];
 	}
@@ -216,6 +229,16 @@ function statCards(type: LocalMediaLibraryType, stats: LocalMediaLibraryStats) {
 				label: "Missing Art",
 				value: stats.missing_artwork.toLocaleString(),
 				icon: <ImageOff className="h-4 w-4" />,
+			},
+			{
+				label: "With NFO",
+				value: stats.metadata.toLocaleString(),
+				icon: <FileText className="h-4 w-4" />,
+			},
+			{
+				label: "Missing NFO",
+				value: stats.missing_metadata.toLocaleString(),
+				icon: <FileText className="h-4 w-4" />,
 			},
 			size,
 		];
@@ -375,11 +398,11 @@ export function LocalMediaConfigSection({
 			});
 			showToast({
 				type: "info",
-				title: withArtwork ? "Artwork matching started" : "Library scan started",
+				title: withArtwork ? "Media matching started" : "Library scan started",
 				message: withArtwork
 					? activeTab === "music"
 						? "Albums will be matched carefully for missing artwork and genre details in the background."
-						: "Missing posters will be matched carefully and saved beside the media."
+						: "Missing posters and NFO metadata will be matched carefully and saved beside the media."
 					: "Tater Tube is updating the local media index.",
 			});
 		} catch (error) {
@@ -391,18 +414,23 @@ export function LocalMediaConfigSection({
 		}
 	};
 
-	const handleVideoArtworkRefresh = async (mediaId: string, hasArtwork: boolean) => {
+	const handleVideoArtworkRefresh = async (
+		mediaId: string,
+		hasArtwork: boolean,
+		hasMetadata: boolean,
+	) => {
 		try {
-			await refreshVideoArtwork.mutateAsync({ mediaId, force: hasArtwork });
+			await refreshVideoArtwork.mutateAsync({ mediaId, force: hasArtwork && hasMetadata });
 			showToast({
 				type: "success",
-				title: hasArtwork ? "Artwork replaced" : "Artwork found",
-				message: "The poster was saved beside the media for Tater Tube, Emby, and Jellyfin.",
+				title: hasArtwork && hasMetadata ? "Artwork replaced" : "Media details found",
+				message:
+					"The poster and NFO metadata are saved beside the media for Tater Tube, Emby, and Jellyfin.",
 			});
 		} catch (error) {
 			showToast({
 				type: "warning",
-				title: "No confident artwork match",
+				title: "No confident media match",
 				message:
 					error instanceof Error
 						? error.message
@@ -441,7 +469,7 @@ export function LocalMediaConfigSection({
 		(album) => !missingOnly || !album.has_artwork,
 	);
 	const videoRows = (library.data?.videos ?? []).filter(
-		(video) => !missingOnly || !video.has_artwork,
+		(video) => !missingOnly || !video.has_artwork || !video.has_metadata,
 	);
 	const tmdbConfigured =
 		formData.tmdb_enabled !== false &&
@@ -506,7 +534,7 @@ export function LocalMediaConfigSection({
 								<div className="mt-1 text-base-content/55 text-xs">
 									{(scanStatus?.files_scanned ?? 0).toLocaleString()} files scanned
 									{scanStatus?.phase === "artwork"
-										? ` · ${(scanStatus.albums_processed ?? 0).toLocaleString()} albums checked · ${(scanStatus.videos_processed ?? 0).toLocaleString()} movies/shows checked · ${(scanStatus.artwork_found ?? 0).toLocaleString()} images found`
+										? ` · ${(scanStatus.albums_processed ?? 0).toLocaleString()} albums checked · ${(scanStatus.videos_processed ?? 0).toLocaleString()} movies/shows checked · ${(scanStatus.artwork_found ?? 0).toLocaleString()} images found · ${(scanStatus.metadata_found ?? 0).toLocaleString()} NFO files created`
 										: ""}
 								</div>
 							</div>
@@ -520,7 +548,8 @@ export function LocalMediaConfigSection({
 							<span>
 								{(scanStatus.albums_processed ?? 0).toLocaleString()} albums checked ·{" "}
 								{(scanStatus.videos_processed ?? 0).toLocaleString()} movies/shows checked ·{" "}
-								{(scanStatus.artwork_found ?? 0).toLocaleString()} images found
+								{(scanStatus.artwork_found ?? 0).toLocaleString()} images found ·{" "}
+								{(scanStatus.metadata_found ?? 0).toLocaleString()} NFO files created
 							</span>
 						</div>
 					)}
@@ -561,7 +590,7 @@ export function LocalMediaConfigSection({
 					</button>
 				</div>
 
-				<div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+				<div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-7">
 					{statCards(activeTab, stats).map((stat) => (
 						<div key={stat.label} className="rounded-xl border border-base-300 bg-base-200/55 p-3">
 							<div className="flex items-center gap-2 text-base-content/45 text-xs uppercase tracking-wide">
@@ -635,11 +664,11 @@ export function LocalMediaConfigSection({
 									<WandSparkles className="h-4 w-4" />
 								</div>
 								<div>
-									<div className="font-bold text-sm">Movie & TV Artwork</div>
+									<div className="font-bold text-sm">Movie, TV & NFO Metadata</div>
 									<p className="mt-1 max-w-2xl text-base-content/55 text-xs leading-relaxed">
-										Existing Emby and Jellyfin artwork is always used first. When art is missing,
-										TMDB can find a confident title and year match and save the poster beside your
-										media as a compatible sidecar file.
+										Existing Emby and Jellyfin posters and NFO files are always used first. When
+										either is missing, TMDB can find a confident title and year match and save
+										compatible sidecar files beside your media.
 									</p>
 								</div>
 							</div>
@@ -665,14 +694,15 @@ export function LocalMediaConfigSection({
 									placeholder={
 										formData.tmdb_api_key_set
 											? "Saved - leave blank to keep"
-											: "Required for missing movie and TV posters"
+											: "Required for missing movie, TV art, and metadata"
 									}
 									value={formData.tmdb_api_key ?? ""}
 									disabled={isReadOnly}
 									onChange={(event) => update({ ...formData, tmdb_api_key: event.target.value })}
 								/>
 								<span className="mt-1.5 block text-[11px] text-base-content/45">
-									Automatic matching stays off until a key is saved; local artwork needs no key.
+									Automatic matching stays off until a key is saved; existing local sidecars need no
+									key.
 								</span>
 							</label>
 						)}
@@ -828,7 +858,7 @@ export function LocalMediaConfigSection({
 								</h4>
 							</div>
 							<p className="mt-1 text-base-content/55 text-sm">
-								Browse poster coverage and fill only the artwork that is still missing.
+								Browse poster and NFO coverage and fill only the sidecars that are still missing.
 							</p>
 						</div>
 						<div className="flex flex-col gap-2 sm:flex-row">
@@ -850,19 +880,22 @@ export function LocalMediaConfigSection({
 								className={`btn ${missingOnly ? "btn-primary" : "btn-outline"}`}
 								onClick={() => setMissingOnly((value) => !value)}
 							>
-								<ImageOff className="h-4 w-4" />
-								Missing Art
+								<FileText className="h-4 w-4" />
+								Missing Art/Meta
 							</button>
 							<button
 								type="button"
 								className="btn btn-secondary"
 								disabled={
-									hasChanges || scanRunning || !tmdbConfigured || stats.missing_artwork === 0
+									hasChanges ||
+									scanRunning ||
+									!tmdbConfigured ||
+									(stats.missing_artwork === 0 && stats.missing_metadata === 0)
 								}
 								onClick={() => beginScan(true)}
 							>
 								<WandSparkles className="h-4 w-4" />
-								Find Missing Art
+								Find Missing Art & Meta
 							</button>
 						</div>
 					</div>
@@ -890,8 +923,8 @@ export function LocalMediaConfigSection({
 							</div>
 							<p className="mt-1 text-base-content/50 text-sm">
 								{library.data?.stale
-									? "Save your folders, then scan to build the artwork index."
-									: "Try a different search or turn off the missing-art filter."}
+									? "Save your folders, then scan to build the artwork and metadata index."
+									: "Try a different search or turn off the missing art/meta filter."}
 							</p>
 						</div>
 					)}
@@ -924,6 +957,12 @@ export function LocalMediaConfigSection({
 											{video.artwork_source === "local" ? "Library file" : video.artwork_source}
 										</span>
 									)}
+									{video.has_metadata && (
+										<span className="badge badge-sm absolute top-2 right-2 border-0 bg-black/70 text-white">
+											<FileText className="h-3 w-3" />
+											NFO
+										</span>
+									)}
 								</div>
 								<div className="space-y-3 p-3">
 									<div className="min-w-0">
@@ -939,10 +978,12 @@ export function LocalMediaConfigSection({
 										type="button"
 										className="btn btn-outline btn-xs w-full"
 										disabled={refreshVideoArtwork.isPending || !tmdbConfigured || hasChanges}
-										onClick={() => handleVideoArtworkRefresh(video.id, video.has_artwork)}
+										onClick={() =>
+											handleVideoArtworkRefresh(video.id, video.has_artwork, video.has_metadata)
+										}
 									>
 										<WandSparkles className="h-3 w-3" />
-										{video.has_artwork ? "Replace" : "Find Art"}
+										{video.has_artwork && video.has_metadata ? "Replace Art" : "Find Art & Meta"}
 									</button>
 									<div
 										className="truncate font-mono text-[10px] text-base-content/35"

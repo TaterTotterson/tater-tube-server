@@ -143,6 +143,126 @@ func TestTaterPlayerArtworkPrefersSavedVideoArtworkChoice(t *testing.T) {
 	}
 }
 
+func TestTaterExistingEmbyNFOIsUsedAndNeverOverwritten(t *testing.T) {
+	root := t.TempDir()
+	movieRoot := filepath.Join(root, "movies")
+	movieDir := filepath.Join(movieRoot, "Christmas with the Kranks (2004)")
+	if err := os.MkdirAll(movieDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	moviePath := filepath.Join(movieDir, "Christmas with the Kranks (2004) Remux-1080p.mkv")
+	nfoPath := strings.TrimSuffix(moviePath, filepath.Ext(moviePath)) + ".nfo"
+	if err := os.WriteFile(moviePath, []byte("movie"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	originalNFO := []byte("\xef\xbb\xbf" + `<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+  <plot>When Blair leaves home, her parents decide to skip Christmas.</plot>
+  <title>Christmas with the Kranks</title>
+  <originaltitle>Christmas with the Kranks</originaltitle>
+  <director tmdbid="18311">Joe Roth</director>
+  <writer tmdbid="10965">Chris Columbus</writer>
+  <rating>6.154</rating>
+  <year>2004</year>
+  <mpaa>PG</mpaa>
+  <imdbid>tt0388419</imdbid>
+  <tmdbid>13673</tmdbid>
+  <tvdbid>3544</tvdbid>
+  <genre>Comedy</genre>
+  <genre>Family</genre>
+  <studio>Revolution Studios</studio>
+  <country>United States of America</country>
+  <actor><name>Tim Allen</name><role>Luther Krank</role></actor>
+  <uniqueid type="imdb">tt0388419</uniqueid>
+</movie>`)
+	if err := os.WriteFile(nfoPath, originalNFO, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	enabled := true
+	cfg := &config.Config{LocalMedia: config.LocalMediaConfig{Categories: []config.LocalMediaCategory{{
+		ID: "movies", Name: "Movies", LibraryType: "movies", Paths: []string{movieRoot}, Enabled: &enabled,
+	}}}}
+	item := taterUsenetItem{MediaType: "movie"}
+	taterApplyLocalMetadata(moviePath, &item)
+	if item.Title != "Christmas with the Kranks" || item.Description == "" || item.IMDbID != "tt0388419" ||
+		item.TMDBID != 13673 || item.TVDBID != 3544 || item.ContentRating != "PG" || len(item.Genres) != 2 ||
+		len(item.Actors) != 1 || item.Actors[0] != "Tim Allen" {
+		t.Fatalf("existing NFO metadata was not fully read: %#v", item)
+	}
+
+	video := taterLocalVideoIndex{
+		ID:         taterVideoMediaID("movies", 0, "movie", filepath.Base(filepath.Dir(moviePath))+"/"+filepath.Base(moviePath)),
+		CategoryID: "movies", LibraryType: "movies", MediaType: "movie", SourceIndex: 0,
+		Path:  "Christmas with the Kranks (2004)/Christmas with the Kranks (2004) Remux-1080p.mkv",
+		Title: "Christmas with the Kranks", Year: "2004",
+	}
+	written, err := writeTaterVideoNFO(cfg, &video, taterTMDBVideoDetails{
+		ID: 99999, Title: "Wrong Replacement", Overview: "This must not replace user metadata.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if written {
+		t.Fatal("existing NFO was unexpectedly replaced")
+	}
+	after, err := os.ReadFile(nfoPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(originalNFO) {
+		t.Fatal("existing Emby/Jellyfin NFO content changed")
+	}
+	if !video.HasMetadata || video.TMDBID != 13673 || video.NFORef == "" {
+		t.Fatalf("existing NFO was not attached to the video index: %#v", video)
+	}
+}
+
+func TestTaterTVMetadataUsesTVShowNFOAtShowRoot(t *testing.T) {
+	root := t.TempDir()
+	tvRoot := filepath.Join(root, "tv")
+	showDir := filepath.Join(tvRoot, "Severance (2022)")
+	seasonDir := filepath.Join(showDir, "Season 01")
+	if err := os.MkdirAll(seasonDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	cfg := &config.Config{LocalMedia: config.LocalMediaConfig{Categories: []config.LocalMediaCategory{{
+		ID: "tv", Name: "TV Shows", LibraryType: "tv", Paths: []string{tvRoot}, Enabled: &enabled,
+	}}}}
+	video := taterLocalVideoIndex{
+		ID:         taterVideoMediaID("tv", 0, "show", "Severance (2022)"),
+		CategoryID: "tv", LibraryType: "tv", MediaType: "show", SourceIndex: 0,
+		Path: "Severance (2022)", Title: "Severance", Year: "2022",
+	}
+	written, err := writeTaterVideoNFO(cfg, &video, taterTMDBVideoDetails{
+		ID: 95396, Name: "Severance", OriginalName: "Severance", Overview: "Employees undergo a severance procedure.",
+		FirstAirDate: "2022-02-17", EpisodeRunTime: []int{50}, VoteAverage: 8.4,
+		Genres:      []taterTMDBNamedValue{{ID: 18, Name: "Drama"}},
+		ExternalIDs: taterTMDBExternalIDs{IMDbID: "tt11280740", TVDBID: 371980},
+		ContentRatings: taterTMDBContentRatings{Results: []struct {
+			Country string `json:"iso_3166_1"`
+			Rating  string `json:"rating"`
+		}{{Country: "US", Rating: "TV-MA"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !written || !video.HasMetadata {
+		t.Fatalf("TV metadata was not created: %#v", video)
+	}
+	nfoPath := filepath.Join(showDir, "tvshow.nfo")
+	raw, err := os.ReadFile(nfoPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"<tvshow>", "<title>Severance</title>", "<mpaa>TV-MA</mpaa>", "<tvdbid>371980</tvdbid>", "<tmdbid>95396</tmdbid>"} {
+		if !strings.Contains(string(raw), expected) {
+			t.Fatalf("TV NFO did not contain %q:\n%s", expected, raw)
+		}
+	}
+}
+
 func TestTaterTMDBArtworkScraperWritesPosterBesideMovie(t *testing.T) {
 	oldBaseURL := taterTMDBBaseURL
 	oldImageBaseURL := taterTMDBImageBaseURL
@@ -163,6 +283,22 @@ func TestTaterTMDBArtworkScraperWritesPosterBesideMovie(t *testing.T) {
 			}
 			response.Header().Set("Content-Type", "application/json")
 			_, _ = response.Write([]byte(`{"results":[{"id":329865,"title":"Arrival","release_date":"2016-11-10","poster_path":"/arrival.jpg","popularity":50}]}`))
+		case "/3/movie/329865":
+			if request.URL.Query().Get("append_to_response") != "credits,external_ids,release_dates" {
+				http.Error(response, "missing appended metadata", http.StatusBadRequest)
+				return
+			}
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = response.Write([]byte(`{
+				"id":329865,"title":"Arrival","original_title":"Arrival","overview":"A linguist works with the military to communicate with alien lifeforms.",
+				"tagline":"Why are they here?","release_date":"2016-11-10","runtime":116,"vote_average":7.6,"poster_path":"/arrival.jpg","imdb_id":"tt2543164",
+				"genres":[{"id":18,"name":"Drama"},{"id":878,"name":"Science Fiction"}],
+				"production_companies":[{"id":4,"name":"FilmNation Entertainment"}],
+				"production_countries":[{"iso_3166_1":"US","name":"United States of America"}],
+				"credits":{"cast":[{"id":9273,"name":"Amy Adams","character":"Louise Banks","order":0}],"crew":[{"id":137427,"name":"Denis Villeneuve","job":"Director"}]},
+				"external_ids":{"imdb_id":"tt2543164"},
+				"release_dates":{"results":[{"iso_3166_1":"US","release_dates":[{"certification":"PG-13","type":3}]}]}
+			}`))
 		case "/image/arrival.jpg":
 			response.Header().Set("Content-Type", "image/jpeg")
 			_, _ = response.Write([]byte("\xff\xd8arrival-poster\xff\xd9"))
@@ -217,6 +353,22 @@ func TestTaterTMDBArtworkScraperWritesPosterBesideMovie(t *testing.T) {
 	if stored := store.Items[video.ID]; stored.Ref != video.ArtworkRef || stored.TMDBID != 329865 {
 		t.Fatalf("artwork provenance was not saved: %#v", stored)
 	}
+	nfoPath := filepath.Join(movieDir, "Arrival (2016).nfo")
+	nfoRaw, err := os.ReadFile(nfoPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"<movie>", "<title>Arrival</title>", "<plot>A linguist works with the military", "<imdbid>tt2543164</imdbid>",
+		"<tmdbid>329865</tmdbid>", "<genre>Science Fiction</genre>", "<mpaa>PG-13</mpaa>", "<name>Amy Adams</name>",
+	} {
+		if !strings.Contains(string(nfoRaw), expected) {
+			t.Fatalf("generated NFO did not contain %q:\n%s", expected, nfoRaw)
+		}
+	}
+	if !index.Videos[0].HasMetadata || index.Videos[0].IMDbID != "tt2543164" || index.Videos[0].Description == "" {
+		t.Fatalf("generated NFO metadata was not applied to the index: %#v", index.Videos[0])
+	}
 }
 
 func TestTaterTMDBArtworkUsesDiscoveryIMDbIDBeforeTitleSearch(t *testing.T) {
@@ -266,6 +418,42 @@ func TestTaterTMDBArtworkUsesDiscoveryIMDbIDBeforeTitleSearch(t *testing.T) {
 	}
 	if candidate.TMDBID != 95396 || candidate.Title != "Severance" || contentType != "image/jpeg" || !strings.Contains(string(raw), "severance-poster") {
 		t.Fatalf("unexpected IMDb artwork result: candidate=%#v type=%q raw=%q", candidate, contentType, raw)
+	}
+}
+
+func TestTaterTMDBMetadataCanResolveTVDBIDWithoutPoster(t *testing.T) {
+	oldBaseURL := taterTMDBBaseURL
+	oldClient := taterTMDBHTTPClient
+	t.Cleanup(func() {
+		taterTMDBBaseURL = oldBaseURL
+		taterTMDBHTTPClient = oldClient
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/3/find/371980" || request.URL.Query().Get("external_source") != "tvdb_id" {
+			http.Error(response, "invalid TVDB lookup", http.StatusBadRequest)
+			return
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"movie_results":[],"tv_results":[{"id":95396,"name":"Severance","first_air_date":"2022-02-17"}]}`))
+	}))
+	defer server.Close()
+	taterTMDBBaseURL = server.URL + "/3"
+	taterTMDBHTTPClient = server.Client()
+
+	enabled := true
+	cfg := &config.Config{LocalMedia: config.LocalMediaConfig{TMDBEnabled: &enabled, TMDBAPIKey: "tmdb-test-key"}}
+	candidate, err := findTaterRemoteVideoCandidateByExternalID(
+		context.Background(),
+		cfg,
+		taterLocalVideoIndex{LibraryType: "tv", MediaType: "show"},
+		"371980",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.TMDBID != 95396 || candidate.Title != "Severance" || candidate.PosterPath != "" {
+		t.Fatalf("unexpected TVDB metadata result: %#v", candidate)
 	}
 }
 
