@@ -971,6 +971,13 @@ class APIClient {
 		});
 	}
 
+	async testLocalMediaTMDBKey(apiKey = "") {
+		return this.request<{ valid: boolean; message: string }>("/local-media/tmdb/test", {
+			method: "POST",
+			body: JSON.stringify({ api_key: apiKey }),
+		});
+	}
+
 	// System endpoints
 	async restartServer(force = false) {
 		return this.request<{ message: string; timestamp: string }>("/system/restart", {

@@ -1057,7 +1057,7 @@ func taterLocalMusicAdminArtworkURL(album taterLocalMusicAlbumIndex) string {
 		version = album.ModifiedUnix
 	}
 	return fmt.Sprintf(
-		"/api/local-media/music/artwork?album_id=%s&v=%d",
+		"/api/local-media/music/artwork?album_id=%s&thumbnail=1&v=%d",
 		url.QueryEscape(album.ID),
 		version,
 	)
@@ -1528,6 +1528,19 @@ func serveTaterIndexedMusicArtwork(c *fiber.Ctx, cfg *config.Config, albumID str
 	}
 	if err != nil {
 		return RespondNotFound(c, "Album artwork", albumID)
+	}
+	if c.QueryBool("thumbnail", false) {
+		thumbnail, thumbnailErr := taterArtworkThumbnail(path)
+		if thumbnailErr != nil {
+			if artwork, artworkErr := taterLocalMusicArtworkForPath(c.Context(), cfg, path); artworkErr == nil {
+				thumbnail, thumbnailErr = taterArtworkThumbnailBytes(artwork)
+			}
+		}
+		if thumbnailErr == nil {
+			c.Set(fiber.HeaderContentType, "image/jpeg")
+			c.Set(fiber.HeaderCacheControl, "private, max-age=86400")
+			return c.Send(thumbnail)
+		}
 	}
 	if (album.ArtworkSource == "scraped" || album.ArtworkSource == "manual") && album.ArtworkStorage != "library" {
 		raw, readErr := os.ReadFile(path)

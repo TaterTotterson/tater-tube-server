@@ -304,6 +304,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Patch("/local-media/music/artwork", s.handleLocalMediaMusicArtworkUpdate)
 	api.Get("/local-media/video/artwork", s.handleLocalMediaVideoArtwork)
 	api.Post("/local-media/video/artwork/refresh", s.handleLocalMediaVideoArtworkRefresh)
+	api.Post("/local-media/tmdb/test", s.handleLocalMediaTMDBTest)
 	api.Post("/tube-tv/guide/rebuild", s.handleTubeTVGuideRebuild)
 	api.Post("/tube-tv/commercials/category", s.handleTubeTVCreateCommercialCategory)
 	api.Post("/tube-tv/commercials/upload", s.handleTubeTVUploadCommercials)
