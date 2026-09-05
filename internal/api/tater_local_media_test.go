@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -2061,6 +2062,10 @@ func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
 		"-g 60",
 		"-bf 0",
 		"-bsf:v dump_extra=freq=keyframe",
+		"-color_primaries bt709",
+		"-color_trc bt709",
+		"-colorspace bt709",
+		"-color_range tv",
 		"-muxdelay 0",
 		"-muxpreload 0",
 		"-f hls",
@@ -2099,6 +2104,47 @@ func TestTaterTVHLSArgsUseIndependentQSVSegments(t *testing.T) {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("expected %q in HLS args: %s", expected, joined)
 		}
+	}
+}
+
+func TestTaterTVHLSArgsContinueTimestampsAcrossItems(t *testing.T) {
+	args := buildTaterTVChannelHLSArgsWithTimeline(
+		config.TranscodingConfig{},
+		transcodeProfiles["hdmi_1080p"],
+		"none",
+		transcodeCodecH264,
+		"/media/commercial.mp4",
+		0,
+		30,
+		125.375,
+		"",
+		"",
+		"/tmp/hls/index.m3u8",
+		"/tmp/hls/seg-%05d.ts",
+	)
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-output_ts_offset 125.375000 -f hls") {
+		t.Fatalf("expected continuous output timestamp offset in HLS args: %s", joined)
+	}
+}
+
+func TestTaterTVHLSNextTimestampUsesProducedDurationsAndGuard(t *testing.T) {
+	session := &taterTVHLSSession{segments: []taterTVHLSSegment{
+		{Duration: 2.002},
+		{Duration: 2.002},
+		{Duration: 1.371},
+		{Duration: math.NaN()},
+	}}
+	if got := session.nextTimestampOffsetSeconds(); math.Abs(got-5.425) > 0.000001 {
+		t.Fatalf("expected produced segment timeline and guard 5.425, got %.6f", got)
+	}
+
+	session.segments = append(session.segments, taterTVHLSSegment{
+		Duration:      2,
+		Discontinuity: true,
+	})
+	if got := session.nextTimestampOffsetSeconds(); math.Abs(got-7.475) > 0.000001 {
+		t.Fatalf("expected one guard per completed item, got %.6f", got)
 	}
 }
 
