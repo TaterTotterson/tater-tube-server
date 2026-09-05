@@ -586,8 +586,13 @@ export const useLocalMediaScanStatus = () => {
 export const useStartLocalMediaScan = () => {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: (scrapeMissingArtwork: boolean) =>
-			apiClient.startLocalMediaScan(scrapeMissingArtwork),
+		mutationFn: ({
+			scrapeMissingArtwork,
+			artworkLibraryType,
+		}: {
+			scrapeMissingArtwork: boolean;
+			artworkLibraryType?: LocalMediaLibraryType;
+		}) => apiClient.startLocalMediaScan(scrapeMissingArtwork, artworkLibraryType),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["local-media"] });
 		},
@@ -610,6 +615,17 @@ export const useUpdateLocalMediaAlbumArtwork = () => {
 	return useMutation({
 		mutationFn: ({ albumId, locked }: { albumId: string; locked: boolean }) =>
 			apiClient.updateLocalMediaAlbumArtwork(albumId, locked),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["local-media", "library"] });
+		},
+	});
+};
+
+export const useRefreshLocalMediaVideoArtwork = () => {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({ mediaId, force }: { mediaId: string; force?: boolean }) =>
+			apiClient.refreshLocalMediaVideoArtwork(mediaId, force ?? false),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["local-media", "library"] });
 		},

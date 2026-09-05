@@ -33,6 +33,7 @@ import type {
 	LocalMediaLibraryResponse,
 	LocalMediaMusicAlbum,
 	LocalMediaScanStatus,
+	LocalMediaVideo,
 	PipelineTuneResponse,
 	ProviderConfig,
 	ProviderCreateRequest,
@@ -937,10 +938,13 @@ class APIClient {
 		return this.request<LocalMediaScanStatus>("/local-media/scan");
 	}
 
-	async startLocalMediaScan(scrapeMissingArtwork = false) {
+	async startLocalMediaScan(scrapeMissingArtwork = false, artworkLibraryType?: string) {
 		return this.request<LocalMediaScanStatus>("/local-media/scan", {
 			method: "POST",
-			body: JSON.stringify({ scrape_missing_artwork: scrapeMissingArtwork }),
+			body: JSON.stringify({
+				scrape_missing_artwork: scrapeMissingArtwork,
+				artwork_library_type: artworkLibraryType,
+			}),
 		});
 	}
 
@@ -955,6 +959,13 @@ class APIClient {
 		return this.request<LocalMediaMusicAlbum>("/local-media/music/artwork", {
 			method: "PATCH",
 			body: JSON.stringify({ album_id: albumId, locked }),
+		});
+	}
+
+	async refreshLocalMediaVideoArtwork(mediaId: string, force = false) {
+		return this.request<LocalMediaVideo>("/local-media/video/artwork/refresh", {
+			method: "POST",
+			body: JSON.stringify({ media_id: mediaId, force }),
 		});
 	}
 

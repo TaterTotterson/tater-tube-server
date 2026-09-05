@@ -405,12 +405,37 @@ func taterPlayerLocalArtworkPath(cfg *config.Config, categoryID string, sourceIn
 		directory = filepath.Dir(target)
 		base = strings.TrimSuffix(filepath.Base(target), filepath.Ext(target))
 	}
+	if path, found := taterPlayerArtworkInDirectory(directory, base); found {
+		return path, true
+	}
+	if strings.EqualFold(strings.TrimSpace(category.LibraryType), "tv") {
+		parts := strings.Split(cleanLocalRelativePath(relPath), "/")
+		if len(parts) > 0 && strings.TrimSpace(parts[0]) != "" {
+			showDirectory, showErr := safeLocalPath(paths[sourceIndex], parts[0])
+			if showErr == nil && showDirectory != directory {
+				if path, found := taterPlayerArtworkInDirectory(showDirectory, filepath.Base(showDirectory)); found {
+					return path, true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+func taterPlayerArtworkInDirectory(directory, base string) (string, bool) {
 	desired := []string{
 		strings.ToLower(base),
 		strings.ToLower(base) + "-poster",
+		strings.ToLower(base) + "-cover",
+		strings.ToLower(base) + "-default",
+		strings.ToLower(base) + "-movie",
+		strings.ToLower(base) + "-show",
 		"poster",
 		"folder",
 		"cover",
+		"default",
+		"movie",
+		"show",
 	}
 	entries, err := os.ReadDir(directory)
 	if err != nil {
@@ -446,7 +471,14 @@ func (s *Server) handleTaterPlayerLocalArtwork(c *fiber.Ctx) error {
 	categoryID := strings.TrimSpace(c.Query("category_id"))
 	sourceIndex := parseTaterInt(c.Query("source"), -1)
 	relPath := cleanLocalRelativePath(c.Query("path"))
-	artworkPath, found := taterPlayerLocalArtworkPath(cfg, categoryID, sourceIndex, relPath)
+	artworkPath := ""
+	found := false
+	if category, categoryFound := taterLocalMediaCategory(cfg, taterRawLocalCategoryID(categoryID)); categoryFound {
+		artworkPath, found = taterStoredVideoArtworkPath(cfg, category, sourceIndex, relPath)
+	}
+	if !found {
+		artworkPath, found = taterPlayerLocalArtworkPath(cfg, categoryID, sourceIndex, relPath)
+	}
 	if !found {
 		return RespondNotFound(c, "Local media artwork", fmt.Sprintf("%s:%d:%s", categoryID, sourceIndex, relPath))
 	}

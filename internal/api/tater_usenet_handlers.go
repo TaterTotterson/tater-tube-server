@@ -346,7 +346,7 @@ func (s *Server) handleTaterUsenetSearch(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleTaterUsenetDiscover(c *fiber.Ctx) error {
-	cfg, _, ok := s.taterUsenetAuthorizedConfig(c)
+	cfg, playerToken, ok := s.taterUsenetAuthorizedConfig(c)
 	if !ok {
 		return nil
 	}
@@ -368,6 +368,7 @@ func (s *Server) handleTaterUsenetDiscover(c *fiber.Ctx) error {
 	if err != nil {
 		return RespondServiceUnavailable(c, "Failed to parse Discover feed", err.Error())
 	}
+	decorateTaterDiscoveryArtwork(cfg, resolveBaseURL(c, ""), playerToken, items)
 
 	return RespondSuccess(c, fiber.Map{
 		"title": title,
@@ -957,6 +958,7 @@ func taterApplyLocalMetadata(mediaPath string, item *taterUsenetItem) {
 	}
 	if genres := taterLocalMetadataGenres(meta); len(genres) > 0 {
 		item.Category = strings.Join(genres, ", ")
+		item.Genres = append([]string(nil), genres...)
 	}
 }
 

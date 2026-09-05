@@ -879,6 +879,19 @@ func refreshTaterLibraryArtworkStats(index *taterLocalLibraryIndex) {
 			break
 		}
 	}
+	for _, video := range index.Videos {
+		for i := range index.Categories {
+			if index.Categories[i].ID != video.CategoryID {
+				continue
+			}
+			if video.HasArtwork {
+				index.Categories[i].Stats.Artwork++
+			} else {
+				index.Categories[i].Stats.MissingArtwork++
+			}
+			break
+		}
+	}
 }
 
 func refreshTaterAlbumArtwork(
@@ -911,9 +924,17 @@ func refreshTaterAlbumArtwork(
 	if len(genres) == 0 {
 		genres, _ = findTaterMusicArtistGenres(ctx, album.Artist, candidate.ArtistID)
 	}
-	ref, err := writeTaterMusicArtworkCache(cfg, album.ID, raw, contentType)
+	ref, sidecarAvailable, err := writeTaterMusicArtworkSidecar(cfg, *album, raw, contentType)
+	storage := "library"
 	if err != nil {
 		return err
+	}
+	if !sidecarAvailable {
+		storage = "cache"
+		ref, err = writeTaterMusicArtworkCache(cfg, album.ID, raw, contentType)
+		if err != nil {
+			return err
+		}
 	}
 	store := readTaterMusicArtworkStore(cfg)
 	updatedAt := time.Now().UTC()
@@ -924,6 +945,7 @@ func refreshTaterAlbumArtwork(
 	override.ContentType = contentType
 	override.MusicBrainzID = candidate.MusicBrainzID
 	override.Genres = mergeTaterMusicGenres(override.Genres, genres)
+	override.Storage = storage
 	override.Locked = force
 	override.UpdatedAt = updatedAt
 	store.Items[album.ID] = override
@@ -932,6 +954,7 @@ func refreshTaterAlbumArtwork(
 	}
 	album.Genres = mergeTaterMusicGenres(album.Genres, override.Genres)
 	setTaterMusicAlbumArtwork(album, "scraped", ref, force, candidate.MusicBrainzID, updatedAt)
+	album.ArtworkStorage = storage
 	album.ArtworkURL = taterLocalMusicAdminArtworkURL(*album)
 	refreshTaterLibraryArtworkStats(index)
 	return nil

@@ -165,6 +165,8 @@ type LocalMediaConfig struct {
 	Enabled        *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	AudioDBEnabled *bool                `yaml:"audiodb_enabled" mapstructure:"audiodb_enabled" json:"audiodb_enabled"`
 	AudioDBAPIKey  string               `yaml:"audiodb_api_key" mapstructure:"audiodb_api_key" json:"audiodb_api_key,omitempty"`
+	TMDBEnabled    *bool                `yaml:"tmdb_enabled" mapstructure:"tmdb_enabled" json:"tmdb_enabled"`
+	TMDBAPIKey     string               `yaml:"tmdb_api_key" mapstructure:"tmdb_api_key" json:"tmdb_api_key,omitempty"`
 	Categories     []LocalMediaCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
 }
 
@@ -893,6 +895,10 @@ func (c *Config) Validate() error {
 	if c.LocalMedia.AudioDBEnabled == nil {
 		enabled := true
 		c.LocalMedia.AudioDBEnabled = &enabled
+	}
+	if c.LocalMedia.TMDBEnabled == nil {
+		enabled := true
+		c.LocalMedia.TMDBEnabled = &enabled
 	}
 	if c.TaterBumpers.LiveTV == nil {
 		enabled := true
@@ -1878,6 +1884,7 @@ func DefaultConfig(configDir ...string) *Config {
 	newznabEnabled := false     // Player-facing Stream catalog disabled by default
 	localMediaEnabled := false  // Server-local media catalog disabled by default
 	audioDBEnabled := true      // Supplement MusicBrainz with album genre/style metadata
+	tmdbEnabled := true         // Fetch missing movie and series posters when a TMDB key is configured
 	tubeTVEnabled := true       // Tube TV is available when local media is configured
 	tubeTVAutoChannels := true  // Tube TV auto-generates channels by default
 	tubeTVCommercials := true   // Commercial breaks enabled when commercials exist
@@ -1954,6 +1961,7 @@ func DefaultConfig(configDir ...string) *Config {
 		LocalMedia: LocalMediaConfig{
 			Enabled:        &localMediaEnabled,
 			AudioDBEnabled: &audioDBEnabled,
+			TMDBEnabled:    &tmdbEnabled,
 			Categories:     []LocalMediaCategory{},
 		},
 		TubeTV: TubeTVConfig{
