@@ -173,7 +173,7 @@ function StatTile({
 	detail: string;
 }) {
 	return (
-		<div className="rounded-lg border border-base-300 bg-base-200/55 p-4">
+		<div className="rounded-xl border border-base-300 bg-base-200/70 p-4 shadow-sm">
 			<div className="flex items-start gap-3">
 				<div className="rounded-md bg-primary/15 p-2">
 					<Icon className="h-5 w-5 text-primary" />
@@ -198,10 +198,12 @@ function Panel({
 	children: ReactNode;
 }) {
 	return (
-		<section className="min-w-0 overflow-hidden rounded-lg border border-base-300 bg-base-200/70 p-5">
+		<section className="min-w-0 overflow-hidden rounded-2xl border border-base-300 bg-base-100 p-5 shadow-black/15 shadow-lg">
 			<div className="mb-4 flex min-w-0 items-center gap-2">
 				<Icon className="h-5 w-5 text-primary" />
-				<h2 className="tater-glow min-w-0 break-words font-vcr text-lg text-primary">{title}</h2>
+				<h2 className="min-w-0 break-words font-semibold text-base-content text-lg tracking-tight">
+					{title}
+				</h2>
 			</div>
 			{children}
 		</section>
@@ -543,7 +545,7 @@ export function Dashboard() {
 			<section className="space-y-3">
 				<div className="flex items-center gap-2">
 					<Activity className="h-4 w-4 text-primary" />
-					<h2 className="tater-glow font-vcr text-lg text-primary">System Summary</h2>
+					<h2 className="font-semibold text-base-content text-lg tracking-tight">System Summary</h2>
 				</div>
 				<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 					<StatTile

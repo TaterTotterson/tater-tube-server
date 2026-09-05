@@ -116,21 +116,21 @@ export function Sidebar() {
 	};
 
 	return (
-		<aside className="min-h-full w-44 overflow-y-auto bg-base-200 md:w-48 lg:w-52">
-			{" "}
-			<div className="p-4">
-				<div className="mb-8 flex items-center space-x-3">
-					<div className="avatar placeholder">
-						<div className="flex h-12 w-12 items-center justify-center overflow-hidden">
-							<img src="/logo.png" alt="Tater Tube Server" className="h-12 w-12 object-contain" />
-						</div>
-					</div>
-					<div>
-						<h2 className="tater-glow font-vcr text-lg text-primary leading-tight">Tater Tube</h2>
-					</div>
-				</div>
+		<aside className="min-h-full w-64 overflow-y-auto border-base-300 border-r bg-base-200/95">
+			<div className="flex min-h-full flex-col p-4">
+				<NavLink
+					to="/"
+					className="mb-6 block rounded-2xl border border-transparent px-1 py-2 transition hover:border-primary/15 hover:bg-primary/5"
+					aria-label="Tater Tube dashboard"
+				>
+					<img
+						src="/tater-tube-logo-leaning-transparent.png"
+						alt="Tater Tube"
+						className="h-auto max-h-28 w-full object-contain"
+					/>
+				</NavLink>
 
-				<nav className="space-y-2" aria-label="Main navigation">
+				<nav className="space-y-1.5" aria-label="Main navigation">
 					{visibleNavigation.map((item) => {
 						const badgeCount = getBadgeCount(item.href);
 						const badgeColor = getBadgeColor(item.href, badgeCount);
@@ -140,12 +140,14 @@ export function Sidebar() {
 								key={item.name}
 								to={item.href}
 								className={({ isActive }) =>
-									`flex items-center space-x-3 rounded-lg px-4 py-3 transition-colors ${
-										isActive ? "bg-primary text-primary-content" : "hover:bg-base-300"
+									`flex items-center gap-3 rounded-xl border px-3.5 py-2.5 font-medium transition-all ${
+										isActive
+											? "border-primary/30 bg-primary/15 text-primary shadow-sm"
+											: "border-transparent text-base-content/70 hover:border-base-300 hover:bg-base-100 hover:text-base-content"
 									}`
 								}
 							>
-								<item.icon className="h-5 w-5" aria-hidden="true" />
+								<item.icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
 								<span className="flex-1">{item.name}</span>
 								{badgeCount > 0 && (
 									<span className={`badge badge-sm ${badgeColor}`}>
@@ -158,47 +160,49 @@ export function Sidebar() {
 					})}
 				</nav>
 
-				<div className="mt-8 border-base-300 border-t pt-6">
-					<div className="space-y-4">
-						<div className="flex items-center justify-between">
-							<div className="flex items-center space-x-2">
-								<Activity className="h-4 w-4 text-success" />
-								<span className="text-sm">Status</span>
-							</div>
-							<div className="text-base-content/70 text-sm">{statusLabel()}</div>
+				<div className="mt-auto pt-8">
+					<div className="rounded-2xl border border-base-300 bg-base-100/65 p-3.5 shadow-sm">
+						<div className="mb-3 text-[10px] text-base-content/40 uppercase tracking-[0.16em]">
+							Server status
 						</div>
-
-						<div className="flex items-center justify-between">
-							<div className="flex items-center space-x-2">
-								<Database className="h-4 w-4" />
-								<span className="text-sm">Activity</span>
+						<div className="space-y-3">
+							<div className="flex items-center justify-between">
+								<div className="flex items-center space-x-2">
+									<Activity className="h-4 w-4 text-success" />
+									<span className="text-xs">Status</span>
+								</div>
+								<div className="font-medium text-base-content/75 text-xs capitalize">
+									{statusLabel()}
+								</div>
 							</div>
-							<div className="text-base-content/70 text-sm">{queueLabel()}</div>
-						</div>
 
-						<div className="flex items-center justify-between">
-							<div className="flex items-center space-x-2">
-								<Cpu className="h-4 w-4 text-primary" />
-								<span className="text-sm">HW</span>
+							<div className="flex items-center justify-between">
+								<div className="flex items-center space-x-2">
+									<Database className="h-4 w-4" />
+									<span className="text-xs">Activity</span>
+								</div>
+								<div className="font-medium text-base-content/75 text-xs">{queueLabel()}</div>
 							</div>
-							<div className={`badge badge-sm ${hardwareBadgeClass()}`}>{hardwareLabel()}</div>
-						</div>
 
-						<div className="flex items-center justify-between">
-							<div className="flex items-center space-x-2">
-								<Tv className="h-4 w-4 text-primary" />
-								<span className="text-sm">Streamer</span>
+							<div className="flex items-center justify-between">
+								<div className="flex items-center space-x-2">
+									<Cpu className="h-4 w-4 text-primary" />
+									<span className="text-xs">Hardware</span>
+								</div>
+								<div className={`badge badge-sm ${hardwareBadgeClass()}`}>{hardwareLabel()}</div>
 							</div>
-							<div className="badge badge-success badge-sm">Online</div>
-						</div>
-					</div>
-				</div>
 
-				<div className="mt-4 border-base-300 border-t pt-4">
-					<div className="space-y-2">
-						<div className="flex items-center justify-between">
-							<div className="text-base-content/70 text-sm">Version</div>
-							<div className="font-mono text-base-content text-sm">{__APP_VERSION__}</div>
+							<div className="flex items-center justify-between">
+								<div className="flex items-center space-x-2">
+									<Tv className="h-4 w-4 text-primary" />
+									<span className="text-xs">Streamer</span>
+								</div>
+								<div className="badge badge-success badge-sm">Online</div>
+							</div>
+						</div>
+						<div className="mt-3 flex items-center justify-between border-base-300/70 border-t pt-3">
+							<div className="text-base-content/45 text-xs">Version</div>
+							<div className="font-mono text-base-content/70 text-xs">{__APP_VERSION__}</div>
 						</div>
 					</div>
 				</div>
