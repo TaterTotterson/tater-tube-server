@@ -106,6 +106,8 @@ const EMPTY_STATS: LocalMediaLibraryStats = {
 	size_bytes: 0,
 };
 
+const LIBRARY_PAGE_SIZE = 36;
+
 function slug(value: string) {
 	return value
 		.toLowerCase()
@@ -295,7 +297,7 @@ export function LocalMediaConfigSection({
 		type: activeTab,
 		q: activeTab !== "folders" ? search.trim() : undefined,
 		missing_only: activeTab !== "folders" ? missingOnly : undefined,
-		limit: 120,
+		limit: LIBRARY_PAGE_SIZE,
 		offset: activeTab !== "folders" ? libraryOffset : 0,
 	});
 	const scan = useLocalMediaScanStatus();
@@ -848,7 +850,7 @@ export function LocalMediaConfigSection({
 
 			{(activeTab === "movies" || activeTab === "tv") && (
 				<section className="space-y-4 rounded-2xl border border-base-300 bg-base-100/70 p-4 sm:p-5">
-					<div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+					<div className="flex flex-col gap-4 2xl:flex-row 2xl:items-end 2xl:justify-between">
 						<div>
 							<div className="flex items-center gap-2">
 								{activeTab === "movies" ? (
@@ -864,8 +866,8 @@ export function LocalMediaConfigSection({
 								Browse poster and NFO coverage and fill only the sidecars that are still missing.
 							</p>
 						</div>
-						<div className="flex flex-col gap-2 sm:flex-row">
-							<label className="input input-bordered flex items-center gap-2 bg-base-100">
+						<div className="grid w-full gap-3 sm:grid-cols-2 2xl:w-auto 2xl:grid-cols-[minmax(18rem,22rem)_auto_auto]">
+							<label className="input input-bordered flex min-w-0 items-center gap-2 bg-base-100 sm:col-span-2 2xl:col-span-1">
 								<Search className="h-4 w-4 text-base-content/40" />
 								<input
 									type="search"
@@ -878,10 +880,10 @@ export function LocalMediaConfigSection({
 									}}
 								/>
 							</label>
-							<fieldset className="join" aria-label="Artwork coverage filter">
+							<fieldset className="grid grid-cols-2 gap-2" aria-label="Artwork coverage filter">
 								<button
 									type="button"
-									className={`btn join-item ${!missingOnly ? "btn-primary" : "btn-outline"}`}
+									className={`btn ${!missingOnly ? "btn-primary" : "btn-outline"}`}
 									onClick={() => {
 										setMissingOnly(false);
 										setLibraryOffset(0);
@@ -891,7 +893,7 @@ export function LocalMediaConfigSection({
 								</button>
 								<button
 									type="button"
-									className={`btn join-item ${missingOnly ? "btn-primary" : "btn-outline"}`}
+									className={`btn ${missingOnly ? "btn-primary" : "btn-outline"}`}
 									onClick={() => {
 										setMissingOnly(true);
 										setLibraryOffset(0);
@@ -903,7 +905,7 @@ export function LocalMediaConfigSection({
 							</fieldset>
 							<button
 								type="button"
-								className="btn btn-secondary"
+								className="btn btn-secondary w-full whitespace-nowrap"
 								disabled={
 									hasChanges ||
 									scanRunning ||
@@ -1012,11 +1014,11 @@ export function LocalMediaConfigSection({
 						))}
 					</div>
 
-					{(library.data?.total_videos ?? 0) > 120 && (
+					{(library.data?.total_videos ?? 0) > LIBRARY_PAGE_SIZE && (
 						<div className="flex items-center justify-between border-base-300 border-t pt-4">
 							<div className="text-base-content/50 text-xs">
 								Titles {libraryOffset + 1}–
-								{Math.min(libraryOffset + 120, library.data?.total_videos ?? 0)} of{" "}
+								{Math.min(libraryOffset + LIBRARY_PAGE_SIZE, library.data?.total_videos ?? 0)} of{" "}
 								{(library.data?.total_videos ?? 0).toLocaleString()}
 							</div>
 							<div className="join">
@@ -1024,15 +1026,15 @@ export function LocalMediaConfigSection({
 									type="button"
 									className="btn join-item btn-sm"
 									disabled={libraryOffset === 0}
-									onClick={() => setLibraryOffset(Math.max(0, libraryOffset - 120))}
+									onClick={() => setLibraryOffset(Math.max(0, libraryOffset - LIBRARY_PAGE_SIZE))}
 								>
 									Previous
 								</button>
 								<button
 									type="button"
 									className="btn join-item btn-sm"
-									disabled={libraryOffset + 120 >= (library.data?.total_videos ?? 0)}
-									onClick={() => setLibraryOffset(libraryOffset + 120)}
+									disabled={libraryOffset + LIBRARY_PAGE_SIZE >= (library.data?.total_videos ?? 0)}
+									onClick={() => setLibraryOffset(libraryOffset + LIBRARY_PAGE_SIZE)}
 								>
 									Next
 								</button>
@@ -1044,7 +1046,7 @@ export function LocalMediaConfigSection({
 
 			{activeTab === "music" && (
 				<section className="space-y-4 rounded-2xl border border-base-300 bg-base-100/70 p-4 sm:p-5">
-					<div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+					<div className="flex flex-col gap-4 2xl:flex-row 2xl:items-end 2xl:justify-between">
 						<div>
 							<div className="flex items-center gap-2">
 								<Disc3 className="h-5 w-5 text-primary" />
@@ -1055,8 +1057,8 @@ export function LocalMediaConfigSection({
 								music.
 							</p>
 						</div>
-						<div className="flex flex-col gap-2 sm:flex-row">
-							<label className="input input-bordered flex items-center gap-2 bg-base-100">
+						<div className="grid w-full gap-3 sm:grid-cols-2 2xl:w-auto 2xl:grid-cols-[minmax(18rem,22rem)_auto_auto]">
+							<label className="input input-bordered flex min-w-0 items-center gap-2 bg-base-100 sm:col-span-2 2xl:col-span-1">
 								<Search className="h-4 w-4 text-base-content/40" />
 								<input
 									type="search"
@@ -1069,10 +1071,10 @@ export function LocalMediaConfigSection({
 									}}
 								/>
 							</label>
-							<fieldset className="join" aria-label="Artwork coverage filter">
+							<fieldset className="grid grid-cols-2 gap-2" aria-label="Artwork coverage filter">
 								<button
 									type="button"
-									className={`btn join-item ${!missingOnly ? "btn-primary" : "btn-outline"}`}
+									className={`btn ${!missingOnly ? "btn-primary" : "btn-outline"}`}
 									onClick={() => {
 										setMissingOnly(false);
 										setLibraryOffset(0);
@@ -1082,7 +1084,7 @@ export function LocalMediaConfigSection({
 								</button>
 								<button
 									type="button"
-									className={`btn join-item ${missingOnly ? "btn-primary" : "btn-outline"}`}
+									className={`btn ${missingOnly ? "btn-primary" : "btn-outline"}`}
 									onClick={() => {
 										setMissingOnly(true);
 										setLibraryOffset(0);
@@ -1094,7 +1096,7 @@ export function LocalMediaConfigSection({
 							</fieldset>
 							<button
 								type="button"
-								className="btn btn-secondary"
+								className="btn btn-secondary w-full whitespace-nowrap"
 								disabled={
 									hasChanges ||
 									scanRunning ||
@@ -1240,11 +1242,11 @@ export function LocalMediaConfigSection({
 						))}
 					</div>
 
-					{(library.data?.total_albums ?? 0) > 120 && (
+					{(library.data?.total_albums ?? 0) > LIBRARY_PAGE_SIZE && (
 						<div className="flex items-center justify-between border-base-300 border-t pt-4">
 							<div className="text-base-content/50 text-xs">
 								Albums {libraryOffset + 1}–
-								{Math.min(libraryOffset + 120, library.data?.total_albums ?? 0)} of{" "}
+								{Math.min(libraryOffset + LIBRARY_PAGE_SIZE, library.data?.total_albums ?? 0)} of{" "}
 								{(library.data?.total_albums ?? 0).toLocaleString()}
 							</div>
 							<div className="join">
@@ -1252,15 +1254,15 @@ export function LocalMediaConfigSection({
 									type="button"
 									className="btn join-item btn-sm"
 									disabled={libraryOffset === 0}
-									onClick={() => setLibraryOffset(Math.max(0, libraryOffset - 120))}
+									onClick={() => setLibraryOffset(Math.max(0, libraryOffset - LIBRARY_PAGE_SIZE))}
 								>
 									Previous
 								</button>
 								<button
 									type="button"
 									className="btn join-item btn-sm"
-									disabled={libraryOffset + 120 >= (library.data?.total_albums ?? 0)}
-									onClick={() => setLibraryOffset(libraryOffset + 120)}
+									disabled={libraryOffset + LIBRARY_PAGE_SIZE >= (library.data?.total_albums ?? 0)}
+									onClick={() => setLibraryOffset(libraryOffset + LIBRARY_PAGE_SIZE)}
 								>
 									Next
 								</button>
