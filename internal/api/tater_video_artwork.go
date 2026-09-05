@@ -77,6 +77,7 @@ type taterVideoArtworkCandidate struct {
 type taterVideoArtworkProgress struct {
 	VideosProcessed int
 	ArtworkFound    int
+	MetadataFound   int
 	Message         string
 }
 
@@ -111,6 +112,66 @@ func taterVideoMediaID(categoryID string, sourceIndex int, mediaType, relPath st
 		strconv.Itoa(sourceIndex) + ":" +
 		base64.RawURLEncoding.EncodeToString([]byte(strings.TrimSpace(mediaType))) + ":" +
 		base64.RawURLEncoding.EncodeToString([]byte(cleanLocalRelativePath(relPath)))
+}
+
+func taterLocalVideoMetadataFile(cfg *config.Config, video taterLocalVideoIndex) (taterLocalNFO, string, bool) {
+	cat, ok := taterLocalMediaCategory(cfg, video.CategoryID)
+	if !ok {
+		return taterLocalNFO{}, "", false
+	}
+	roots := taterLocalMediaCategoryPaths(cat)
+	if video.SourceIndex < 0 || video.SourceIndex >= len(roots) {
+		return taterLocalNFO{}, "", false
+	}
+	target, err := safeLocalPath(roots[video.SourceIndex], video.Path)
+	if err != nil {
+		return taterLocalNFO{}, "", false
+	}
+	directory := target
+	base := ""
+	if video.MediaType != "show" {
+		directory = filepath.Dir(target)
+		base = strings.TrimSuffix(filepath.Base(target), filepath.Ext(target))
+	}
+	meta, path, found := taterReadLocalMetadataFile(directory, base)
+	if !found {
+		return taterLocalNFO{}, "", false
+	}
+	rel, err := filepath.Rel(roots[video.SourceIndex], path)
+	if err != nil {
+		return taterLocalNFO{}, "", false
+	}
+	return meta, cleanLocalRelativePath(filepath.ToSlash(rel)), true
+}
+
+func applyTaterLocalNFOMetadata(video *taterLocalVideoIndex, meta taterLocalNFO, ref string) {
+	if video == nil {
+		return
+	}
+	if title := cleanTaterText(meta.Title); title != "" {
+		video.Title = title
+	}
+	if year := taterLocalMetadataYear(meta); year != "" {
+		video.Year = year
+	}
+	video.Description = cleanTaterText(meta.Plot)
+	if video.Description == "" {
+		video.Description = cleanTaterText(meta.Outline)
+	}
+	video.OriginalTitle = cleanTaterText(meta.OriginalTitle)
+	video.Tagline = cleanTaterText(meta.Tagline)
+	video.ContentRating = cleanTaterText(meta.MPAA)
+	video.CommunityRating = taterLocalMetadataRating(meta.Rating)
+	video.Genres = taterLocalMetadataGenres(meta)
+	video.Studios = cleanTaterMetadataValues(meta.Studios)
+	video.Countries = cleanTaterMetadataValues(meta.Countries)
+	video.Actors = taterLocalMetadataActors(meta)
+	video.Directors = cleanTaterMetadataValues(meta.Directors)
+	video.Writers = cleanTaterMetadataValues(meta.Writers)
+	video.IMDbID, video.TMDBID, video.TVDBID = taterLocalMetadataIDs(meta)
+	video.HasMetadata = true
+	video.MetadataSource = "nfo"
+	video.NFORef = ref
 }
 
 func taterStoredVideoArtworkPath(
@@ -257,13 +318,18 @@ func buildTaterLocalVideoArtworkIndex(
 	store := readTaterVideoArtworkStore(cfg)
 	for i := range videos {
 		video := &videos[i]
+		if meta, ref, found := taterLocalVideoMetadataFile(cfg, *video); found {
+			applyTaterLocalNFOMetadata(video, meta, ref)
+		}
 		override := store.Items[video.ID]
 		if override.MediaID == video.ID && taterVideoArtworkRefExists(cfg, *video, override.Ref) {
 			video.HasArtwork = true
 			video.ArtworkSource = override.Source
 			video.ArtworkRef = override.Ref
 			video.ArtworkLocked = override.Locked
-			video.TMDBID = override.TMDBID
+			if override.TMDBID > 0 {
+				video.TMDBID = override.TMDBID
+			}
 			video.ArtworkUpdated = override.UpdatedAt.Unix()
 		} else if ref := findTaterLocalVideoArtworkRef(cfg, *video); ref != "" {
 			video.HasArtwork = true
@@ -377,8 +443,16 @@ func taterTMDBRequest(ctx context.Context, cfg *config.Config, endpoint string, 
 }
 
 func findTaterRemoteVideoArtwork(ctx context.Context, cfg *config.Config, video taterLocalVideoIndex) (taterVideoArtworkCandidate, []byte, string, error) {
+	candidate, err := findTaterRemoteVideoCandidate(ctx, cfg, video)
+	if err != nil {
+		return taterVideoArtworkCandidate{}, nil, "", err
+	}
+	return downloadTaterVideoArtworkCandidate(ctx, candidate)
+}
+
+func findTaterRemoteVideoCandidate(ctx context.Context, cfg *config.Config, video taterLocalVideoIndex) (taterVideoArtworkCandidate, error) {
 	if !taterTMDBConfigured(cfg) {
-		return taterVideoArtworkCandidate{}, nil, "", fmt.Errorf("add a TMDB API key in Local Media before finding movie or TV artwork")
+		return taterVideoArtworkCandidate{}, fmt.Errorf("add a TMDB API key in Local Media before finding movie or TV artwork and metadata")
 	}
 	params := url.Values{}
 	params.Set("query", strings.TrimSpace(video.Title))
@@ -393,24 +467,24 @@ func findTaterRemoteVideoArtwork(ctx context.Context, cfg *config.Config, video 
 	}
 	response, err := taterTMDBRequest(ctx, cfg, endpoint, params)
 	if err != nil {
-		return taterVideoArtworkCandidate{}, nil, "", err
+		return taterVideoArtworkCandidate{}, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return taterVideoArtworkCandidate{}, nil, "", fmt.Errorf("TMDB returned HTTP %d", response.StatusCode)
+		return taterVideoArtworkCandidate{}, fmt.Errorf("TMDB returned HTTP %d", response.StatusCode)
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, taterTMDBResponseMaximumBytes+1))
 	if err != nil || len(raw) == 0 || len(raw) > taterTMDBResponseMaximumBytes {
-		return taterVideoArtworkCandidate{}, nil, "", fmt.Errorf("TMDB search response is invalid")
+		return taterVideoArtworkCandidate{}, fmt.Errorf("TMDB search response is invalid")
 	}
 	var payload taterTMDBSearchResponse
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return taterVideoArtworkCandidate{}, nil, "", err
+		return taterVideoArtworkCandidate{}, err
 	}
 	wanted := normalizeTaterMusicMatchText(video.Title)
 	matches := []taterVideoArtworkCandidate{}
 	for _, row := range payload.Results {
-		if row.ID <= 0 || strings.TrimSpace(row.PosterPath) == "" {
+		if row.ID <= 0 {
 			continue
 		}
 		titles := []string{row.Title, row.OriginalTitle, row.Name, row.OriginalName}
@@ -441,10 +515,10 @@ func findTaterRemoteVideoArtwork(ctx context.Context, cfg *config.Config, video 
 		})
 	}
 	if len(matches) == 0 || (video.Year == "" && len(matches) > 1) {
-		return taterVideoArtworkCandidate{}, nil, "", os.ErrNotExist
+		return taterVideoArtworkCandidate{}, os.ErrNotExist
 	}
 	sort.SliceStable(matches, func(i, j int) bool { return matches[i].Popularity > matches[j].Popularity })
-	return downloadTaterVideoArtworkCandidate(ctx, matches[0])
+	return matches[0], nil
 }
 
 func findTaterRemoteVideoArtworkByExternalID(
@@ -453,31 +527,55 @@ func findTaterRemoteVideoArtworkByExternalID(
 	video taterLocalVideoIndex,
 	externalID string,
 ) (taterVideoArtworkCandidate, []byte, string, error) {
-	externalID = strings.ToLower(strings.TrimSpace(externalID))
-	if len(externalID) < 3 || len(externalID) > 24 || !strings.HasPrefix(externalID, "tt") {
-		return taterVideoArtworkCandidate{}, nil, "", os.ErrNotExist
-	}
-	for _, character := range externalID[2:] {
-		if character < '0' || character > '9' {
-			return taterVideoArtworkCandidate{}, nil, "", os.ErrNotExist
-		}
-	}
-	params := url.Values{"external_source": []string{"imdb_id"}}
-	response, err := taterTMDBRequest(ctx, cfg, "find/"+url.PathEscape(externalID), params)
+	candidate, err := findTaterRemoteVideoCandidateByExternalID(ctx, cfg, video, externalID)
 	if err != nil {
 		return taterVideoArtworkCandidate{}, nil, "", err
 	}
+	return downloadTaterVideoArtworkCandidate(ctx, candidate)
+}
+
+func findTaterRemoteVideoCandidateByExternalID(
+	ctx context.Context,
+	cfg *config.Config,
+	video taterLocalVideoIndex,
+	externalID string,
+) (taterVideoArtworkCandidate, error) {
+	externalID = strings.ToLower(strings.TrimSpace(externalID))
+	if len(externalID) < 1 || len(externalID) > 24 {
+		return taterVideoArtworkCandidate{}, os.ErrNotExist
+	}
+	externalSource := "tvdb_id"
+	digits := externalID
+	if strings.HasPrefix(externalID, "tt") {
+		externalSource = "imdb_id"
+		digits = externalID[2:]
+	} else if video.LibraryType != "tv" && video.MediaType != "show" {
+		return taterVideoArtworkCandidate{}, os.ErrNotExist
+	}
+	if digits == "" {
+		return taterVideoArtworkCandidate{}, os.ErrNotExist
+	}
+	for _, character := range digits {
+		if character < '0' || character > '9' {
+			return taterVideoArtworkCandidate{}, os.ErrNotExist
+		}
+	}
+	params := url.Values{"external_source": []string{externalSource}}
+	response, err := taterTMDBRequest(ctx, cfg, "find/"+url.PathEscape(externalID), params)
+	if err != nil {
+		return taterVideoArtworkCandidate{}, err
+	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return taterVideoArtworkCandidate{}, nil, "", fmt.Errorf("TMDB returned HTTP %d", response.StatusCode)
+		return taterVideoArtworkCandidate{}, fmt.Errorf("TMDB returned HTTP %d", response.StatusCode)
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, taterTMDBResponseMaximumBytes+1))
 	if err != nil || len(raw) == 0 || len(raw) > taterTMDBResponseMaximumBytes {
-		return taterVideoArtworkCandidate{}, nil, "", fmt.Errorf("TMDB find response is invalid")
+		return taterVideoArtworkCandidate{}, fmt.Errorf("TMDB find response is invalid")
 	}
 	payload := taterTMDBFindResponse{}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return taterVideoArtworkCandidate{}, nil, "", err
+		return taterVideoArtworkCandidate{}, err
 	}
 	results := payload.MovieResults
 	if video.LibraryType == "tv" || video.MediaType == "show" {
@@ -485,7 +583,7 @@ func findTaterRemoteVideoArtworkByExternalID(
 	}
 	candidates := make([]taterVideoArtworkCandidate, 0, len(results))
 	for _, row := range results {
-		if row.ID <= 0 || strings.TrimSpace(row.PosterPath) == "" {
+		if row.ID <= 0 {
 			continue
 		}
 		title := strings.TrimSpace(row.Title)
@@ -506,10 +604,10 @@ func findTaterRemoteVideoArtworkByExternalID(
 		})
 	}
 	if len(candidates) == 0 {
-		return taterVideoArtworkCandidate{}, nil, "", os.ErrNotExist
+		return taterVideoArtworkCandidate{}, os.ErrNotExist
 	}
 	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].Popularity > candidates[j].Popularity })
-	return downloadTaterVideoArtworkCandidate(ctx, candidates[0])
+	return candidates[0], nil
 }
 
 func downloadTaterVideoArtworkCandidate(
@@ -681,35 +779,51 @@ func refreshTaterVideoArtwork(ctx context.Context, cfg *config.Config, index *ta
 	if video == nil {
 		return fmt.Errorf("movie or TV show is unavailable")
 	}
-	if video.ArtworkLocked && !force {
-		return fmt.Errorf("artwork is locked")
-	}
-	if video.HasArtwork && !force {
+	if video.HasArtwork && video.HasMetadata && !force {
 		return nil
 	}
-	candidate, raw, contentType, err := findTaterRemoteVideoArtwork(ctx, cfg, *video)
+	candidate, details, err := resolveTaterTMDBVideoMetadata(ctx, cfg, *video)
 	if err != nil {
 		return err
 	}
-	ref, err := writeTaterVideoArtworkSidecar(cfg, *video, raw, contentType)
-	if err != nil {
-		return err
-	}
-	updatedAt := time.Now().UTC()
-	store := readTaterVideoArtworkStore(cfg)
-	store.Items[video.ID] = taterVideoArtworkOverride{
-		MediaID: video.ID, Source: "scraped", Ref: ref, TMDBID: candidate.TMDBID,
-		Locked: false, UpdatedAt: updatedAt,
-	}
-	if err := writeTaterVideoArtworkStore(cfg, store); err != nil {
-		return err
-	}
-	video.HasArtwork = true
-	video.ArtworkSource = "scraped"
-	video.ArtworkRef = ref
 	video.TMDBID = candidate.TMDBID
-	video.ArtworkUpdated = updatedAt.Unix()
-	video.ArtworkURL = taterLocalVideoAdminArtworkURL(*video)
+	if !video.HasMetadata {
+		if _, err := writeTaterVideoNFO(cfg, video, details); err != nil {
+			return err
+		}
+		updateTaterIndexedVideoMetadata(index, *video)
+	}
+	if (!video.HasArtwork || force) && (!video.ArtworkLocked || force) {
+		if strings.TrimSpace(candidate.PosterPath) == "" {
+			refreshTaterLibraryArtworkStats(index)
+			if video.HasMetadata {
+				return nil
+			}
+			return fmt.Errorf("TMDB metadata did not include a poster")
+		}
+		_, raw, contentType, err := downloadTaterVideoArtworkCandidate(ctx, candidate)
+		if err != nil {
+			return err
+		}
+		ref, err := writeTaterVideoArtworkSidecar(cfg, *video, raw, contentType)
+		if err != nil {
+			return err
+		}
+		updatedAt := time.Now().UTC()
+		store := readTaterVideoArtworkStore(cfg)
+		store.Items[video.ID] = taterVideoArtworkOverride{
+			MediaID: video.ID, Source: "scraped", Ref: ref, TMDBID: candidate.TMDBID,
+			Locked: false, UpdatedAt: updatedAt,
+		}
+		if err := writeTaterVideoArtworkStore(cfg, store); err != nil {
+			return err
+		}
+		video.HasArtwork = true
+		video.ArtworkSource = "scraped"
+		video.ArtworkRef = ref
+		video.ArtworkUpdated = updatedAt.Unix()
+		video.ArtworkURL = taterLocalVideoAdminArtworkURL(*video)
+	}
 	refreshTaterLibraryArtworkStats(index)
 	return nil
 }
@@ -728,7 +842,7 @@ func scrapeTaterMissingVideoArtwork(ctx context.Context, cfg *config.Config, ind
 		if (wantedType == "movies" || wantedType == "tv") && video.LibraryType != wantedType {
 			continue
 		}
-		if video.HasArtwork || video.ArtworkLocked {
+		if (video.HasArtwork && video.HasMetadata) || (video.ArtworkLocked && video.HasMetadata) {
 			continue
 		}
 		status.VideosProcessed++
@@ -736,9 +850,16 @@ func scrapeTaterMissingVideoArtwork(ctx context.Context, cfg *config.Config, ind
 		if progress != nil {
 			progress(status)
 		}
-		if err := refreshTaterVideoArtwork(ctx, cfg, index, video, false); err == nil && video.HasArtwork {
+		hadArtwork := video.HasArtwork
+		hadMetadata := video.HasMetadata
+		err := refreshTaterVideoArtwork(ctx, cfg, index, video, false)
+		if !hadArtwork && video.HasArtwork {
 			status.ArtworkFound++
-		} else {
+		}
+		if !hadMetadata && video.HasMetadata {
+			status.MetadataFound++
+		}
+		if err != nil {
 			slog.Debug("Video artwork enrichment did not find a confident match", "title", video.Title, "year", video.Year, "error", err)
 		}
 		if progress != nil {
@@ -925,10 +1046,10 @@ func (s *Server) handleLocalMediaVideoArtworkRefresh(c *fiber.Ctx) error {
 		return RespondNotFound(c, "Movie or TV show", request.MediaID)
 	}
 	if err := refreshTaterVideoArtwork(c.Context(), cfg, &index, video, request.Force); err != nil {
-		return RespondValidationError(c, "No confident artwork match was found", err.Error())
+		return RespondValidationError(c, "No confident media match was found", err.Error())
 	}
 	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), index); err != nil {
-		return RespondInternalError(c, "Failed to save video artwork", err.Error())
+		return RespondInternalError(c, "Failed to save video artwork and metadata", err.Error())
 	}
 	return RespondSuccess(c, video)
 }

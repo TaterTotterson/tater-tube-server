@@ -69,6 +69,18 @@ type taterUsenetItem struct {
 	GUID            string   `json:"guid,omitempty"`
 	Date            string   `json:"date,omitempty"`
 	Description     string   `json:"description,omitempty"`
+	OriginalTitle   string   `json:"originalTitle,omitempty"`
+	Tagline         string   `json:"tagline,omitempty"`
+	ContentRating   string   `json:"contentRating,omitempty"`
+	CommunityRating float64  `json:"communityRating,omitempty"`
+	Studios         []string `json:"studios,omitempty"`
+	Countries       []string `json:"countries,omitempty"`
+	Actors          []string `json:"actors,omitempty"`
+	Directors       []string `json:"directors,omitempty"`
+	Writers         []string `json:"writers,omitempty"`
+	IMDbID          string   `json:"imdbId,omitempty"`
+	TMDBID          int64    `json:"tmdbId,omitempty"`
+	TVDBID          int64    `json:"tvdbId,omitempty"`
 	Category        string   `json:"category,omitempty"`
 	Poster          string   `json:"poster,omitempty"`
 	HasArtwork      bool     `json:"hasArtwork,omitempty"`
@@ -718,12 +730,40 @@ type taterLocalDiscoverGenre struct {
 }
 
 type taterLocalNFO struct {
-	Title     string   `xml:"title"`
-	Plot      string   `xml:"plot"`
-	Outline   string   `xml:"outline"`
-	Year      string   `xml:"year"`
-	Premiered string   `xml:"premiered"`
-	Genres    []string `xml:"genre"`
+	Title          string                  `xml:"title"`
+	OriginalTitle  string                  `xml:"originaltitle"`
+	SortTitle      string                  `xml:"sorttitle"`
+	Plot           string                  `xml:"plot"`
+	Outline        string                  `xml:"outline"`
+	Tagline        string                  `xml:"tagline"`
+	Year           string                  `xml:"year"`
+	Premiered      string                  `xml:"premiered"`
+	ReleaseDate    string                  `xml:"releasedate"`
+	Runtime        string                  `xml:"runtime"`
+	Rating         string                  `xml:"rating"`
+	MPAA           string                  `xml:"mpaa"`
+	IMDbID         string                  `xml:"imdbid"`
+	IMDbUnderscore string                  `xml:"imdb_id"`
+	TMDBID         int64                   `xml:"tmdbid"`
+	TVDBID         int64                   `xml:"tvdbid"`
+	ID             string                  `xml:"id"`
+	Genres         []string                `xml:"genre"`
+	Studios        []string                `xml:"studio"`
+	Countries      []string                `xml:"country"`
+	Actors         []taterLocalNFOActor    `xml:"actor"`
+	Directors      []string                `xml:"director"`
+	Writers        []string                `xml:"writer"`
+	UniqueIDs      []taterLocalNFOUniqueID `xml:"uniqueid"`
+}
+
+type taterLocalNFOUniqueID struct {
+	Type  string `xml:"type,attr"`
+	Value string `xml:",chardata"`
+}
+
+type taterLocalNFOActor struct {
+	Name string `xml:"name"`
+	Role string `xml:"role"`
 }
 
 func taterLocalDiscoverDefinitions() []taterLocalDiscoverDefinition {
@@ -960,9 +1000,24 @@ func taterApplyLocalMetadata(mediaPath string, item *taterUsenetItem) {
 		item.Category = strings.Join(genres, ", ")
 		item.Genres = append([]string(nil), genres...)
 	}
+	item.OriginalTitle = cleanTaterText(meta.OriginalTitle)
+	item.Tagline = cleanTaterText(meta.Tagline)
+	item.ContentRating = cleanTaterText(meta.MPAA)
+	item.CommunityRating = taterLocalMetadataRating(meta.Rating)
+	item.Studios = cleanTaterMetadataValues(meta.Studios)
+	item.Countries = cleanTaterMetadataValues(meta.Countries)
+	item.Actors = taterLocalMetadataActors(meta)
+	item.Directors = cleanTaterMetadataValues(meta.Directors)
+	item.Writers = cleanTaterMetadataValues(meta.Writers)
+	item.IMDbID, item.TMDBID, item.TVDBID = taterLocalMetadataIDs(meta)
 }
 
 func taterReadLocalMetadata(dir, base string) (taterLocalNFO, bool) {
+	meta, _, ok := taterReadLocalMetadataFile(dir, base)
+	return meta, ok
+}
+
+func taterReadLocalMetadataFile(dir, base string) (taterLocalNFO, string, bool) {
 	candidates := []string{}
 	if base != "" {
 		candidates = append(candidates, filepath.Join(dir, base+".nfo"))
@@ -998,13 +1053,13 @@ func taterReadLocalMetadata(dir, base string) (taterLocalNFO, bool) {
 			len(taterLocalMetadataGenres(meta)) == 0 {
 			continue
 		}
-		return meta, true
+		return meta, candidate, true
 	}
-	return taterLocalNFO{}, false
+	return taterLocalNFO{}, "", false
 }
 
 func taterLocalMetadataYear(meta taterLocalNFO) string {
-	for _, value := range []string{meta.Year, meta.Premiered} {
+	for _, value := range []string{meta.Year, meta.Premiered, meta.ReleaseDate} {
 		if match := localYearPattern.FindStringSubmatch(value); len(match) > 1 {
 			return match[1]
 		}
@@ -1029,6 +1084,67 @@ func taterLocalMetadataGenres(meta taterLocalNFO) []string {
 		}
 	}
 	return genres
+}
+
+func cleanTaterMetadataValues(values []string) []string {
+	cleaned := []string{}
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = cleanTaterText(value)
+		key := strings.ToLower(value)
+		if value == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		cleaned = append(cleaned, value)
+	}
+	return cleaned
+}
+
+func taterLocalMetadataActors(meta taterLocalNFO) []string {
+	actors := make([]string, 0, len(meta.Actors))
+	for _, actor := range meta.Actors {
+		actors = append(actors, actor.Name)
+	}
+	return cleanTaterMetadataValues(actors)
+}
+
+func taterLocalMetadataRating(value string) float64 {
+	rating, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil || rating < 0 {
+		return 0
+	}
+	return rating
+}
+
+func taterLocalMetadataIDs(meta taterLocalNFO) (string, int64, int64) {
+	imdbID := strings.TrimSpace(meta.IMDbID)
+	if imdbID == "" {
+		imdbID = strings.TrimSpace(meta.IMDbUnderscore)
+	}
+	if imdbID == "" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(meta.ID)), "tt") {
+		imdbID = strings.TrimSpace(meta.ID)
+	}
+	tmdbID := meta.TMDBID
+	tvdbID := meta.TVDBID
+	for _, uniqueID := range meta.UniqueIDs {
+		value := strings.TrimSpace(uniqueID.Value)
+		switch strings.ToLower(strings.TrimSpace(uniqueID.Type)) {
+		case "imdb":
+			if imdbID == "" {
+				imdbID = value
+			}
+		case "tmdb":
+			if tmdbID == 0 {
+				tmdbID, _ = strconv.ParseInt(value, 10, 64)
+			}
+		case "tvdb":
+			if tvdbID == 0 {
+				tvdbID, _ = strconv.ParseInt(value, 10, 64)
+			}
+		}
+	}
+	return imdbID, tmdbID, tvdbID
 }
 
 func taterApplyLocalDiscoverInfo(item *taterUsenetItem, roots []string) {
@@ -1310,23 +1426,36 @@ func taterIndexedLocalVideoItem(cfg *config.Config, cat config.LocalMediaCategor
 		}
 	}
 	item := taterUsenetItem{
-		Title:         title,
-		Key:           taterLocalPlayStateID(cat.ID, file.SourceIndex, rel),
-		RatingKey:     taterLocalPlayStateID(cat.ID, file.SourceIndex, rel),
-		Type:          "localFile",
-		MediaType:     mediaType,
-		CategoryID:    "local:" + cat.ID,
-		SourceIndex:   file.SourceIndex,
-		Path:          rel,
-		StreamURL:     taterLocalStreamURL(baseURL, cat.ID, file.SourceIndex, rel, playerToken),
-		SeekMode:      taterLocalSeekMode(cfg, filepath.Ext(rel)),
-		Date:          year,
-		Category:      strings.Join(file.Genres, ", "),
-		Genres:        append([]string(nil), file.Genres...),
-		SizeBytes:     file.SizeBytes,
-		ModifiedUnix:  file.ModifiedUnix,
-		PlayStateID:   taterLocalPlayStateID(cat.ID, file.SourceIndex, rel),
-		SeriesStateID: "",
+		Title:           title,
+		Key:             taterLocalPlayStateID(cat.ID, file.SourceIndex, rel),
+		RatingKey:       taterLocalPlayStateID(cat.ID, file.SourceIndex, rel),
+		Type:            "localFile",
+		MediaType:       mediaType,
+		CategoryID:      "local:" + cat.ID,
+		SourceIndex:     file.SourceIndex,
+		Path:            rel,
+		StreamURL:       taterLocalStreamURL(baseURL, cat.ID, file.SourceIndex, rel, playerToken),
+		SeekMode:        taterLocalSeekMode(cfg, filepath.Ext(rel)),
+		Date:            year,
+		Description:     file.Description,
+		OriginalTitle:   file.OriginalTitle,
+		Tagline:         file.Tagline,
+		ContentRating:   file.ContentRating,
+		CommunityRating: file.CommunityRating,
+		Studios:         append([]string(nil), file.Studios...),
+		Countries:       append([]string(nil), file.Countries...),
+		Actors:          append([]string(nil), file.Actors...),
+		Directors:       append([]string(nil), file.Directors...),
+		Writers:         append([]string(nil), file.Writers...),
+		IMDbID:          file.IMDbID,
+		TMDBID:          file.TMDBID,
+		TVDBID:          file.TVDBID,
+		Category:        strings.Join(file.Genres, ", "),
+		Genres:          append([]string(nil), file.Genres...),
+		SizeBytes:       file.SizeBytes,
+		ModifiedUnix:    file.ModifiedUnix,
+		PlayStateID:     taterLocalPlayStateID(cat.ID, file.SourceIndex, rel),
+		SeriesStateID:   "",
 	}
 	if mediaType == "episode" {
 		item.SizeText = "EPISODE"

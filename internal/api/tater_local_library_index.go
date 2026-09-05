@@ -19,20 +19,22 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-const taterLocalLibraryIndexSchema = 2
+const taterLocalLibraryIndexSchema = 3
 
 type taterLocalLibraryStats struct {
-	Files          int   `json:"files"`
-	Movies         int   `json:"movies"`
-	Shows          int   `json:"shows"`
-	Episodes       int   `json:"episodes"`
-	Artists        int   `json:"artists"`
-	Albums         int   `json:"albums"`
-	Songs          int   `json:"songs"`
-	Artwork        int   `json:"artwork"`
-	MissingArtwork int   `json:"missing_artwork"`
-	Errors         int   `json:"errors"`
-	SizeBytes      int64 `json:"size_bytes"`
+	Files           int   `json:"files"`
+	Movies          int   `json:"movies"`
+	Shows           int   `json:"shows"`
+	Episodes        int   `json:"episodes"`
+	Artists         int   `json:"artists"`
+	Albums          int   `json:"albums"`
+	Songs           int   `json:"songs"`
+	Artwork         int   `json:"artwork"`
+	MissingArtwork  int   `json:"missing_artwork"`
+	Metadata        int   `json:"metadata"`
+	MissingMetadata int   `json:"missing_metadata"`
+	Errors          int   `json:"errors"`
+	SizeBytes       int64 `json:"size_bytes"`
 }
 
 type taterLocalLibraryCategoryIndex struct {
@@ -60,6 +62,19 @@ type taterLocalLibraryFileIndex struct {
 	Album              string   `json:"album,omitempty"`
 	Genres             []string `json:"genres,omitempty"`
 	Year               string   `json:"year,omitempty"`
+	Description        string   `json:"description,omitempty"`
+	OriginalTitle      string   `json:"original_title,omitempty"`
+	Tagline            string   `json:"tagline,omitempty"`
+	ContentRating      string   `json:"content_rating,omitempty"`
+	CommunityRating    float64  `json:"community_rating,omitempty"`
+	Studios            []string `json:"studios,omitempty"`
+	Countries          []string `json:"countries,omitempty"`
+	Actors             []string `json:"actors,omitempty"`
+	Directors          []string `json:"directors,omitempty"`
+	Writers            []string `json:"writers,omitempty"`
+	IMDbID             string   `json:"imdb_id,omitempty"`
+	TMDBID             int64    `json:"tmdb_id,omitempty"`
+	TVDBID             int64    `json:"tvdb_id,omitempty"`
 	Track              int      `json:"track,omitempty"`
 	Disc               int      `json:"disc,omitempty"`
 	DurationSeconds    float64  `json:"duration_seconds,omitempty"`
@@ -92,24 +107,40 @@ type taterLocalMusicAlbumIndex struct {
 }
 
 type taterLocalVideoIndex struct {
-	ID             string `json:"id"`
-	CategoryID     string `json:"category_id"`
-	CategoryName   string `json:"category_name"`
-	LibraryType    string `json:"library_type"`
-	MediaType      string `json:"media_type"`
-	SourceIndex    int    `json:"source_index"`
-	Path           string `json:"path"`
-	Title          string `json:"title"`
-	Year           string `json:"year,omitempty"`
-	SizeBytes      int64  `json:"size_bytes"`
-	ModifiedUnix   int64  `json:"modified_unix"`
-	HasArtwork     bool   `json:"has_artwork"`
-	ArtworkSource  string `json:"artwork_source,omitempty"`
-	ArtworkRef     string `json:"artwork_ref,omitempty"`
-	ArtworkURL     string `json:"artwork_url,omitempty"`
-	ArtworkLocked  bool   `json:"artwork_locked"`
-	TMDBID         int64  `json:"tmdb_id,omitempty"`
-	ArtworkUpdated int64  `json:"artwork_updated,omitempty"`
+	ID              string   `json:"id"`
+	CategoryID      string   `json:"category_id"`
+	CategoryName    string   `json:"category_name"`
+	LibraryType     string   `json:"library_type"`
+	MediaType       string   `json:"media_type"`
+	SourceIndex     int      `json:"source_index"`
+	Path            string   `json:"path"`
+	Title           string   `json:"title"`
+	Year            string   `json:"year,omitempty"`
+	Description     string   `json:"description,omitempty"`
+	OriginalTitle   string   `json:"original_title,omitempty"`
+	Tagline         string   `json:"tagline,omitempty"`
+	ContentRating   string   `json:"content_rating,omitempty"`
+	CommunityRating float64  `json:"community_rating,omitempty"`
+	Genres          []string `json:"genres,omitempty"`
+	Studios         []string `json:"studios,omitempty"`
+	Countries       []string `json:"countries,omitempty"`
+	Actors          []string `json:"actors,omitempty"`
+	Directors       []string `json:"directors,omitempty"`
+	Writers         []string `json:"writers,omitempty"`
+	IMDbID          string   `json:"imdb_id,omitempty"`
+	TVDBID          int64    `json:"tvdb_id,omitempty"`
+	SizeBytes       int64    `json:"size_bytes"`
+	ModifiedUnix    int64    `json:"modified_unix"`
+	HasArtwork      bool     `json:"has_artwork"`
+	ArtworkSource   string   `json:"artwork_source,omitempty"`
+	ArtworkRef      string   `json:"artwork_ref,omitempty"`
+	ArtworkURL      string   `json:"artwork_url,omitempty"`
+	ArtworkLocked   bool     `json:"artwork_locked"`
+	TMDBID          int64    `json:"tmdb_id,omitempty"`
+	ArtworkUpdated  int64    `json:"artwork_updated,omitempty"`
+	HasMetadata     bool     `json:"has_metadata"`
+	MetadataSource  string   `json:"metadata_source,omitempty"`
+	NFORef          string   `json:"nfo_ref,omitempty"`
 }
 
 type taterLocalLibraryIndex struct {
@@ -150,6 +181,7 @@ type taterLocalLibraryScanStatus struct {
 	AlbumsProcessed int       `json:"albums_processed"`
 	VideosProcessed int       `json:"videos_processed"`
 	ArtworkFound    int       `json:"artwork_found"`
+	MetadataFound   int       `json:"metadata_found"`
 	GenreMatches    int       `json:"genre_matches"`
 	GenreUnmatched  int       `json:"genre_unmatched"`
 	Error           string    `json:"error,omitempty"`
@@ -468,17 +500,33 @@ func scanTaterLocalLibrary(
 						file.Disc = metadata.Disc
 						file.DurationSeconds = metadata.Duration
 						file.HasEmbeddedArtwork = metadata.HasArtwork
-					} else {
-						mediaType := "movie"
-						if category.LibraryType == "tv" {
-							mediaType = "episode"
-						}
-						item := taterUsenetItem{MediaType: mediaType}
-						taterApplyLocalMetadata(path, &item)
-						file.Title = cleanTaterText(item.Title)
-						file.Year = strings.TrimSpace(item.Date)
-						file.Genres = append([]string(nil), item.Genres...)
 					}
+				}
+				// NFO sidecars can change without changing the video itself, so refresh
+				// their small metadata payload even when the indexed media file is unchanged.
+				if category.LibraryType != "music" {
+					mediaType := "movie"
+					if category.LibraryType == "tv" {
+						mediaType = "episode"
+					}
+					item := taterUsenetItem{MediaType: mediaType}
+					taterApplyLocalMetadata(path, &item)
+					file.Title = cleanTaterText(item.Title)
+					file.Year = strings.TrimSpace(item.Date)
+					file.Genres = append([]string(nil), item.Genres...)
+					file.Description = cleanTaterText(item.Description)
+					file.OriginalTitle = cleanTaterText(item.OriginalTitle)
+					file.Tagline = cleanTaterText(item.Tagline)
+					file.ContentRating = cleanTaterText(item.ContentRating)
+					file.CommunityRating = item.CommunityRating
+					file.Studios = append([]string(nil), item.Studios...)
+					file.Countries = append([]string(nil), item.Countries...)
+					file.Actors = append([]string(nil), item.Actors...)
+					file.Directors = append([]string(nil), item.Directors...)
+					file.Writers = append([]string(nil), item.Writers...)
+					file.IMDbID = strings.TrimSpace(item.IMDbID)
+					file.TMDBID = item.TMDBID
+					file.TVDBID = item.TVDBID
 				}
 				index.Files = append(index.Files, file)
 				if category.LibraryType != "music" && file.DurationSeconds <= 0 {
@@ -591,6 +639,8 @@ func buildTaterLocalLibraryStats(cfg *config.Config, index *taterLocalLibraryInd
 		index.Categories[i].Stats.Songs = 0
 		index.Categories[i].Stats.Artwork = 0
 		index.Categories[i].Stats.MissingArtwork = 0
+		index.Categories[i].Stats.Metadata = 0
+		index.Categories[i].Stats.MissingMetadata = 0
 		index.Categories[i].Stats.SizeBytes = 0
 		categoryByID[index.Categories[i].ID] = &index.Categories[i]
 	}
@@ -684,6 +734,11 @@ func buildTaterLocalLibraryStats(cfg *config.Config, index *taterLocalLibraryInd
 				category.Stats.Artwork++
 			} else {
 				category.Stats.MissingArtwork++
+			}
+			if video.HasMetadata {
+				category.Stats.Metadata++
+			} else {
+				category.Stats.MissingMetadata++
 			}
 		}
 	}
@@ -907,6 +962,8 @@ func aggregateTaterLocalLibraryStats(categories []taterLocalLibraryCategoryIndex
 		total.Songs += category.Stats.Songs
 		total.Artwork += category.Stats.Artwork
 		total.MissingArtwork += category.Stats.MissingArtwork
+		total.Metadata += category.Stats.Metadata
+		total.MissingMetadata += category.Stats.MissingMetadata
 		total.Errors += category.Stats.Errors
 		total.SizeBytes += category.Stats.SizeBytes
 	}
@@ -1100,6 +1157,7 @@ func runTaterLocalLibraryScan(
 				updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
 					status.VideosProcessed = progress.VideosProcessed
 					status.ArtworkFound = musicArtworkFound + progress.ArtworkFound
+					status.MetadataFound = progress.MetadataFound
 					status.Message = progress.Message
 				})
 			})
@@ -1122,8 +1180,9 @@ func runTaterLocalLibraryScan(
 			status.FilesScanned = len(index.Files)
 			if status.AlbumsProcessed > 0 || status.VideosProcessed > 0 {
 				status.Message = fmt.Sprintf(
-					"Library updated: %d artwork found, %d albums and %d videos checked",
+					"Library updated: %d artwork and %d NFO files found, %d albums and %d videos checked",
 					status.ArtworkFound,
+					status.MetadataFound,
 					status.AlbumsProcessed,
 					status.VideosProcessed,
 				)

@@ -551,6 +551,8 @@ export interface LocalMediaLibraryStats {
 	songs: number;
 	artwork: number;
 	missing_artwork: number;
+	metadata: number;
+	missing_metadata: number;
 	errors: number;
 	size_bytes: number;
 }
@@ -606,7 +608,18 @@ export interface LocalMediaVideo {
 	artwork_url?: string;
 	artwork_locked: boolean;
 	tmdb_id?: number;
+	imdb_id?: string;
+	tvdb_id?: number;
 	artwork_updated?: number;
+	has_metadata: boolean;
+	metadata_source?: "nfo" | "scraped" | string;
+	nfo_ref?: string;
+	description?: string;
+	tagline?: string;
+	content_rating?: string;
+	community_rating?: number;
+	genres?: string[];
+	actors?: string[];
 }
 
 export interface LocalMediaScanStatus {
@@ -619,6 +632,7 @@ export interface LocalMediaScanStatus {
 	albums_processed: number;
 	videos_processed: number;
 	artwork_found: number;
+	metadata_found: number;
 	genre_matches: number;
 	genre_unmatched: number;
 	error?: string;
