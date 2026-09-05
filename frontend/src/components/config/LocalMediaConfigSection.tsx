@@ -779,8 +779,8 @@ export function LocalMediaConfigSection({
 								</div>
 								<p className="mt-2 text-[11px] text-base-content/50 leading-relaxed">
 									Use your own TMDB key for better privacy. Your lookups aren’t tied to a shared
-									app-wide key controlled by someone else, so Tater can’t view or use your TMDB
-									activity. Existing local artwork and NFO files never require a key.
+									app-wide key, so nobody else has access to that key’s activity—it stays between
+									your server and TMDB. Existing local artwork and NFO files never require a key.
 								</p>
 								{tmdbTestResult && (
 									<div
