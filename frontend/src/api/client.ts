@@ -919,6 +919,7 @@ class APIClient {
 		type?: string;
 		category_id?: string;
 		q?: string;
+		missing_only?: boolean;
 		limit?: number;
 		offset?: number;
 	}) {
@@ -926,6 +927,7 @@ class APIClient {
 		if (params?.type) searchParams.set("type", params.type);
 		if (params?.category_id) searchParams.set("category_id", params.category_id);
 		if (params?.q) searchParams.set("q", params.q);
+		if (params?.missing_only) searchParams.set("missing_only", "true");
 		if (params?.limit !== undefined) searchParams.set("limit", String(params.limit));
 		if (params?.offset !== undefined) searchParams.set("offset", String(params.offset));
 		const query = searchParams.toString();

@@ -40,6 +40,7 @@ import type {
 	LocalMediaLibraryType,
 	LocalMediaMusicAlbum,
 } from "../../types/config";
+import { LocalMediaScanProgress } from "../system/LocalMediaScanProgress";
 import { BytesDisplay } from "../ui/BytesDisplay";
 import { ConfigMiniTabs } from "./ConfigMiniTabs";
 import { FolderPickerModal } from "./FolderPickerModal";
@@ -293,6 +294,7 @@ export function LocalMediaConfigSection({
 	const library = useLocalMediaLibrary({
 		type: activeTab,
 		q: activeTab !== "folders" ? search.trim() : undefined,
+		missing_only: activeTab !== "folders" ? missingOnly : undefined,
 		limit: 120,
 		offset: activeTab !== "folders" ? libraryOffset : 0,
 	});
@@ -432,16 +434,12 @@ export function LocalMediaConfigSection({
 		}
 	};
 
-	const handleVideoArtworkRefresh = async (
-		mediaId: string,
-		hasArtwork: boolean,
-		hasMetadata: boolean,
-	) => {
+	const handleVideoArtworkRefresh = async (mediaId: string, hasArtwork: boolean) => {
 		try {
-			await refreshVideoArtwork.mutateAsync({ mediaId, force: hasArtwork && hasMetadata });
+			await refreshVideoArtwork.mutateAsync({ mediaId, force: hasArtwork });
 			showToast({
 				type: "success",
-				title: hasArtwork && hasMetadata ? "Artwork replaced" : "Media details found",
+				title: hasArtwork ? "Artwork replaced" : "Media details found",
 				message:
 					"The poster and NFO metadata are saved beside the media for Tater Tube, Emby, and Jellyfin.",
 			});
@@ -457,16 +455,12 @@ export function LocalMediaConfigSection({
 		}
 	};
 
-	const handleArtworkRefresh = async (
-		albumId: string,
-		hasArtwork: boolean,
-		metadataComplete: boolean,
-	) => {
+	const handleArtworkRefresh = async (albumId: string, hasArtwork: boolean) => {
 		try {
-			await refreshArtwork.mutateAsync({ albumId, force: hasArtwork && metadataComplete });
+			await refreshArtwork.mutateAsync({ albumId, force: hasArtwork });
 			showToast({
 				type: "success",
-				title: hasArtwork && metadataComplete ? "Album artwork replaced" : "Album details found",
+				title: hasArtwork ? "Album artwork replaced" : "Album details found",
 				message: "Compatible album and artist NFO files are saved beside the music when possible.",
 			});
 		} catch (error) {
@@ -488,12 +482,8 @@ export function LocalMediaConfigSection({
 	const stats = library.data?.stats ?? EMPTY_STATS;
 	const scanStatus = scan.data ?? library.data?.scan;
 	const scanRunning = scanStatus?.running ?? false;
-	const albumRows = (library.data?.albums ?? []).filter(
-		(album) => !missingOnly || !album.has_artwork || !musicMetadataComplete(album),
-	);
-	const videoRows = (library.data?.videos ?? []).filter(
-		(video) => !missingOnly || !video.has_artwork || !video.has_metadata,
-	);
+	const albumRows = library.data?.albums ?? [];
+	const videoRows = library.data?.videos ?? [];
 	const tmdbConfigured =
 		formData.tmdb_enabled !== false &&
 		(formData.tmdb_api_key_set || (formData.tmdb_api_key?.trim() ?? "") !== "");
@@ -548,20 +538,9 @@ export function LocalMediaConfigSection({
 						<span>{scanStatus.error || scanStatus.message || "Library scan failed"}</span>
 					</div>
 				)}
-				{scanRunning && (
-					<div className="mt-5 rounded-xl border border-primary/25 bg-primary/10 p-4">
-						<div className="flex items-center gap-3">
-							<span className="loading loading-spinner loading-sm text-primary" />
-							<div className="min-w-0 flex-1">
-								<div className="font-bold text-sm">{scanStatus?.message || "Scanning library"}</div>
-								<div className="mt-1 text-base-content/55 text-xs">
-									{(scanStatus?.files_scanned ?? 0).toLocaleString()} files scanned
-									{scanStatus?.phase === "artwork"
-										? ` · ${(scanStatus.albums_processed ?? 0).toLocaleString()} albums checked · ${(scanStatus.videos_processed ?? 0).toLocaleString()} movies/shows checked · ${(scanStatus.artwork_found ?? 0).toLocaleString()} images found · ${(scanStatus.metadata_found ?? 0).toLocaleString()} NFO files created`
-										: ""}
-								</div>
-							</div>
-						</div>
+				{scanRunning && scanStatus && (
+					<div className="mt-5">
+						<LocalMediaScanProgress status={scanStatus} />
 					</div>
 				)}
 				{scanStatus?.phase === "complete" &&
@@ -899,14 +878,29 @@ export function LocalMediaConfigSection({
 									}}
 								/>
 							</label>
-							<button
-								type="button"
-								className={`btn ${missingOnly ? "btn-primary" : "btn-outline"}`}
-								onClick={() => setMissingOnly((value) => !value)}
-							>
-								<FileText className="h-4 w-4" />
-								Missing Art/Meta
-							</button>
+							<fieldset className="join" aria-label="Artwork coverage filter">
+								<button
+									type="button"
+									className={`btn join-item ${!missingOnly ? "btn-primary" : "btn-outline"}`}
+									onClick={() => {
+										setMissingOnly(false);
+										setLibraryOffset(0);
+									}}
+								>
+									All
+								</button>
+								<button
+									type="button"
+									className={`btn join-item ${missingOnly ? "btn-primary" : "btn-outline"}`}
+									onClick={() => {
+										setMissingOnly(true);
+										setLibraryOffset(0);
+									}}
+								>
+									<ImageOff className="h-4 w-4" />
+									Missing
+								</button>
+							</fieldset>
 							<button
 								type="button"
 								className="btn btn-secondary"
@@ -1002,9 +996,7 @@ export function LocalMediaConfigSection({
 										type="button"
 										className="btn btn-outline btn-xs w-full"
 										disabled={refreshVideoArtwork.isPending || !tmdbConfigured || hasChanges}
-										onClick={() =>
-											handleVideoArtworkRefresh(video.id, video.has_artwork, video.has_metadata)
-										}
+										onClick={() => handleVideoArtworkRefresh(video.id, video.has_artwork)}
 									>
 										<WandSparkles className="h-3 w-3" />
 										{video.has_artwork && video.has_metadata ? "Replace Art" : "Find Art & Meta"}
@@ -1077,14 +1069,29 @@ export function LocalMediaConfigSection({
 									}}
 								/>
 							</label>
-							<button
-								type="button"
-								className={`btn ${missingOnly ? "btn-primary" : "btn-outline"}`}
-								onClick={() => setMissingOnly((value) => !value)}
-							>
-								<FileText className="h-4 w-4" />
-								Missing Art/Meta
-							</button>
+							<fieldset className="join" aria-label="Artwork coverage filter">
+								<button
+									type="button"
+									className={`btn join-item ${!missingOnly ? "btn-primary" : "btn-outline"}`}
+									onClick={() => {
+										setMissingOnly(false);
+										setLibraryOffset(0);
+									}}
+								>
+									All
+								</button>
+								<button
+									type="button"
+									className={`btn join-item ${missingOnly ? "btn-primary" : "btn-outline"}`}
+									onClick={() => {
+										setMissingOnly(true);
+										setLibraryOffset(0);
+									}}
+								>
+									<ImageOff className="h-4 w-4" />
+									Missing
+								</button>
+							</fieldset>
 							<button
 								type="button"
 								className="btn btn-secondary"
@@ -1097,7 +1104,7 @@ export function LocalMediaConfigSection({
 								onClick={() => beginScan(true)}
 							>
 								<WandSparkles className="h-4 w-4" />
-								Find Art & Metadata
+								Find Missing Art & Meta
 							</button>
 						</div>
 					</div>
@@ -1199,13 +1206,7 @@ export function LocalMediaConfigSection({
 												refreshArtwork.isPending ||
 												(album.artwork_locked && musicMetadataComplete(album))
 											}
-											onClick={() =>
-												handleArtworkRefresh(
-													album.id,
-													album.has_artwork,
-													musicMetadataComplete(album),
-												)
-											}
+											onClick={() => handleArtworkRefresh(album.id, album.has_artwork)}
 										>
 											<WandSparkles className="h-3 w-3" />
 											{album.has_artwork && musicMetadataComplete(album)

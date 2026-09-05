@@ -634,13 +634,19 @@ export interface LocalMediaVideo {
 
 export interface LocalMediaScanStatus {
 	running: boolean;
-	phase: "" | "scanning" | "artwork" | "complete" | "error" | string;
+	phase: "" | "discovering" | "scanning" | "durations" | "artwork" | "complete" | "error" | string;
 	message?: string;
 	started_at?: string;
 	finished_at?: string;
+	progress_current: number;
+	progress_total: number;
+	progress_percent: number;
 	files_scanned: number;
+	files_total: number;
 	albums_processed: number;
+	albums_total: number;
 	videos_processed: number;
+	videos_total: number;
 	artwork_found: number;
 	metadata_found: number;
 	genre_matches: number;

@@ -188,14 +188,29 @@ type taterLocalLibraryScanStatus struct {
 	Message         string    `json:"message,omitempty"`
 	StartedAt       time.Time `json:"started_at,omitempty"`
 	FinishedAt      time.Time `json:"finished_at,omitempty"`
+	ProgressCurrent int       `json:"progress_current"`
+	ProgressTotal   int       `json:"progress_total"`
+	ProgressPercent int       `json:"progress_percent"`
 	FilesScanned    int       `json:"files_scanned"`
+	FilesTotal      int       `json:"files_total"`
 	AlbumsProcessed int       `json:"albums_processed"`
+	AlbumsTotal     int       `json:"albums_total"`
 	VideosProcessed int       `json:"videos_processed"`
+	VideosTotal     int       `json:"videos_total"`
 	ArtworkFound    int       `json:"artwork_found"`
 	MetadataFound   int       `json:"metadata_found"`
 	GenreMatches    int       `json:"genre_matches"`
 	GenreUnmatched  int       `json:"genre_unmatched"`
 	Error           string    `json:"error,omitempty"`
+}
+
+type taterLocalLibraryScanProgress struct {
+	Phase        string
+	Message      string
+	FilesScanned int
+	FilesTotal   int
+	Current      int
+	Total        int
 }
 
 type taterLocalLibraryScanRequest struct {
@@ -388,6 +403,19 @@ func updateTaterLocalLibraryScanStatus(cfg *config.Config, update func(*taterLoc
 	taterLocalLibraryScans.Unlock()
 }
 
+func setTaterLocalLibraryProgress(status *taterLocalLibraryScanStatus, current, total int) {
+	if status == nil {
+		return
+	}
+	status.ProgressCurrent = max(0, current)
+	status.ProgressTotal = max(0, total)
+	status.ProgressPercent = 0
+	if status.ProgressTotal > 0 {
+		status.ProgressCurrent = min(status.ProgressCurrent, status.ProgressTotal)
+		status.ProgressPercent = min(99, (status.ProgressCurrent*100)/status.ProgressTotal)
+	}
+}
+
 func taterLocalLibraryTypeSupportsFile(libraryType, path string) bool {
 	ext := filepath.Ext(path)
 	switch strings.ToLower(strings.TrimSpace(libraryType)) {
@@ -408,11 +436,53 @@ func taterLocalLibraryEnabled(cat config.LocalMediaCategory) bool {
 	return cat.Enabled == nil || *cat.Enabled
 }
 
+func countTaterLocalLibraryFiles(ctx context.Context, cfg *config.Config) (int, error) {
+	if cfg == nil {
+		return 0, fmt.Errorf("configuration is unavailable")
+	}
+	total := 0
+	for _, cat := range cfg.LocalMedia.Categories {
+		if !taterLocalLibraryEnabled(cat) {
+			continue
+		}
+		libraryType := strings.ToLower(strings.TrimSpace(cat.LibraryType))
+		for _, configuredRoot := range taterLocalMediaCategoryPaths(cat) {
+			root := filepath.Clean(configuredRoot)
+			info, err := os.Stat(root)
+			if err != nil || info == nil || !info.IsDir() {
+				continue
+			}
+			err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if walkErr != nil {
+					return nil
+				}
+				if path != root && strings.HasPrefix(entry.Name(), ".") {
+					if entry.IsDir() {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+				if !entry.IsDir() && taterLocalLibraryTypeSupportsFile(libraryType, path) {
+					total++
+				}
+				return nil
+			})
+			if err != nil {
+				return total, err
+			}
+		}
+	}
+	return total, nil
+}
+
 func scanTaterLocalLibrary(
 	ctx context.Context,
 	cfg *config.Config,
 	previous taterLocalLibraryIndex,
-	progress func(files int, message string),
+	progress func(taterLocalLibraryScanProgress),
 ) (taterLocalLibraryIndex, error) {
 	index := taterLocalLibraryIndex{
 		Schema:                taterLocalLibraryIndexSchema,
@@ -426,6 +496,21 @@ func scanTaterLocalLibrary(
 	}
 	if cfg == nil {
 		return index, fmt.Errorf("configuration is unavailable")
+	}
+	if progress != nil {
+		progress(taterLocalLibraryScanProgress{
+			Phase: "discovering", Message: "Counting local media files",
+		})
+	}
+	totalFiles, err := countTaterLocalLibraryFiles(ctx, cfg)
+	if err != nil {
+		return index, err
+	}
+	if progress != nil {
+		progress(taterLocalLibraryScanProgress{
+			Phase: "scanning", Message: "Scanning local media libraries", FilesTotal: totalFiles,
+			Total: totalFiles,
+		})
 	}
 	previousFiles := make(map[string]taterLocalLibraryFileIndex, len(previous.Files))
 	for _, file := range previous.Files {
@@ -547,8 +632,12 @@ func scanTaterLocalLibrary(
 					})
 				}
 				filesScanned++
-				if progress != nil && filesScanned%25 == 0 {
-					progress(filesScanned, "Scanning "+category.Name)
+				if progress != nil && (filesScanned%25 == 0 || filesScanned == totalFiles) {
+					progress(taterLocalLibraryScanProgress{
+						Phase: "scanning", Message: "Scanning " + category.Name,
+						FilesScanned: filesScanned, FilesTotal: totalFiles,
+						Current: filesScanned, Total: totalFiles,
+					})
 				}
 				return nil
 			})
@@ -559,7 +648,7 @@ func scanTaterLocalLibrary(
 		index.Categories = append(index.Categories, category)
 	}
 	if err := probeTaterLocalLibraryDurations(
-		ctx, cfg, &index, durationJobs, filesScanned, progress,
+		ctx, cfg, &index, durationJobs, filesScanned, totalFiles, progress,
 	); err != nil {
 		return index, err
 	}
@@ -579,7 +668,8 @@ func probeTaterLocalLibraryDurations(
 	index *taterLocalLibraryIndex,
 	jobs []taterLocalDurationProbeJob,
 	filesScanned int,
-	progress func(files int, message string),
+	filesTotal int,
+	progress func(taterLocalLibraryScanProgress),
 ) error {
 	if len(jobs) == 0 || index == nil {
 		return ctx.Err()
@@ -627,9 +717,13 @@ func probeTaterLocalLibraryDurations(
 		}
 		completed++
 		if progress != nil && (completed%10 == 0 || completed == len(jobs)) {
-			progress(filesScanned, fmt.Sprintf(
-				"Reading video durations (%d/%d)", completed, len(jobs),
-			))
+			progress(taterLocalLibraryScanProgress{
+				Phase: "durations", Message: fmt.Sprintf(
+					"Reading video durations (%d/%d)", completed, len(jobs),
+				),
+				FilesScanned: filesScanned, FilesTotal: filesTotal,
+				Current: completed, Total: len(jobs),
+			})
 		}
 	}
 	return ctx.Err()
@@ -992,6 +1086,16 @@ func aggregateTaterLocalLibraryStats(categories []taterLocalLibraryCategoryIndex
 	return total
 }
 
+func taterLocalMusicAlbumNeedsAttention(album taterLocalMusicAlbumIndex) bool {
+	metadataMissing := album.MetadataAvailable && (!album.HasMetadata ||
+		(album.ArtistMetadataAvailable && !album.HasArtistMetadata))
+	return !album.HasArtwork || metadataMissing
+}
+
+func taterLocalVideoNeedsAttention(video taterLocalVideoIndex) bool {
+	return !video.HasArtwork || !video.HasMetadata
+}
+
 func (s *Server) handleLocalMediaLibrary(c *fiber.Ctx) error {
 	if s.configManager == nil || s.configManager.GetConfig() == nil {
 		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
@@ -1021,6 +1125,7 @@ func (s *Server) handleLocalMediaLibrary(c *fiber.Ctx) error {
 	libraryType := strings.ToLower(strings.TrimSpace(c.Query("type")))
 	categoryID := strings.TrimSpace(c.Query("category_id"))
 	query := strings.ToLower(strings.TrimSpace(c.Query("q")))
+	missingOnly := c.QueryBool("missing_only", false)
 	filteredCategories := make([]taterLocalLibraryCategoryIndex, 0, len(index.Categories))
 	for _, category := range index.Categories {
 		if libraryType != "" && category.LibraryType != libraryType {
@@ -1044,6 +1149,9 @@ func (s *Server) handleLocalMediaLibrary(c *fiber.Ctx) error {
 		}, " ")), query) {
 			continue
 		}
+		if missingOnly && !taterLocalMusicAlbumNeedsAttention(album) {
+			continue
+		}
 		album.ArtworkURL = taterLocalMusicAdminArtworkURL(album)
 		albums = append(albums, album)
 	}
@@ -1058,6 +1166,9 @@ func (s *Server) handleLocalMediaLibrary(c *fiber.Ctx) error {
 		if query != "" && !strings.Contains(strings.ToLower(strings.Join([]string{
 			video.Title, video.Year, video.CategoryName, video.Path,
 		}, " ")), query) {
+			continue
+		}
+		if missingOnly && !taterLocalVideoNeedsAttention(video) {
 			continue
 		}
 		video.ArtworkURL = taterLocalVideoAdminArtworkURL(video)
@@ -1139,13 +1250,13 @@ func runTaterLocalLibraryScan(
 	request taterLocalLibraryScanRequest,
 ) (taterLocalLibraryIndex, error) {
 	previous, _ := readTaterLocalLibraryIndex(cfg)
-	index, err := scanTaterLocalLibrary(context.Background(), cfg, previous, func(files int, message string) {
+	index, err := scanTaterLocalLibrary(context.Background(), cfg, previous, func(progress taterLocalLibraryScanProgress) {
 		updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
-			status.FilesScanned = files
-			status.Message = message
-			if strings.HasPrefix(message, "Reading video durations") {
-				status.Phase = "durations"
-			}
+			status.Phase = progress.Phase
+			status.FilesScanned = progress.FilesScanned
+			status.FilesTotal = progress.FilesTotal
+			status.Message = progress.Message
+			setTaterLocalLibraryProgress(status, progress.Current, progress.Total)
 		})
 	})
 	if err == nil && request.ScrapeMissingArtwork {
@@ -1159,17 +1270,22 @@ func runTaterLocalLibraryScan(
 			updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
 				status.Phase = "artwork"
 				status.Message = "Finding album artwork, genres, and NFO metadata"
+				setTaterLocalLibraryProgress(status, 0, 0)
 			})
 			err = scrapeTaterMissingAlbumArtwork(context.Background(), cfg, &index, func(progress taterMusicEnrichmentProgress) {
 				musicArtworkFound = progress.ArtworkFound
 				musicMetadataFound = progress.MetadataFound
 				updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
 					status.AlbumsProcessed = progress.AlbumsProcessed
+					status.AlbumsTotal = progress.AlbumsTotal
 					status.ArtworkFound = progress.ArtworkFound
 					status.MetadataFound = progress.MetadataFound
 					status.GenreMatches = progress.GenreMatches
 					status.GenreUnmatched = progress.GenreUnmatched
-					status.Message = progress.Message
+					if progress.Message != "" {
+						status.Message = progress.Message
+					}
+					setTaterLocalLibraryProgress(status, progress.AlbumsProcessed, progress.AlbumsTotal)
 				})
 			})
 		}
@@ -1177,13 +1293,18 @@ func runTaterLocalLibraryScan(
 			updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
 				status.Phase = "artwork"
 				status.Message = "Finding movie and TV artwork and metadata"
+				setTaterLocalLibraryProgress(status, 0, 0)
 			})
 			err = scrapeTaterMissingVideoArtwork(context.Background(), cfg, &index, artworkType, func(progress taterVideoArtworkProgress) {
 				updateTaterLocalLibraryScanStatus(cfg, func(status *taterLocalLibraryScanStatus) {
 					status.VideosProcessed = progress.VideosProcessed
+					status.VideosTotal = progress.VideosTotal
 					status.ArtworkFound = musicArtworkFound + progress.ArtworkFound
 					status.MetadataFound = musicMetadataFound + progress.MetadataFound
-					status.Message = progress.Message
+					if progress.Message != "" {
+						status.Message = progress.Message
+					}
+					setTaterLocalLibraryProgress(status, progress.VideosProcessed, progress.VideosTotal)
 				})
 			})
 		}
@@ -1203,6 +1324,9 @@ func runTaterLocalLibraryScan(
 		} else {
 			status.Phase = "complete"
 			status.FilesScanned = len(index.Files)
+			status.FilesTotal = len(index.Files)
+			status.ProgressCurrent = status.ProgressTotal
+			status.ProgressPercent = 100
 			if status.AlbumsProcessed > 0 || status.VideosProcessed > 0 {
 				status.Message = fmt.Sprintf(
 					"Library updated: %d artwork and %d NFO files found, %d albums and %d videos checked",

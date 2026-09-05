@@ -76,6 +76,7 @@ type taterVideoArtworkCandidate struct {
 
 type taterVideoArtworkProgress struct {
 	VideosProcessed int
+	VideosTotal     int
 	ArtworkFound    int
 	MetadataFound   int
 	Message         string
@@ -833,7 +834,21 @@ func scrapeTaterMissingVideoArtwork(ctx context.Context, cfg *config.Config, ind
 		return nil
 	}
 	wantedType := strings.ToLower(strings.TrimSpace(libraryType))
-	status := taterVideoArtworkProgress{}
+	totalVideos := 0
+	for i := range index.Videos {
+		video := &index.Videos[i]
+		if (wantedType == "movies" || wantedType == "tv") && video.LibraryType != wantedType {
+			continue
+		}
+		if (video.HasArtwork && video.HasMetadata) || (video.ArtworkLocked && video.HasMetadata) {
+			continue
+		}
+		totalVideos++
+	}
+	status := taterVideoArtworkProgress{VideosTotal: totalVideos}
+	if progress != nil {
+		progress(status)
+	}
 	for i := range index.Videos {
 		if err := ctx.Err(); err != nil {
 			return err
