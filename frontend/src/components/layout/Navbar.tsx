@@ -3,38 +3,20 @@ import { UserMenu } from "../auth/UserMenu";
 
 export function Navbar() {
 	return (
-		<div className="navbar border-base-200 border-b bg-base-100 px-4 shadow-lg lg:px-6">
+		<header className="navbar sticky top-0 z-30 min-h-14 border-base-300 border-b bg-base-200/90 px-3 shadow-sm backdrop-blur-xl lg:px-6">
 			<div className="navbar-start">
 				<label
 					htmlFor="sidebar-toggle"
-					className="btn btn-square btn-ghost transition-colors hover:bg-base-200 lg:hidden"
+					className="btn btn-square btn-ghost btn-sm transition-colors hover:bg-base-300/70 lg:hidden"
+					aria-label="Open navigation"
 				>
 					<Menu className="h-5 w-5" />
 				</label>
-
-				{/* Logo and title */}
-				<div className="ml-2 flex items-center gap-3 lg:ml-0">
-					<div className="flex flex-col">
-						<h1 className="tater-glow hidden font-vcr text-primary text-xl lg:block">
-							Tater Tube Server
-						</h1>
-					</div>
-				</div>
-			</div>
-
-			<div className="navbar-center lg:hidden">
-				<div className="flex items-center gap-2">
-					<img src="/logo.png" alt="Tater Tube Server" className="h-7 w-7 object-contain" />
-					<h1 className="tater-glow font-vcr text-lg text-primary">Tater Tube</h1>
-				</div>
 			</div>
 
 			<div className="navbar-end">
-				<div className="flex items-center gap-2">
-					{/* User Menu */}
-					<UserMenu />
-				</div>
+				<UserMenu />
 			</div>
-		</div>
+		</header>
 	);
 }

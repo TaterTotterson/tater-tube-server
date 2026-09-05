@@ -7,12 +7,12 @@ export function Layout() {
 		<div className="drawer lg:drawer-open">
 			<input id="sidebar-toggle" type="checkbox" className="drawer-toggle" />
 
-			<div className="drawer-content flex flex-col">
+			<div className="drawer-content min-w-0 bg-transparent">
 				{/* Navbar */}
 				<Navbar />
 
 				{/* Page content */}
-				<main className="flex-1 p-3 md:p-4">
+				<main className="min-w-0 p-4 md:p-6 xl:p-8">
 					<Outlet />
 				</main>
 			</div>
