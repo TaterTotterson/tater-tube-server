@@ -778,8 +778,9 @@ export function LocalMediaConfigSection({
 									</button>
 								</div>
 								<p className="mt-2 text-[11px] text-base-content/50 leading-relaxed">
-									Your key stays on this server. Lookup requests go directly from it to TMDB; Tater
-									does not receive either. Existing local artwork and NFO files never require a key.
+									Use your own TMDB key for privacy. Tater doesn’t need to see what you’re
+									scraping—your server connects directly to TMDB. Existing local artwork and NFO
+									files never require a key.
 								</p>
 								{tmdbTestResult && (
 									<div
