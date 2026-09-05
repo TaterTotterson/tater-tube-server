@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"net/url"
 	"os"
@@ -26,6 +28,15 @@ type taterPlayerHomeCapabilities struct {
 	TubeTV             bool `json:"tubeTV"`
 	Commercials        bool `json:"commercials"`
 	MidrollCommercials bool `json:"midrollCommercials"`
+	TaterLink          bool `json:"taterLink"`
+}
+
+type taterPlayerHomeHero struct {
+	Personalized bool      `json:"personalized"`
+	Eyebrow      string    `json:"eyebrow"`
+	Message      string    `json:"message"`
+	Assistant    string    `json:"assistantName"`
+	GeneratedAt  time.Time `json:"generatedAt"`
 }
 
 type taterPlayerHomeProgram struct {
@@ -57,6 +68,7 @@ type taterPlayerHomeResponse struct {
 	RecentlyAdded    []taterUsenetItem           `json:"recentlyAdded"`
 	LiveChannels     []taterPlayerHomeChannel    `json:"liveChannels"`
 	Libraries        []taterUsenetCategory       `json:"libraries"`
+	Hero             *taterPlayerHomeHero        `json:"hero,omitempty"`
 	Warnings         []string                    `json:"warnings,omitempty"`
 }
 
@@ -85,6 +97,9 @@ func (s *Server) handleTaterPlayerHome(c *fiber.Ctx) error {
 		Warnings:         []string{},
 	}
 	response.Capabilities = taterPlayerCapabilities(cfg)
+	response.Capabilities.TaterLink, response.Hero = s.taterPlayerLinkedHero(
+		c.Context(), response.GeneratedAt,
+	)
 
 	continueWatching, err := taterContinueWatchingItems(cfg, baseURL, playerToken)
 	if err != nil {
@@ -116,6 +131,51 @@ func (s *Server) handleTaterPlayerHome(c *fiber.Ctx) error {
 	}
 
 	return RespondSuccess(c, response)
+}
+
+func (s *Server) taterPlayerLinkedHero(ctx context.Context, now time.Time) (bool, *taterPlayerHomeHero) {
+	if s.queueRepo == nil {
+		return false, nil
+	}
+	connections, err := s.queueRepo.ListTaterCoreConnections(ctx)
+	if err != nil {
+		return false, nil
+	}
+	connected := false
+	for _, connection := range connections {
+		if !connection.RevokedAt.Valid {
+			connected = true
+			break
+		}
+	}
+	if !connected {
+		return false, nil
+	}
+
+	batch, _, err := s.queueRepo.GetActiveTaterRecommendations(
+		ctx, taterDefaultProfileID, now,
+	)
+	if err == sql.ErrNoRows {
+		return true, nil
+	}
+	if err != nil || batch == nil {
+		return true, nil
+	}
+	message := cleanTaterText(batch.Summary)
+	if message == "" {
+		return true, nil
+	}
+	assistant := cleanTaterAssistantFirstName(batch.AssistantName)
+	if assistant == "" {
+		assistant = "Tater"
+	}
+	return true, &taterPlayerHomeHero{
+		Personalized: true,
+		Eyebrow:      "TATER LINK  •  PICKED FOR YOU",
+		Message:      message,
+		Assistant:    assistant,
+		GeneratedAt:  batch.GeneratedAt,
+	}
 }
 
 func (s *Server) handleTaterPlayerLibrary(c *fiber.Ctx) error {
