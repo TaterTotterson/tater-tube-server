@@ -694,6 +694,8 @@ export interface TubeTVConfig {
 	commercials_enabled: boolean;
 	midroll_commercials: boolean;
 	channel_logos_enabled: boolean;
+	auto_channel_logo_overlay_enabled: boolean;
+	auto_channel_logo_position: "top_left" | "top_right" | "bottom_right" | "bottom_left" | string;
 	commercial_categories: string[];
 	custom_channels: TubeTVCustomChannel[];
 }

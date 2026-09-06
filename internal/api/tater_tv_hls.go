@@ -397,7 +397,7 @@ func (s *taterTVHLSSession) run(ctx context.Context) {
 		return
 	}
 	logoFile := ""
-	if taterTVChannelLogosEnabled(s.cfg) && s.channel.LogoPath != "" {
+	if taterTVChannelLogoEnabled(s.cfg, s.channel) && s.channel.LogoPath != "" {
 		if resolvedLogo, err := taterTVResolveLogoFile(ctx, s.cfg, s.channel.LogoPath); err == nil {
 			logoFile = resolvedLogo
 		} else {

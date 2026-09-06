@@ -181,13 +181,15 @@ type LocalMediaCategory struct {
 
 // TubeTVConfig stores server-side Tube TV settings.
 type TubeTVConfig struct {
-	Enabled              *bool                 `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	AutoChannels         *bool                 `yaml:"auto_channels" mapstructure:"auto_channels" json:"auto_channels"`
-	CommercialsEnabled   *bool                 `yaml:"commercials_enabled" mapstructure:"commercials_enabled" json:"commercials_enabled"`
-	MidrollCommercials   *bool                 `yaml:"midroll_commercials" mapstructure:"midroll_commercials" json:"midroll_commercials"`
-	ChannelLogosEnabled  *bool                 `yaml:"channel_logos_enabled" mapstructure:"channel_logos_enabled" json:"channel_logos_enabled"`
-	CommercialCategories []string              `yaml:"commercial_categories" mapstructure:"commercial_categories" json:"commercial_categories"`
-	CustomChannels       []TubeTVCustomChannel `yaml:"custom_channels" mapstructure:"custom_channels" json:"custom_channels"`
+	Enabled                       *bool                 `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	AutoChannels                  *bool                 `yaml:"auto_channels" mapstructure:"auto_channels" json:"auto_channels"`
+	CommercialsEnabled            *bool                 `yaml:"commercials_enabled" mapstructure:"commercials_enabled" json:"commercials_enabled"`
+	MidrollCommercials            *bool                 `yaml:"midroll_commercials" mapstructure:"midroll_commercials" json:"midroll_commercials"`
+	ChannelLogosEnabled           *bool                 `yaml:"channel_logos_enabled" mapstructure:"channel_logos_enabled" json:"channel_logos_enabled"`
+	AutoChannelLogoOverlayEnabled *bool                 `yaml:"auto_channel_logo_overlay_enabled" mapstructure:"auto_channel_logo_overlay_enabled" json:"auto_channel_logo_overlay_enabled"`
+	AutoChannelLogoPosition       string                `yaml:"auto_channel_logo_position" mapstructure:"auto_channel_logo_position" json:"auto_channel_logo_position"`
+	CommercialCategories          []string              `yaml:"commercial_categories" mapstructure:"commercial_categories" json:"commercial_categories"`
+	CustomChannels                []TubeTVCustomChannel `yaml:"custom_channels" mapstructure:"custom_channels" json:"custom_channels"`
 }
 
 // TaterBumpersConfig controls where the built-in Tater Tube bumpers may play.
@@ -936,6 +938,11 @@ func (c *Config) Validate() error {
 		enabled := true
 		c.TubeTV.ChannelLogosEnabled = &enabled
 	}
+	if c.TubeTV.AutoChannelLogoOverlayEnabled == nil {
+		enabled := true
+		c.TubeTV.AutoChannelLogoOverlayEnabled = &enabled
+	}
+	c.TubeTV.AutoChannelLogoPosition = NormalizeTubeTVLogoPosition(c.TubeTV.AutoChannelLogoPosition)
 	cleanCommercialCategories := make([]string, 0, len(c.TubeTV.CommercialCategories))
 	seenCommercialCategories := make(map[string]bool, len(c.TubeTV.CommercialCategories))
 	for _, rawCategory := range c.TubeTV.CommercialCategories {
@@ -1965,13 +1972,15 @@ func DefaultConfig(configDir ...string) *Config {
 			Categories:     []LocalMediaCategory{},
 		},
 		TubeTV: TubeTVConfig{
-			Enabled:              &tubeTVEnabled,
-			AutoChannels:         &tubeTVAutoChannels,
-			CommercialsEnabled:   &tubeTVCommercials,
-			MidrollCommercials:   &tubeTVMidroll,
-			ChannelLogosEnabled:  &tubeTVEnabled,
-			CommercialCategories: []string{},
-			CustomChannels:       []TubeTVCustomChannel{},
+			Enabled:                       &tubeTVEnabled,
+			AutoChannels:                  &tubeTVAutoChannels,
+			CommercialsEnabled:            &tubeTVCommercials,
+			MidrollCommercials:            &tubeTVMidroll,
+			ChannelLogosEnabled:           &tubeTVEnabled,
+			AutoChannelLogoOverlayEnabled: &tubeTVEnabled,
+			AutoChannelLogoPosition:       "bottom_right",
+			CommercialCategories:          []string{},
+			CustomChannels:                []TubeTVCustomChannel{},
 		},
 		TaterBumpers: TaterBumpersConfig{
 			LiveTV:      &taterBumpersLiveTV,

@@ -1803,8 +1803,9 @@ func TestTaterTVGuidePersistsAcrossMemoryReset(t *testing.T) {
 
 func TestTaterTVPersonalizeChannelsRestoresScheduledItemURLs(t *testing.T) {
 	channels := []taterTVChannel{{
-		Number: "02",
-		Title:  "Cartoons",
+		Number:   "02",
+		Title:    "Cartoons",
+		LogoPath: "tater-auto/cartoon-channel.png",
 		Schedule: []map[string]any{
 			{
 				"title":       "Episode One",
@@ -1828,6 +1829,11 @@ func TestTaterTVPersonalizeChannelsRestoresScheduledItemURLs(t *testing.T) {
 	}
 	if !strings.Contains(personalized[0].StreamURL, "/api/tater/tv/channel/02/playlist.m3u8") {
 		t.Fatalf("expected compatibility channel URL, got %q", personalized[0].StreamURL)
+	}
+	if !strings.Contains(personalized[0].LogoURL, "/api/v1/player/artwork/channel-logo") ||
+		!strings.Contains(personalized[0].LogoURL, "number=02") ||
+		!strings.Contains(personalized[0].LogoURL, "player_token=player+token") {
+		t.Fatalf("expected personalized channel logo URL, got %q", personalized[0].LogoURL)
 	}
 	episodeURL := rowString(personalized[0].Schedule[0], "streamUrl")
 	commercialURL := rowString(personalized[0].Schedule[1], "url")

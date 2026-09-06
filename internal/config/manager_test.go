@@ -192,6 +192,8 @@ func TestConfig_Validate_TubeTVChannelNumbers(t *testing.T) {
 func TestConfig_Validate_TubeTVLogoPaths(t *testing.T) {
 	cfg := DefaultConfig(t.TempDir())
 	cfg.TubeTV.ChannelLogosEnabled = nil
+	cfg.TubeTV.AutoChannelLogoOverlayEnabled = nil
+	cfg.TubeTV.AutoChannelLogoPosition = "top-right"
 	cfg.TubeTV.CustomChannels = []TubeTVCustomChannel{
 		{
 			ID:           "cartoons",
@@ -204,6 +206,9 @@ func TestConfig_Validate_TubeTVLogoPaths(t *testing.T) {
 	assert.NoError(t, cfg.Validate())
 	assert.NotNil(t, cfg.TubeTV.ChannelLogosEnabled)
 	assert.True(t, *cfg.TubeTV.ChannelLogosEnabled)
+	assert.NotNil(t, cfg.TubeTV.AutoChannelLogoOverlayEnabled)
+	assert.True(t, *cfg.TubeTV.AutoChannelLogoOverlayEnabled)
+	assert.Equal(t, "top_right", cfg.TubeTV.AutoChannelLogoPosition)
 	assert.Equal(t, "countries/united-states/cartoon-network-us.png", cfg.TubeTV.CustomChannels[0].LogoPath)
 	assert.Equal(t, "top_left", cfg.TubeTV.CustomChannels[0].LogoPosition)
 
