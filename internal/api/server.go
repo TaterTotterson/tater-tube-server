@@ -508,7 +508,7 @@ func (s *Server) runTVGuidePlanner(ctx context.Context) {
 // handleGetActiveStreams handles GET /api/files/active-streams
 //
 //	@Summary		List active streams
-//	@Description	Returns all currently active NZB file streams. Optionally filter by type=file.
+//	@Description	Returns all currently active playback sessions, including Tube TV HLS playback. Optionally filter by type=file.
 //	@Tags			Files
 //	@Produce		json
 //	@Param			type	query		string	false	"Filter by source type (e.g. file)"
@@ -520,7 +520,7 @@ func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 		return RespondSuccess(c, []nzbfilesystem.ActiveStream{})
 	}
 
-	streams := s.streamTracker.GetAll()
+	streams := s.streamTracker.GetActive()
 
 	// Check for filter parameter
 	filterType := c.Query("type") // e.g., type=file

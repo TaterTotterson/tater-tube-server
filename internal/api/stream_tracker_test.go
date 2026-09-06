@@ -318,6 +318,54 @@ func TestStreamTracker_GetHistory_DerivesHLSActivityFromServerTime(t *testing.T)
 	assert.Less(t, activity["tube-future"].ActivityAgeSeconds, int64(0))
 }
 
+func TestStreamTracker_GetActive_IncludesTrackedAndRecentHLSPlayback(t *testing.T) {
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+
+	local := tracker.AddStream(
+		"/media/local/movie.mkv",
+		"Local",
+		"Tater Tube Player",
+		"10.0.0.2",
+		"TaterTube",
+		2048,
+	)
+	tracker.SetPlayerID(local.ID, "player-local")
+	tracker.RecordPlayback(nzbfilesystem.ActiveStream{
+		ID:           "tube-recent",
+		FilePath:     "Tube TV CH 07 - SCI-FI MOVIES",
+		StartedAt:    time.Now().Add(-time.Minute),
+		LastActivity: time.Now().Add(-5 * time.Second),
+		Source:       "Tube TV",
+		PlayerID:     "player-live",
+		UserName:     "Tater Tube Player",
+		Status:       "Streaming",
+	})
+	tracker.RecordPlayback(nzbfilesystem.ActiveStream{
+		ID:           "tube-stale",
+		FilePath:     "Tube TV CH 14 - 90S MOVIES",
+		StartedAt:    time.Now().Add(-time.Hour),
+		LastActivity: time.Now().Add(-time.Minute),
+		Source:       "Tube TV",
+		PlayerID:     "player-stale",
+		UserName:     "Tater Tube Player",
+		Status:       "Streaming",
+	})
+
+	active := tracker.GetActive()
+	byPath := make(map[string]nzbfilesystem.ActiveStream, len(active))
+	for _, stream := range active {
+		byPath[stream.FilePath] = stream
+	}
+
+	assert.Len(t, active, 2)
+	assert.True(t, byPath["Tube TV CH 07 - SCI-FI MOVIES"].IsActive)
+	assert.Equal(t, "player-live", byPath["Tube TV CH 07 - SCI-FI MOVIES"].PlayerID)
+	assert.Equal(t, "player-local", byPath["/media/local/movie.mkv"].PlayerID)
+	_, hasStale := byPath["Tube TV CH 14 - 90S MOVIES"]
+	assert.False(t, hasStale)
+}
+
 func TestStreamTracker_RestoresPersistentPlaybackActivity(t *testing.T) {
 	store := &memoryPlaybackHistoryStore{}
 	started := time.Now().Add(-90 * time.Second)
