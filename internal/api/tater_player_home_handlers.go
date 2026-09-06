@@ -461,19 +461,32 @@ func taterPlayerAvailableLocalArtworkURL(
 		return ""
 	}
 	normalizedKind := taterPlayerArtworkKind(kind)
+	artworkPath := ""
 	found := false
 	if normalizedKind == "poster" || normalizedKind == "series-poster" {
 		if category, ok := taterLocalMediaCategory(cfg, taterRawLocalCategoryID(categoryID)); ok {
-			_, found = taterStoredVideoArtworkPath(cfg, category, sourceIndex, relPath)
+			artworkPath, found = taterStoredVideoArtworkPath(cfg, category, sourceIndex, relPath)
 		}
 	}
 	if !found {
-		_, found = taterPlayerLocalArtworkPathForKind(cfg, categoryID, sourceIndex, relPath, normalizedKind)
+		artworkPath, found = taterPlayerLocalArtworkPathForKind(cfg, categoryID, sourceIndex, relPath, normalizedKind)
 	}
 	if !found {
 		return ""
 	}
-	return taterPlayerLocalArtworkURLForKind(baseURL, playerToken, categoryID, sourceIndex, relPath, normalizedKind)
+	artworkURL := taterPlayerLocalArtworkURLForKind(baseURL, playerToken, categoryID, sourceIndex, relPath, normalizedKind)
+	info, err := os.Stat(artworkPath)
+	if err != nil || !info.Mode().IsRegular() {
+		return artworkURL
+	}
+	u, err := url.Parse(artworkURL)
+	if err != nil {
+		return artworkURL
+	}
+	query := u.Query()
+	query.Set("v", fmt.Sprintf("%d-%d", info.ModTime().UnixNano(), info.Size()))
+	u.RawQuery = query.Encode()
+	return u.String()
 }
 
 func taterPlayerLocalArtworkPathForKind(cfg *config.Config, categoryID string, sourceIndex int, relPath, kind string) (string, bool) {

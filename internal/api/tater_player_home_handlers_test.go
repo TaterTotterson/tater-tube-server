@@ -154,6 +154,7 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 
 	posterURL, err := url.Parse(envelope.Data.ContinueWatching[0].Poster)
 	require.NoError(t, err)
+	require.NotEmpty(t, posterURL.Query().Get("v"))
 	artworkResponse, err := app.Test(httptest.NewRequest(http.MethodGet, posterURL.RequestURI(), nil))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, artworkResponse.StatusCode)
