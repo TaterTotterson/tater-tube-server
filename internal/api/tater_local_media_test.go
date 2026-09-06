@@ -1651,6 +1651,54 @@ func TestTaterTVEmptyGuideRetriesOnPlannerInterval(t *testing.T) {
 	}
 }
 
+func TestTaterTVGuideRefreshesAfterServerClockCorrection(t *testing.T) {
+	now := time.Date(2026, time.September, 6, 12, 0, 0, 0, time.UTC)
+	entry := &taterTVGuideCacheEntry{
+		Channels:     []taterTVChannel{{Title: "Future Channel"}},
+		StartedAt:    now.Add(13 * time.Hour),
+		UpdatedAt:    now,
+		PlannedUntil: now.Add(25 * time.Hour),
+	}
+	if !taterTVGuideStartsInFuture(entry, now) {
+		t.Fatal("a guide left in the future by a clock correction should be invalid")
+	}
+	if !taterTVGuideNeedsRefresh(entry, now) {
+		t.Fatal("a future-dated guide should be rebuilt immediately")
+	}
+
+	entry.StartedAt = now.Add(30 * time.Second)
+	if taterTVGuideStartsInFuture(entry, now) {
+		t.Fatal("a small clock skew should not discard an otherwise valid guide")
+	}
+}
+
+func TestTaterTVEnsureGuideReplacesFutureDatedCache(t *testing.T) {
+	taterTVResetGuide()
+	cfg := config.DefaultConfig(t.TempDir())
+	defer taterTVResetGuideForConfig(cfg)
+
+	now := time.Date(2026, time.September, 6, 12, 0, 0, 0, time.UTC)
+	taterTVGuideCache = &taterTVGuideCacheEntry{
+		Channels:     []taterTVChannel{{Title: "Future Channel"}},
+		StartedAt:    now.Add(13 * time.Hour),
+		GeneratedAt:  now.Add(13 * time.Hour),
+		UpdatedAt:    now,
+		PlannedUntil: now.Add(25 * time.Hour),
+		Fingerprint:  taterTVGuideFingerprint(cfg),
+	}
+
+	guide, err := taterTVEnsureGuide(cfg, "http://server", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if guide.StartedAt != now {
+		t.Fatalf("expected rebuilt guide to start at %s, got %s", now, guide.StartedAt)
+	}
+	if len(guide.Channels) != 0 {
+		t.Fatalf("expected invalid cached channels to be discarded, got %#v", guide.Channels)
+	}
+}
+
 func TestTaterTVGuideCapsLargeSeriesWhileBuilding(t *testing.T) {
 	cfg := config.DefaultConfig(t.TempDir())
 	episodes := make([]taterUsenetItem, 5000)
