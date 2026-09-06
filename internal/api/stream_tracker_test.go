@@ -196,6 +196,8 @@ func TestStreamTracker_GetHistory_IncludesActivePlayback(t *testing.T) {
 	assert.Equal(t, "Tater Tube CRT", history[0].UserName)
 	assert.Equal(t, "player-crt", history[0].PlayerID)
 	assert.Equal(t, int64(512), history[0].BytesSent)
+	assert.True(t, history[0].IsActive)
+	assert.GreaterOrEqual(t, history[0].ActivityAgeSeconds, int64(0))
 }
 
 func TestStreamTracker_GetHistory_KeepsCompletedPlayback(t *testing.T) {
@@ -268,6 +270,52 @@ func TestStreamTracker_RecordPlayback_CoalescesPlaybackEvents(t *testing.T) {
 	assert.Equal(t, 120.0, history[0].PlaybackPosition)
 	assert.Equal(t, 1800.0, history[0].MediaDuration)
 	assert.True(t, history[0].HardwareActive)
+}
+
+func TestStreamTracker_GetHistory_DerivesHLSActivityFromServerTime(t *testing.T) {
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+
+	tracker.RecordPlayback(nzbfilesystem.ActiveStream{
+		ID:           "tube-recent",
+		FilePath:     "Tube TV CH 01 - Recent",
+		StartedAt:    time.Now().Add(-time.Minute),
+		LastActivity: time.Now().Add(-5 * time.Second),
+		Source:       "Tube TV",
+		Status:       "Streaming",
+	})
+	tracker.RecordPlayback(nzbfilesystem.ActiveStream{
+		ID:           "tube-stale",
+		FilePath:     "Tube TV CH 02 - Stale",
+		StartedAt:    time.Now().Add(-time.Hour),
+		LastActivity: time.Now().Add(-time.Minute),
+		Source:       "Tube TV",
+		Status:       "Streaming",
+	})
+	tracker.RecordPlayback(nzbfilesystem.ActiveStream{
+		ID:           "tube-future",
+		FilePath:     "Tube TV CH 03 - Future",
+		StartedAt:    time.Now().Add(-time.Minute),
+		LastActivity: time.Now().Add(time.Hour),
+		Source:       "Tube TV",
+		Status:       "Streaming",
+	})
+
+	history := tracker.GetHistory()
+	activity := make(map[string]nzbfilesystem.ActiveStream, len(history))
+	for _, stream := range history {
+		activity[stream.ID] = stream
+	}
+
+	assert.True(t, activity["tube-recent"].IsActive)
+	assert.False(t, activity["tube-stale"].IsActive)
+	assert.False(t, activity["tube-future"].IsActive)
+	assert.Equal(t, "Streaming", activity["tube-recent"].Status)
+	assert.Equal(t, "Completed", activity["tube-stale"].Status)
+	assert.Equal(t, "Completed", activity["tube-future"].Status)
+	assert.GreaterOrEqual(t, activity["tube-recent"].ActivityAgeSeconds, int64(0))
+	assert.Greater(t, activity["tube-stale"].ActivityAgeSeconds, int64(20))
+	assert.Less(t, activity["tube-future"].ActivityAgeSeconds, int64(0))
 }
 
 func TestStreamTracker_RestoresPersistentPlaybackActivity(t *testing.T) {

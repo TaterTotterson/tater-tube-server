@@ -67,6 +67,10 @@ function sourceClass(stream: ActiveStream) {
 }
 
 function activityDate(stream: ActiveStream) {
+	const reportedAge = Number(stream.activity_age_seconds);
+	if (Number.isFinite(reportedAge) && reportedAge >= 0) {
+		return new Date(Date.now() - reportedAge * 1000);
+	}
 	const value = stream.last_activity || stream.started_at;
 	const date = new Date(value);
 	return Number.isNaN(date.getTime()) ? undefined : date;
@@ -103,9 +107,13 @@ function formatBytes(value?: number) {
 	return `${amount.toFixed(amount >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
 }
 
-function timeAgo(value?: Date) {
+function timeAgo(value?: Date, serverAgeSeconds?: number) {
 	if (!value) return "Unknown";
-	const seconds = Math.max(0, Math.floor((Date.now() - value.getTime()) / 1000));
+	const reportedAge = Number(serverAgeSeconds);
+	if (Number.isFinite(reportedAge) && reportedAge < 0) return "Server clock changed";
+	const seconds = Number.isFinite(reportedAge)
+		? Math.max(0, Math.floor(reportedAge))
+		: Math.max(0, Math.floor((Date.now() - value.getTime()) / 1000));
 	if (seconds < 10) return "Just now";
 	if (seconds < 60) return `${seconds}s ago`;
 	const minutes = Math.floor(seconds / 60);
@@ -141,10 +149,13 @@ function clockLabel(date?: Date) {
 
 function isLive(stream: ActiveStream) {
 	const status = String(stream.status || "").toLowerCase();
+	const activeStatus =
+		["starting", "buffering", "streaming"].includes(status) || status.startsWith("transcoding");
+	if (typeof stream.is_active === "boolean") return stream.is_active && activeStatus;
 	const date = activityDate(stream);
-	const recent = date ? Date.now() - date.getTime() < 20000 : false;
-	return recent && (["starting", "buffering", "streaming"].includes(status)
-		|| status.startsWith("transcoding"));
+	const age = date ? Date.now() - date.getTime() : Number.POSITIVE_INFINITY;
+	const recent = age >= 0 && age < 20000;
+	return recent && activeStatus;
 }
 
 function playbackProgress(stream: ActiveStream) {
@@ -179,9 +190,15 @@ function hardwareLabel(stream: ActiveStream) {
 function hardwareDetail(stream: ActiveStream) {
 	const videoMode = stream.video_mode || (stream.transcoded ? "transcode" : "direct");
 	const audioMode = stream.audio_mode || (stream.transcoded ? "transcode" : "direct");
-	const videoLabel = videoMode === "transcode" ? "Transcoding" : videoMode === "none" ? "None" : "Direct";
+	const videoLabel =
+		videoMode === "transcode" ? "Transcoding" : videoMode === "none" ? "None" : "Direct";
 	const audioCodec = stream.audio_codec ? ` (${String(stream.audio_codec).toUpperCase()})` : "";
-	const audioLabel = audioMode === "transcode" ? `Transcoding${audioCodec}` : audioMode === "none" ? "None" : "Direct";
+	const audioLabel =
+		audioMode === "transcode"
+			? `Transcoding${audioCodec}`
+			: audioMode === "none"
+				? "None"
+				: "Direct";
 	const parts = [stream.video_codec, stream.transcode_name || stream.transcode_profile]
 		.filter(Boolean)
 		.map((value) => String(value));
@@ -499,7 +516,7 @@ export function QueuePage() {
 														</div>
 													)}
 													<div className="mt-2 font-mono text-base-content/55 text-xs">
-														{clockLabel(moment)} / {timeAgo(moment)}
+														{clockLabel(moment)} / {timeAgo(moment, stream.activity_age_seconds)}
 													</div>
 												</div>
 											</div>

@@ -9,40 +9,42 @@ import (
 
 // ActiveStream represents a file currently being streamed
 type ActiveStream struct {
-	ID               string    `json:"id"`
-	FilePath         string    `json:"file_path"`
-	StartedAt        time.Time `json:"started_at"`
-	LastActivity     time.Time `json:"last_activity"`
-	Source           string    `json:"source"`
-	PlayerID         string    `json:"player_id,omitempty"`
-	UserName         string    `json:"user_name,omitempty"`
-	ClientIP         string    `json:"client_ip,omitempty"`
-	UserAgent        string    `json:"user_agent,omitempty"`
-	TotalSize        int64     `json:"total_size"`
-	BytesSent        int64     `json:"bytes_sent"`
-	BytesDownloaded  int64     `json:"bytes_downloaded"`
-	CurrentOffset    int64     `json:"current_offset"`
-	BytesPerSecond   int64     `json:"bytes_per_second"`
-	DownloadSpeed    int64     `json:"download_speed"`
-	SpeedAvg         int64     `json:"speed_avg"`
-	ETA              int64     `json:"eta"` // Seconds remaining
-	TotalConnections int       `json:"total_connections"`
-	BufferedOffset   int64     `json:"buffered_offset"`
-	Status           string    `json:"status"` // e.g., "Buffering", "Streaming", "Stalled"
-	PlaybackPosition float64   `json:"playback_position_seconds"`
-	PlaybackStart    float64   `json:"playback_start_seconds,omitempty"`
-	MediaDuration    float64   `json:"media_duration_seconds,omitempty"`
-	WatchedSeconds   float64   `json:"watched_seconds"`
-	Transcoded       bool      `json:"transcoded"`
-	TranscodeProfile string    `json:"transcode_profile,omitempty"`
-	TranscodeName    string    `json:"transcode_name,omitempty"`
-	HardwareAccel    string    `json:"hardware_acceleration,omitempty"`
-	HardwareDevice   string    `json:"hardware_device,omitempty"`
-	VideoCodec       string    `json:"video_codec,omitempty"`
-	VideoMode        string    `json:"video_mode,omitempty"`
-	AudioMode        string    `json:"audio_mode,omitempty"`
-	AudioCodec       string    `json:"audio_codec,omitempty"`
-	HardwareActive   bool      `json:"hardware_active"`
+	ID                 string    `json:"id"`
+	FilePath           string    `json:"file_path"`
+	StartedAt          time.Time `json:"started_at"`
+	LastActivity       time.Time `json:"last_activity"`
+	Source             string    `json:"source"`
+	PlayerID           string    `json:"player_id,omitempty"`
+	UserName           string    `json:"user_name,omitempty"`
+	ClientIP           string    `json:"client_ip,omitempty"`
+	UserAgent          string    `json:"user_agent,omitempty"`
+	TotalSize          int64     `json:"total_size"`
+	BytesSent          int64     `json:"bytes_sent"`
+	BytesDownloaded    int64     `json:"bytes_downloaded"`
+	CurrentOffset      int64     `json:"current_offset"`
+	BytesPerSecond     int64     `json:"bytes_per_second"`
+	DownloadSpeed      int64     `json:"download_speed"`
+	SpeedAvg           int64     `json:"speed_avg"`
+	ETA                int64     `json:"eta"` // Seconds remaining
+	TotalConnections   int       `json:"total_connections"`
+	BufferedOffset     int64     `json:"buffered_offset"`
+	Status             string    `json:"status"` // e.g., "Buffering", "Streaming", "Stalled"
+	PlaybackPosition   float64   `json:"playback_position_seconds"`
+	PlaybackStart      float64   `json:"playback_start_seconds,omitempty"`
+	MediaDuration      float64   `json:"media_duration_seconds,omitempty"`
+	WatchedSeconds     float64   `json:"watched_seconds"`
+	Transcoded         bool      `json:"transcoded"`
+	TranscodeProfile   string    `json:"transcode_profile,omitempty"`
+	TranscodeName      string    `json:"transcode_name,omitempty"`
+	HardwareAccel      string    `json:"hardware_acceleration,omitempty"`
+	HardwareDevice     string    `json:"hardware_device,omitempty"`
+	VideoCodec         string    `json:"video_codec,omitempty"`
+	VideoMode          string    `json:"video_mode,omitempty"`
+	AudioMode          string    `json:"audio_mode,omitempty"`
+	AudioCodec         string    `json:"audio_codec,omitempty"`
+	HardwareActive     bool      `json:"hardware_active"`
+	IsActive           bool      `json:"is_active"`
+	ActivityAgeSeconds int64     `json:"activity_age_seconds"`
 }
 
 // ARRsRepairService abstracts the ARR repair operations needed by the filesystem.

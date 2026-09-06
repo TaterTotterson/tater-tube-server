@@ -21,6 +21,7 @@ import (
 // Default timeout for stale streams (4 hours - covers most movie lengths)
 const defaultStreamTimeout = 4 * time.Hour
 const playbackHistoryLimit = 250
+const recentPlaybackActivityWindow = 20 * time.Second
 
 type playbackHistoryStore interface {
 	UpsertPlaybackHistory(context.Context, *database.PlaybackHistoryEntry) error
@@ -748,6 +749,25 @@ func (t *StreamTracker) GetHistory() []nzbfilesystem.ActiveStream {
 	}
 	t.mu.Unlock()
 
+	// History also contains lightweight HLS playback records, which do not
+	// live in the long-running streams map. Derive their active state against
+	// the server's clock so a clock difference between the server and browser
+	// cannot leave completed channels labelled "On Air" in the dashboard.
+	now := time.Now()
+	for i := range streams {
+		activityAt := streamSortTime(streams[i])
+		age := now.Sub(activityAt)
+		streams[i].ActivityAgeSeconds = int64(age / time.Second)
+		if streams[i].IsActive {
+			continue
+		}
+		liveStatus := playbackStatusIsLive(streams[i].Status)
+		streams[i].IsActive = age >= 0 && age < recentPlaybackActivityWindow && liveStatus
+		if liveStatus && !streams[i].IsActive {
+			streams[i].Status = "Completed"
+		}
+	}
+
 	sort.SliceStable(streams, func(i, j int) bool {
 		return streamSortTime(streams[i]).After(streamSortTime(streams[j]))
 	})
@@ -863,6 +883,7 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			streamCopy.DownloadSpeed = internal.DownloadSpeed
 			streamCopy.SpeedAvg = internal.SpeedAvg
 			streamCopy.ETA = internal.ETA
+			streamCopy.IsActive = true
 			// Use groupKey as stable ID to prevent UI flickering when underlying connections change
 			streamCopy.ID = groupKey
 			streamCopy.TotalConnections = 1
@@ -885,6 +906,11 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 	})
 
 	return streams
+}
+
+func playbackStatusIsLive(status string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	return status == "starting" || status == "buffering" || status == "streaming" || strings.HasPrefix(status, "transcoding")
 }
 
 func streamSortTime(stream nzbfilesystem.ActiveStream) time.Time {

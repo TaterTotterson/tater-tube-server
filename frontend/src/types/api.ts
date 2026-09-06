@@ -433,6 +433,8 @@ export interface ActiveStream {
 	audio_mode?: "direct" | "transcode" | "none" | string;
 	audio_codec?: string;
 	hardware_active: boolean;
+	is_active?: boolean;
+	activity_age_seconds?: number;
 }
 
 export interface PoolMetrics {
