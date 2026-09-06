@@ -819,7 +819,11 @@ func buildTaterTVChannelHLSArgsWithTimeline(cfg config.TranscodingConfig, profil
 		"-colorspace", "bt709",
 		"-color_range", "tv",
 		"-fflags", "+genpts",
-		"-avoid_negative_ts", "make_zero",
+		// Each schedule item is encoded independently, then placed on one
+		// continuous MPEG-TS timeline with -output_ts_offset below. make_zero
+		// cancels that offset inside the HLS MPEG-TS muxer and makes every ad or
+		// bumper jump back to timestamp zero, which stalls stricter TV players.
+		"-avoid_negative_ts", "disabled",
 		"-force_key_frames", "expr:gte(t,n_forced*"+strconv.Itoa(taterTVHLSSegmentSeconds)+")",
 		"-bsf:v", "dump_extra=freq=keyframe",
 		"-muxdelay", "0",

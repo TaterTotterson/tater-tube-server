@@ -2120,6 +2120,7 @@ func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
 		"-color_trc bt709",
 		"-colorspace bt709",
 		"-color_range tv",
+		"-avoid_negative_ts disabled",
 		"-muxdelay 0",
 		"-muxpreload 0",
 		"-f hls",
@@ -2132,6 +2133,9 @@ func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("expected %q in HLS args: %s", expected, joined)
 		}
+	}
+	if strings.Contains(joined, "-avoid_negative_ts make_zero") {
+		t.Fatalf("HLS args must preserve the cross-item timestamp offset: %s", joined)
 	}
 }
 

@@ -792,6 +792,20 @@ func (t *StreamTracker) GetHistory() []nzbfilesystem.ActiveStream {
 	return streams
 }
 
+// GetActive returns every playback session that is currently active. In
+// addition to long-lived file streams, this includes recent lightweight
+// playback records such as Tube TV HLS segment requests.
+func (t *StreamTracker) GetActive() []nzbfilesystem.ActiveStream {
+	history := t.GetHistory()
+	active := make([]nzbfilesystem.ActiveStream, 0, len(history))
+	for _, stream := range history {
+		if stream.IsActive {
+			active = append(active, stream)
+		}
+	}
+	return active
+}
+
 func valueToInternal(val any) *streamInternal {
 	return val.(*streamInternal)
 }
