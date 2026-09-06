@@ -458,6 +458,16 @@ func (t *StreamTracker) SetTrackProcessingInfo(id, videoMode, audioMode, audioCo
 	}
 }
 
+func (t *StreamTracker) SetDynamicRangeInfo(id, sourceRange, outputRange string, toneMapped bool) {
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*streamInternal)
+		stream.SourceVideoRange = cleanTaterVideoRange(sourceRange)
+		stream.OutputVideoRange = cleanTaterVideoRange(outputRange)
+		stream.ToneMapped = toneMapped
+		stream.lastReadAt = time.Now()
+	}
+}
+
 func (t *StreamTracker) SetMediaInfo(id string, durationSeconds, playbackStartSeconds float64) {
 	if val, ok := t.streams.Load(id); ok {
 		stream := val.(*streamInternal)
@@ -692,6 +702,11 @@ func mergePlaybackRecord(existing *nzbfilesystem.ActiveStream, next nzbfilesyste
 		existing.AudioCodec = next.AudioCodec
 		existing.HardwareActive = next.HardwareActive
 	}
+	if next.SourceVideoRange != "" {
+		existing.SourceVideoRange = next.SourceVideoRange
+		existing.OutputVideoRange = next.OutputVideoRange
+		existing.ToneMapped = next.ToneMapped
+	}
 	updateWatchedDuration(existing)
 }
 
@@ -865,6 +880,11 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 				if existing.Status != "Streaming" {
 					existing.Status = s.Status
 				}
+			}
+			if s.SourceVideoRange != "" {
+				existing.SourceVideoRange = s.SourceVideoRange
+				existing.OutputVideoRange = s.OutputVideoRange
+				existing.ToneMapped = s.ToneMapped
 			}
 
 			existing.TotalConnections++

@@ -18,6 +18,7 @@ import (
 const taterPlaybackProbeTimeout = 12 * time.Second
 
 type taterPlaybackCapabilities struct {
+	CapabilityVersion    int      `json:"capability_version"`
 	Platform             string   `json:"platform"`
 	Engine               string   `json:"engine"`
 	OutputName           string   `json:"output_name"`
@@ -31,6 +32,11 @@ type taterPlaybackCapabilities struct {
 	MaxAudioChannels     int      `json:"max_audio_channels"`
 	CompatibilityMode    bool     `json:"compatibility_mode"`
 	PassthroughAvailable bool     `json:"passthrough_available"`
+	VideoHDRFormats      []string `json:"video_hdr_formats"`
+	DisplayHDRFormats    []string `json:"display_hdr_formats"`
+	DisplayHDREnabled    bool     `json:"display_hdr_enabled"`
+	MaxVideoBitDepth     int      `json:"max_video_bit_depth"`
+	DolbyVisionProfiles  []int    `json:"dolby_vision_profiles"`
 }
 
 type taterPlaybackSessionRequest struct {
@@ -41,15 +47,23 @@ type taterPlaybackSessionRequest struct {
 }
 
 type taterPlaybackMediaInfo struct {
-	Container     string `json:"container,omitempty"`
-	VideoCodec    string `json:"video_codec,omitempty"`
-	VideoProfile  string `json:"video_profile,omitempty"`
-	Width         int    `json:"width,omitempty"`
-	Height        int    `json:"height,omitempty"`
-	AudioCodec    string `json:"audio_codec,omitempty"`
-	AudioProfile  string `json:"audio_profile,omitempty"`
-	AudioChannels int    `json:"audio_channels,omitempty"`
-	ChannelLayout string `json:"channel_layout,omitempty"`
+	Container                  string `json:"container,omitempty"`
+	VideoCodec                 string `json:"video_codec,omitempty"`
+	VideoProfile               string `json:"video_profile,omitempty"`
+	Width                      int    `json:"width,omitempty"`
+	Height                     int    `json:"height,omitempty"`
+	VideoRange                 string `json:"video_range,omitempty"`
+	PixelFormat                string `json:"pixel_format,omitempty"`
+	ColorSpace                 string `json:"color_space,omitempty"`
+	ColorTransfer              string `json:"color_transfer,omitempty"`
+	ColorPrimaries             string `json:"color_primaries,omitempty"`
+	VideoBitDepth              int    `json:"video_bit_depth,omitempty"`
+	DolbyVisionProfile         int    `json:"dolby_vision_profile,omitempty"`
+	DolbyVisionCompatibilityID int    `json:"dolby_vision_compatibility_id,omitempty"`
+	AudioCodec                 string `json:"audio_codec,omitempty"`
+	AudioProfile               string `json:"audio_profile,omitempty"`
+	AudioChannels              int    `json:"audio_channels,omitempty"`
+	ChannelLayout              string `json:"channel_layout,omitempty"`
 }
 
 type taterPlaybackSessionResponse struct {
@@ -63,18 +77,37 @@ type taterPlaybackSessionResponse struct {
 	Reason           string                 `json:"reason,omitempty"`
 	OutputName       string                 `json:"output_name,omitempty"`
 	OutputConnection string                 `json:"output_connection,omitempty"`
+	SourceVideoRange string                 `json:"source_video_range"`
+	OutputVideoRange string                 `json:"output_video_range"`
+	ToneMapped       bool                   `json:"tone_mapped"`
 	Source           taterPlaybackMediaInfo `json:"source"`
+}
+
+type taterFFprobePlaybackSideData struct {
+	SideDataType               string `json:"side_data_type"`
+	DolbyVisionProfile         int    `json:"dv_profile"`
+	DolbyVisionLevel           int    `json:"dv_level"`
+	RPUFlag                    int    `json:"rpu_present_flag"`
+	ELFlag                     int    `json:"el_present_flag"`
+	BLFlag                     int    `json:"bl_present_flag"`
+	DolbyVisionCompatibilityID int    `json:"dv_bl_signal_compatibility_id"`
 }
 
 type taterFFprobePlaybackResult struct {
 	Streams []struct {
-		CodecType     string `json:"codec_type"`
-		CodecName     string `json:"codec_name"`
-		Profile       string `json:"profile"`
-		Width         int    `json:"width"`
-		Height        int    `json:"height"`
-		Channels      int    `json:"channels"`
-		ChannelLayout string `json:"channel_layout"`
+		CodecType        string                         `json:"codec_type"`
+		CodecName        string                         `json:"codec_name"`
+		Profile          string                         `json:"profile"`
+		Width            int                            `json:"width"`
+		Height           int                            `json:"height"`
+		Channels         int                            `json:"channels"`
+		ChannelLayout    string                         `json:"channel_layout"`
+		PixelFormat      string                         `json:"pix_fmt"`
+		ColorSpace       string                         `json:"color_space"`
+		ColorTransfer    string                         `json:"color_transfer"`
+		ColorPrimaries   string                         `json:"color_primaries"`
+		BitsPerRawSample string                         `json:"bits_per_raw_sample"`
+		SideDataList     []taterFFprobePlaybackSideData `json:"side_data_list"`
 	} `json:"streams"`
 	Format struct {
 		FormatName string `json:"format_name"`
@@ -134,6 +167,33 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		videoCompatible = false
 	}
 
+	sourceRange := cleanTaterVideoRange(source.VideoRange)
+	if sourceRange == "" {
+		sourceRange = "sdr"
+	}
+	outputRange := sourceRange
+	toneMapped := false
+	rangeFallback := false
+	if sourceRange != "sdr" {
+		if !taterPlaybackCanOutputRange(caps, source) {
+			if taterPlaybackCanUseHDRFallback(caps, source) {
+				outputRange = "hdr10"
+				rangeFallback = true
+			} else {
+				videoCompatible = false
+				outputRange = "sdr"
+				toneMapped = true
+			}
+		}
+		if source.VideoBitDepth > 0 && caps.MaxVideoBitDepth > 0 &&
+			source.VideoBitDepth > caps.MaxVideoBitDepth {
+			videoCompatible = false
+			outputRange = "sdr"
+			toneMapped = true
+			rangeFallback = false
+		}
+	}
+
 	passthrough := caps.PassthroughAvailable && audioCodec != "" &&
 		taterCodecListContains(caps.AudioPassthrough, audioCodec)
 	audioCompatible := audioCodec == "" && !caps.CompatibilityMode
@@ -154,6 +214,9 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		AudioCodec:       audioCodec,
 		OutputName:       strings.TrimSpace(caps.OutputName),
 		OutputConnection: strings.TrimSpace(caps.OutputConnection),
+		SourceVideoRange: sourceRange,
+		OutputVideoRange: outputRange,
+		ToneMapped:       toneMapped,
 		Source:           source,
 	}
 	if passthrough {
@@ -163,18 +226,21 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 	switch {
 	case videoCompatible && audioCompatible:
 		if passthrough {
-			plan.QualityLabel = "Video Direct • Audio Bitstream" + taterPlaybackCodecSuffix(audioCodec)
+			plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, false) + "Video Direct • Audio Bitstream" + taterPlaybackCodecSuffix(audioCodec)
 			plan.Reason = "The current audio output accepts the source audio format."
 		} else {
-			plan.QualityLabel = "Video Direct • Audio Direct" + taterPlaybackCodecSuffix(audioCodec)
+			plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, false) + "Video Direct • Audio Direct" + taterPlaybackCodecSuffix(audioCodec)
 			plan.Reason = "The player can decode both source tracks."
+		}
+		if rangeFallback {
+			plan.Reason = "The source includes an HDR10-compatible base layer for this display."
 		}
 	case videoCompatible:
 		plan.Mode = "audio_transcode"
 		plan.AudioMode = "transcode"
 		plan.AudioCodec = "aac"
 		plan.StreamURL = taterPlaybackPlannedURL(req.StreamURL, "audio", profile, "h264", "")
-		plan.QualityLabel = "Video Direct • Audio AAC"
+		plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, false) + "Video Direct • Audio AAC"
 		plan.Reason = "The source video is compatible, but its audio needs conversion."
 	case audioCompatible:
 		plan.Mode = "video_transcode"
@@ -182,10 +248,10 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		plan.VideoCodec = "h264"
 		plan.StreamURL = taterPlaybackPlannedURL(req.StreamURL, "video", profile, "h264", audioCodec)
 		if passthrough {
-			plan.QualityLabel = "Video H.264 • Audio Bitstream" + taterPlaybackCodecSuffix(audioCodec)
+			plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, toneMapped) + "Video H.264 • Audio Bitstream" + taterPlaybackCodecSuffix(audioCodec)
 			plan.Reason = "The source audio is preserved while the video is converted."
 		} else {
-			plan.QualityLabel = "Video H.264 • Audio Direct" + taterPlaybackCodecSuffix(audioCodec)
+			plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, toneMapped) + "Video H.264 • Audio Direct" + taterPlaybackCodecSuffix(audioCodec)
 			plan.Reason = "The source audio is compatible, so only the video is converted."
 		}
 	default:
@@ -195,16 +261,24 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		plan.VideoCodec = "h264"
 		plan.AudioCodec = "aac"
 		plan.StreamURL = taterPlaybackPlannedURL(req.StreamURL, "full", profile, "h264", "")
-		plan.QualityLabel = "Video H.264 • Audio AAC"
+		plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, toneMapped) + "Video H.264 • Audio AAC"
 		plan.Reason = "Both source tracks need conversion for this player."
+	}
+	if toneMapped {
+		if audioCompatible {
+			plan.Reason = "The connected display cannot use the source picture format, so only the video is tone-mapped."
+		} else {
+			plan.Reason = "The picture is tone-mapped for the connected display and the audio is converted for the player."
+		}
 	}
 	plan.StreamURL = annotateTaterPlaybackURL(
 		plan.StreamURL, plan.VideoMode, plan.AudioMode, plan.AudioCodec,
+		sourceRange, outputRange, toneMapped,
 	)
 	return plan
 }
 
-func annotateTaterPlaybackURL(rawURL, videoMode, audioMode, audioCodec string) string {
+func annotateTaterPlaybackURL(rawURL, videoMode, audioMode, audioCodec, sourceRange, outputRange string, toneMapped bool) string {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return rawURL
@@ -217,6 +291,13 @@ func annotateTaterPlaybackURL(rawURL, videoMode, audioMode, audioCodec string) s
 	} else {
 		query.Del("tater_audio_codec")
 	}
+	query.Set("tater_source_video_range", cleanTaterVideoRange(sourceRange))
+	query.Set("tater_output_video_range", cleanTaterVideoRange(outputRange))
+	if toneMapped {
+		query.Set("tater_tone_map", "1")
+	} else {
+		query.Del("tater_tone_map")
+	}
 	u.RawQuery = query.Encode()
 	return u.String()
 }
@@ -227,7 +308,7 @@ func taterPlaybackPlannedURL(rawURL, mode, profile, videoCodec, audioCodec strin
 		return rawURL
 	}
 	query := u.Query()
-	for _, key := range []string{"direct", "transcode", "profile", "codec", "audio_codec", "start"} {
+	for _, key := range []string{"direct", "transcode", "profile", "codec", "audio_codec", "start", "tater_tone_map", "tater_source_video_range", "tater_output_video_range"} {
 		query.Del(key)
 	}
 	switch mode {
@@ -291,7 +372,7 @@ func probeTaterPlaybackMedia(parent context.Context, cfg *config.Config, path st
 	defer cancel()
 	cmd := exec.CommandContext(ctx, ffprobePath,
 		"-v", "error",
-		"-show_entries", "format=format_name:stream=codec_type,codec_name,profile,width,height,channels,channel_layout",
+		"-show_entries", "format=format_name:stream=codec_type,codec_name,profile,width,height,channels,channel_layout,pix_fmt,color_space,color_transfer,color_primaries,bits_per_raw_sample:stream_side_data=side_data_type,dv_profile,dv_level,rpu_present_flag,el_present_flag,bl_present_flag,dv_bl_signal_compatibility_id",
 		"-of", "json",
 		path,
 	)
@@ -312,6 +393,12 @@ func probeTaterPlaybackMedia(parent context.Context, cfg *config.Config, path st
 				info.VideoProfile = strings.TrimSpace(stream.Profile)
 				info.Width = stream.Width
 				info.Height = stream.Height
+				info.PixelFormat = strings.ToLower(strings.TrimSpace(stream.PixelFormat))
+				info.ColorSpace = strings.ToLower(strings.TrimSpace(stream.ColorSpace))
+				info.ColorTransfer = strings.ToLower(strings.TrimSpace(stream.ColorTransfer))
+				info.ColorPrimaries = strings.ToLower(strings.TrimSpace(stream.ColorPrimaries))
+				info.VideoBitDepth = taterPlaybackBitDepth(stream.BitsPerRawSample, stream.PixelFormat)
+				info.VideoRange, info.DolbyVisionProfile, info.DolbyVisionCompatibilityID = taterPlaybackVideoRange(stream.ColorTransfer, stream.ColorPrimaries, stream.SideDataList)
 			}
 		case "audio":
 			if info.AudioCodec == "" {
@@ -323,6 +410,161 @@ func probeTaterPlaybackMedia(parent context.Context, cfg *config.Config, path st
 		}
 	}
 	return info, nil
+}
+
+func taterPlaybackVideoRange(transfer, primaries string, sideData []taterFFprobePlaybackSideData) (string, int, int) {
+	dolbyProfile := 0
+	dolbyCompatibilityID := 0
+	hdr10Plus := false
+	hdrStaticMetadata := false
+	for _, data := range sideData {
+		kind := strings.ToLower(strings.TrimSpace(data.SideDataType))
+		if strings.Contains(kind, "dovi") || strings.Contains(kind, "dolby vision") {
+			dolbyProfile = data.DolbyVisionProfile
+			dolbyCompatibilityID = data.DolbyVisionCompatibilityID
+		}
+		if strings.Contains(kind, "smpte2094-40") || strings.Contains(kind, "hdr10+") {
+			hdr10Plus = true
+		}
+		if strings.Contains(kind, "mastering display") || strings.Contains(kind, "content light") {
+			hdrStaticMetadata = true
+		}
+	}
+	if dolbyProfile > 0 {
+		return "dolby_vision", dolbyProfile, dolbyCompatibilityID
+	}
+	if hdr10Plus {
+		return "hdr10plus", 0, 0
+	}
+	switch cleanTaterVideoRange(transfer) {
+	case "hdr10":
+		return "hdr10", 0, 0
+	case "hlg":
+		return "hlg", 0, 0
+	}
+	if strings.EqualFold(strings.TrimSpace(primaries), "bt2020") &&
+		(strings.Contains(strings.ToLower(strings.TrimSpace(transfer)), "2084") || hdrStaticMetadata) {
+		return "hdr10", 0, 0
+	}
+	return "sdr", 0, 0
+}
+
+func taterPlaybackBitDepth(bitsPerRawSample, pixelFormat string) int {
+	if bits, err := strconv.Atoi(strings.TrimSpace(bitsPerRawSample)); err == nil && bits > 0 {
+		return bits
+	}
+	format := strings.ToLower(strings.TrimSpace(pixelFormat))
+	for _, bits := range []int{16, 14, 12, 10, 9} {
+		if strings.Contains(format, strconv.Itoa(bits)) {
+			return bits
+		}
+	}
+	if format != "" {
+		return 8
+	}
+	return 0
+}
+
+func cleanTaterVideoRange(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.NewReplacer("-", "", "_", "", "+", "plus", ".", "").Replace(value)
+	switch value {
+	case "dolbyvision", "dovi", "dv":
+		return "dolby_vision"
+	case "hdr10plus", "smpte209440":
+		return "hdr10plus"
+	case "hdr10", "pq", "smpte2084":
+		return "hdr10"
+	case "hlg", "aribstdb67":
+		return "hlg"
+	case "sdr", "bt709", "iec6196621":
+		return "sdr"
+	default:
+		return ""
+	}
+}
+
+func taterPlaybackRangeSupported(values []string, videoRange string) bool {
+	videoRange = cleanTaterVideoRange(videoRange)
+	for _, value := range values {
+		if cleanTaterVideoRange(value) == videoRange {
+			return true
+		}
+	}
+	return false
+}
+
+func taterPlaybackCanOutputRange(caps taterPlaybackCapabilities, source taterPlaybackMediaInfo) bool {
+	videoRange := cleanTaterVideoRange(source.VideoRange)
+	if videoRange == "" || videoRange == "sdr" {
+		return true
+	}
+	if !caps.DisplayHDREnabled ||
+		!taterPlaybackRangeSupported(caps.VideoHDRFormats, videoRange) ||
+		!taterPlaybackRangeSupported(caps.DisplayHDRFormats, videoRange) {
+		return false
+	}
+	if videoRange == "dolby_vision" && source.DolbyVisionProfile > 0 &&
+		len(caps.DolbyVisionProfiles) > 0 {
+		for _, profile := range caps.DolbyVisionProfiles {
+			if profile == source.DolbyVisionProfile {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
+func taterPlaybackCanUseHDRFallback(caps taterPlaybackCapabilities, source taterPlaybackMediaInfo) bool {
+	if !caps.DisplayHDREnabled ||
+		!taterPlaybackRangeSupported(caps.VideoHDRFormats, "hdr10") ||
+		!taterPlaybackRangeSupported(caps.DisplayHDRFormats, "hdr10") {
+		return false
+	}
+	switch cleanTaterVideoRange(source.VideoRange) {
+	case "hdr10plus":
+		return true
+	case "dolby_vision":
+		return source.DolbyVisionProfile == 7 || source.DolbyVisionCompatibilityID == 1
+	default:
+		return false
+	}
+}
+
+func taterPlaybackRangePrefix(sourceRange, outputRange string, toneMapped bool) string {
+	sourceRange = cleanTaterVideoRange(sourceRange)
+	outputRange = cleanTaterVideoRange(outputRange)
+	if sourceRange == "" || sourceRange == "sdr" {
+		return ""
+	}
+	label := taterPlaybackRangeLabel(sourceRange)
+	if outputRange != "" && outputRange != sourceRange {
+		label += " → " + taterPlaybackRangeLabel(outputRange)
+	}
+	if toneMapped {
+		label += " Tone Map"
+	} else if outputRange == sourceRange {
+		label += " Direct"
+	}
+	return label + " • "
+}
+
+func taterPlaybackRangeLabel(videoRange string) string {
+	switch cleanTaterVideoRange(videoRange) {
+	case "dolby_vision":
+		return "Dolby Vision"
+	case "hdr10plus":
+		return "HDR10+"
+	case "hdr10":
+		return "HDR10"
+	case "hlg":
+		return "HLG"
+	case "sdr":
+		return "SDR"
+	default:
+		return "Video"
+	}
 }
 
 func parsedPlaybackPath(rawURL string) string {

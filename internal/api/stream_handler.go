@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -34,6 +35,8 @@ type StreamHandler struct {
 	streamTracker *StreamTracker
 	configGetter  config.ConfigGetter
 }
+
+var taterToneMapFilterCache sync.Map
 
 // MonitoredFile wraps an afero.File to track read progress and support cancellation
 type MonitoredFile struct {
@@ -333,6 +336,7 @@ func applyTaterRequestedTrackInfo(tracker *StreamTracker, streamID string, r *ht
 	videoMode := requestedTaterTrackMode(r, "tater_video_mode", "")
 	audioMode := requestedTaterTrackMode(r, "tater_audio_mode", "")
 	if videoMode == "" && audioMode == "" {
+		applyTaterRequestedDynamicRangeInfo(tracker, streamID, r)
 		return
 	}
 	if videoMode == "" {
@@ -347,6 +351,28 @@ func applyTaterRequestedTrackInfo(tracker *StreamTracker, streamID string, r *ht
 		status = "Bitstreaming audio"
 	}
 	tracker.SetTrackProcessingInfo(streamID, videoMode, audioMode, audioCodec, status)
+	applyTaterRequestedDynamicRangeInfo(tracker, streamID, r)
+}
+
+func applyTaterRequestedDynamicRangeInfo(tracker *StreamTracker, streamID string, r *http.Request) {
+	if tracker == nil || strings.TrimSpace(streamID) == "" || r == nil {
+		return
+	}
+	sourceRange := cleanTaterVideoRange(r.URL.Query().Get("tater_source_video_range"))
+	outputRange := cleanTaterVideoRange(r.URL.Query().Get("tater_output_video_range"))
+	if sourceRange == "" && outputRange == "" {
+		return
+	}
+	if sourceRange == "" {
+		sourceRange = "sdr"
+	}
+	if outputRange == "" {
+		outputRange = sourceRange
+	}
+	tracker.SetDynamicRangeInfo(
+		streamID, sourceRange, outputRange,
+		strings.TrimSpace(r.URL.Query().Get("tater_tone_map")) == "1",
+	)
 }
 
 func requestedTaterTrackMode(r *http.Request, key, fallback string) string {
@@ -569,12 +595,25 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	if startSeconds > 0 {
 		inputPath = path
 	}
-	args := buildFFmpegTranscodeArgsWithCodec(transcodeCfg, profile, accel, videoCodecPreference, inputPath, startSeconds)
+	toneMapSource, toneMapTarget := requestedTaterToneMap(r)
+	toneMapFilter := taterToneMapFilterForFFmpeg(r.Context(), ffmpegPath, toneMapSource)
+	if toneMapSource != "" && toneMapFilter == "" {
+		http.Error(w, "Tone mapping unavailable in the configured FFmpeg build", http.StatusServiceUnavailable)
+		return
+	}
+	args := buildFFmpegTranscodeArgsWithOptions(
+		transcodeCfg, profile, accel, videoCodecPreference, transcodeOutputOptions{
+			InputPath: inputPath, StartSeconds: startSeconds,
+			ToneMapSource: toneMapSource, ToneMapTarget: toneMapTarget,
+			ToneMapFilter: toneMapFilter,
+		},
+	)
 	videoCodec, _ := transcodeVideoSettingsForCodec(accel, transcodeCfg.HardwareDevice, profile, videoCodecPreference)
 	effectiveAccel := effectiveTranscodeHardwareAccel(videoCodec)
 	hardwareDevice := effectiveTranscodeHardwareDevice(effectiveAccel, transcodeCfg.HardwareDevice)
 	durationSeconds := h.probeMediaDuration(ctx, path)
-	h.markTranscodedStream(w, file, profileID, profile.Name, effectiveAccel, hardwareDevice, videoCodec, startSeconds, durationSeconds)
+	streamID := h.markTranscodedStream(w, file, profileID, profile.Name, effectiveAccel, hardwareDevice, videoCodec, startSeconds, durationSeconds)
+	applyTaterRequestedDynamicRangeInfo(h.streamTracker, streamID, r)
 
 	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
 	if inputPath == "" {
@@ -647,6 +686,7 @@ func (h *StreamHandler) serveAudioOnlyVideoTranscoded(
 		h.streamTracker.SetTrackProcessingInfo(
 			streamID, "direct", "transcode", "aac", "Transcoding audio",
 		)
+		applyTaterRequestedDynamicRangeInfo(h.streamTracker, streamID, r)
 	}
 
 	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
@@ -732,8 +772,15 @@ func (h *StreamHandler) serveVideoOnlyTranscoded(
 	if startSeconds > 0 {
 		inputPath = path
 	}
-	args := buildFFmpegVideoOnlyArgs(
+	toneMapSource, toneMapTarget := requestedTaterToneMap(r)
+	toneMapFilter := taterToneMapFilterForFFmpeg(r.Context(), ffmpegPath, toneMapSource)
+	if toneMapSource != "" && toneMapFilter == "" {
+		http.Error(w, "Tone mapping unavailable in the configured FFmpeg build", http.StatusServiceUnavailable)
+		return
+	}
+	args := buildFFmpegVideoOnlyArgsWithToneMapFilter(
 		transcodeCfg, profile, accel, videoCodecPreference, inputPath, startSeconds,
+		toneMapSource, toneMapTarget, toneMapFilter,
 	)
 	videoCodec, _ := transcodeVideoSettingsForCodec(
 		accel, transcodeCfg.HardwareDevice, profile, videoCodecPreference,
@@ -756,6 +803,7 @@ func (h *StreamHandler) serveVideoOnlyTranscoded(
 		h.streamTracker.SetTrackProcessingInfo(
 			streamID, "transcode", audioMode, audioCodec, "Transcoding video",
 		)
+		applyTaterRequestedDynamicRangeInfo(h.streamTracker, streamID, r)
 	}
 
 	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
@@ -1090,6 +1138,19 @@ func buildFFmpegAudioOnlyVideoArgs(audioBitrate, inputPath string, startSeconds 
 }
 
 func buildFFmpegVideoOnlyArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec, inputPath string, startSeconds float64) []string {
+	return buildFFmpegVideoOnlyArgsWithToneMap(
+		cfg, profile, accel, preferredCodec, inputPath, startSeconds, "", "",
+	)
+}
+
+func buildFFmpegVideoOnlyArgsWithToneMap(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec, inputPath string, startSeconds float64, toneMapSource, toneMapTarget string) []string {
+	return buildFFmpegVideoOnlyArgsWithToneMapFilter(
+		cfg, profile, accel, preferredCodec, inputPath, startSeconds,
+		toneMapSource, toneMapTarget, "tonemapx",
+	)
+}
+
+func buildFFmpegVideoOnlyArgsWithToneMapFilter(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec, inputPath string, startSeconds float64, toneMapSource, toneMapTarget, toneMapFilter string) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
@@ -1108,6 +1169,7 @@ func buildFFmpegVideoOnlyArgs(cfg config.TranscodingConfig, profile transcodePro
 	videoCodec, filters := transcodeVideoSettingsForCodec(
 		accel, cfg.HardwareDevice, profile, preferredCodec,
 	)
+	filters = appendTaterToneMapFilter(filters, toneMapSource, toneMapTarget, toneMapFilter)
 	args = append(args,
 		"-map", "0:v:0",
 		"-map", "0:a:0?",
@@ -1124,6 +1186,7 @@ func buildFFmpegVideoOnlyArgs(cfg config.TranscodingConfig, profile transcodePro
 		"-bufsize", profile.BufferSize,
 	)
 	args = appendVideoEncoderOptions(args, videoCodec, profile)
+	args = appendTaterToneMapOutputMetadata(args, toneMapSource, toneMapTarget)
 	args = append(args,
 		"-c:a", "copy",
 		"-fflags", "+genpts",
@@ -1146,6 +1209,9 @@ type transcodeOutputOptions struct {
 	DurationSeconds float64
 	LogoFile        string
 	LogoPosition    string
+	ToneMapSource   string
+	ToneMapTarget   string
+	ToneMapFilter   string
 }
 
 func buildFFmpegTranscodeArgsWithOptions(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, options transcodeOutputOptions) []string {
@@ -1174,6 +1240,9 @@ func buildFFmpegTranscodeArgsWithOptions(cfg config.TranscodingConfig, profile t
 	}
 
 	videoCodec, filters := transcodeVideoSettingsForCodec(accel, cfg.HardwareDevice, profile, preferredCodec)
+	filters = appendTaterToneMapFilter(
+		filters, options.ToneMapSource, options.ToneMapTarget, options.ToneMapFilter,
+	)
 	if logoFile != "" {
 		args = append(args,
 			"-filter_complex", taterTVChannelLogoFilter(filters, profile, options.LogoPosition),
@@ -1200,6 +1269,7 @@ func buildFFmpegTranscodeArgsWithOptions(cfg config.TranscodingConfig, profile t
 	)
 
 	args = appendVideoEncoderOptions(args, videoCodec, profile)
+	args = appendTaterToneMapOutputMetadata(args, options.ToneMapSource, options.ToneMapTarget)
 
 	args = append(args,
 		"-c:a", "aac",
@@ -1214,6 +1284,81 @@ func buildFFmpegTranscodeArgsWithOptions(cfg config.TranscodingConfig, profile t
 	)
 
 	return args
+}
+
+func requestedTaterToneMap(r *http.Request) (string, string) {
+	if r == nil || strings.TrimSpace(r.URL.Query().Get("tater_tone_map")) != "1" {
+		return "", ""
+	}
+	source := cleanTaterVideoRange(r.URL.Query().Get("tater_source_video_range"))
+	target := cleanTaterVideoRange(r.URL.Query().Get("tater_output_video_range"))
+	if source == "" || source == "sdr" || target != "sdr" {
+		return "", ""
+	}
+	return source, target
+}
+
+func appendTaterToneMapFilter(filters, sourceRange, targetRange, implementation string) string {
+	sourceRange = cleanTaterVideoRange(sourceRange)
+	targetRange = cleanTaterVideoRange(targetRange)
+	if sourceRange == "" || sourceRange == "sdr" || targetRange != "sdr" {
+		return filters
+	}
+	var toneMap string
+	switch strings.ToLower(strings.TrimSpace(implementation)) {
+	case "tonemapx":
+		// Jellyfin FFmpeg's SIMD implementation handles HDR10, HDR10+, HLG and
+		// Dolby Vision metadata and removes HDR side data from the SDR result.
+		toneMap = "tonemapx=tonemap=bt2390:desat=0:peak=100:transfer=bt709:matrix=bt709:primaries=bt709:range=tv:format=yuv420p"
+	case "zscale":
+		// Portable fallback for standard FFmpeg builds compiled with libzimg.
+		toneMap = "zscale=t=linear:npl=100,format=gbrpf32le,tonemap=tonemap=mobius:desat=0,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p"
+	default:
+		return filters
+	}
+	if strings.TrimSpace(filters) == "" {
+		return toneMap
+	}
+	return toneMap + "," + filters
+}
+
+func taterToneMapFilterForFFmpeg(parent context.Context, ffmpegPath, sourceRange string) string {
+	if cleanTaterVideoRange(sourceRange) == "" || cleanTaterVideoRange(sourceRange) == "sdr" {
+		return ""
+	}
+	key := strings.TrimSpace(ffmpegPath)
+	if cached, ok := taterToneMapFilterCache.Load(key); ok {
+		return cached.(string)
+	}
+	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, ffmpegPath, "-hide_banner", "-filters").CombinedOutput()
+	selected := ""
+	if err == nil {
+		filters := string(out)
+		switch {
+		case strings.Contains(filters, " tonemapx "):
+			selected = "tonemapx"
+		case strings.Contains(filters, " zscale ") && strings.Contains(filters, " tonemap "):
+			selected = "zscale"
+		}
+	}
+	taterToneMapFilterCache.Store(key, selected)
+	return selected
+}
+
+func appendTaterToneMapOutputMetadata(args []string, sourceRange, targetRange string) []string {
+	if cleanTaterVideoRange(sourceRange) == "" ||
+		cleanTaterVideoRange(sourceRange) == "sdr" ||
+		cleanTaterVideoRange(targetRange) != "sdr" {
+		return args
+	}
+	return append(args,
+		"-color_primaries", "bt709",
+		"-color_trc", "bt709",
+		"-colorspace", "bt709",
+		"-color_range", "tv",
+	)
 }
 
 func (h *StreamHandler) selectTranscodeAccelerationAndCodec(ctx context.Context, ffmpegPath string, cfg config.TranscodingConfig, profile transcodeProfile, requestedAccel, requestedCodec string) (string, string, string) {

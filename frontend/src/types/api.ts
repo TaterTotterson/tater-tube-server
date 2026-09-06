@@ -432,6 +432,9 @@ export interface ActiveStream {
 	video_mode?: "direct" | "transcode" | "none" | string;
 	audio_mode?: "direct" | "transcode" | "none" | string;
 	audio_codec?: string;
+	source_video_range?: string;
+	output_video_range?: string;
+	tone_mapped?: boolean;
 	hardware_active: boolean;
 	is_active?: boolean;
 	activity_age_seconds?: number;

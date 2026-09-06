@@ -198,11 +198,32 @@ function hardwareDetail(stream: ActiveStream) {
 			? `Transcoding${audioCodec}`
 			: audioMode === "none"
 				? "None"
-				: "Direct";
+				: audioMode === "bitstream"
+					? `Bitstream${audioCodec}`
+					: `Direct${audioCodec}`;
+	const rangeNames: Record<string, string> = {
+		dolby_vision: "Dolby Vision",
+		hdr10plus: "HDR10+",
+		hdr10: "HDR10",
+		hlg: "HLG",
+		sdr: "SDR",
+	};
+	const sourceRange = String(stream.source_video_range || "");
+	const outputRange = String(stream.output_video_range || sourceRange);
+	let rangeDetail = "";
+	if (sourceRange && sourceRange !== "sdr") {
+		rangeDetail = rangeNames[sourceRange] || sourceRange.toUpperCase();
+		if (outputRange && outputRange !== sourceRange) {
+			rangeDetail += ` → ${rangeNames[outputRange] || outputRange.toUpperCase()}`;
+		}
+		if (stream.tone_mapped) rangeDetail += " Tone Map";
+	}
 	const parts = [stream.video_codec, stream.transcode_name || stream.transcode_profile]
 		.filter(Boolean)
 		.map((value) => String(value));
-	return [`Video: ${videoLabel}`, `Audio: ${audioLabel}`, ...parts].join(" / ");
+	return [rangeDetail, `Video: ${videoLabel}`, `Audio: ${audioLabel}`, ...parts]
+		.filter(Boolean)
+		.join(" / ");
 }
 
 export function QueuePage() {

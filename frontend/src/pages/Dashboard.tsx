@@ -132,21 +132,47 @@ function playbackMode(stream?: ActiveStream) {
 	const videoMode = stream.video_mode || (stream.transcoded ? "transcode" : "direct");
 	const audioMode = stream.audio_mode || (stream.transcoded ? "transcode" : "direct");
 	const audioCodec = String(stream.audio_codec || "aac").toUpperCase();
+	const rangeNames: Record<string, string> = {
+		dolby_vision: "Dolby Vision",
+		hdr10plus: "HDR10+",
+		hdr10: "HDR10",
+		hlg: "HLG",
+		sdr: "SDR",
+	};
+	const sourceRange = String(stream.source_video_range || "");
+	const outputRange = String(stream.output_video_range || sourceRange);
+	let rangeDetail = "";
+	if (sourceRange && sourceRange !== "sdr") {
+		rangeDetail = rangeNames[sourceRange] || sourceRange.toUpperCase();
+		if (outputRange && outputRange !== sourceRange) {
+			rangeDetail += ` → ${rangeNames[outputRange] || outputRange.toUpperCase()}`;
+		}
+		if (stream.tone_mapped) rangeDetail += " Tone Map";
+	}
+	const withRange = (detail: string) => (rangeDetail ? `${rangeDetail} • ${detail}` : detail);
 	if (videoMode === "direct" && audioMode === "transcode") {
 		return {
 			label: "Audio Transcode",
 			className: "badge-warning",
-			detail: `Video: Direct • Audio: Transcoding (${audioCodec})`,
+			detail: withRange(`Video: Direct • Audio: Transcoding (${audioCodec})`),
 		};
 	}
 	if (!stream.transcoded) {
+		const directAudio =
+			audioMode === "bitstream" ? `Audio: Bitstream (${audioCodec})` : "Audio: Direct";
 		return {
 			label: "Direct",
 			className: "badge-outline",
-			detail: "Video: Direct • Audio: Direct",
+			detail: withRange(`Video: Direct • ${directAudio}`),
 		};
 	}
-	const trackDetail = `Video: Transcoding • Audio: Transcoding (${audioCodec})`;
+	const audioDetail =
+		audioMode === "transcode"
+			? `Transcoding (${audioCodec})`
+			: audioMode === "bitstream"
+				? `Bitstream (${audioCodec})`
+				: `Direct (${audioCodec})`;
+	const trackDetail = withRange(`Video: Transcoding • Audio: ${audioDetail}`);
 	if (stream.hardware_active) {
 		return {
 			label: `HW ${hardwareName(stream.hardware_acceleration)}`,

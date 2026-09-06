@@ -42,6 +42,9 @@ type ActiveStream struct {
 	VideoMode          string    `json:"video_mode,omitempty"`
 	AudioMode          string    `json:"audio_mode,omitempty"`
 	AudioCodec         string    `json:"audio_codec,omitempty"`
+	SourceVideoRange   string    `json:"source_video_range,omitempty"`
+	OutputVideoRange   string    `json:"output_video_range,omitempty"`
+	ToneMapped         bool      `json:"tone_mapped"`
 	HardwareActive     bool      `json:"hardware_active"`
 	IsActive           bool      `json:"is_active"`
 	ActivityAgeSeconds int64     `json:"activity_age_seconds"`
