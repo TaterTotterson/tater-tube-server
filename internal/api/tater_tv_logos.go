@@ -106,6 +106,9 @@ func (s *Server) handleTubeTVLogoSearch(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleTaterTVChannelLogo(c *fiber.Ctx) error {
+	if playerToken := strings.TrimSpace(c.Query("player_token")); playerToken != "" && strings.TrimSpace(c.Get(fiber.HeaderAuthorization)) == "" {
+		c.Request().Header.Set(fiber.HeaderAuthorization, "Bearer "+playerToken)
+	}
 	cfg, _, ok := s.taterAuthorizedConfig(c)
 	if !ok {
 		return nil
