@@ -126,6 +126,7 @@ const (
 	taterTVGuideRefillThreshold = 2 * time.Hour
 	taterTVGuidePlannerInterval = 5 * time.Minute
 	taterTVGuideRetryInterval   = 5 * time.Minute
+	taterTVGuideFutureTolerance = time.Minute
 	taterTVGuideCacheVersion    = 6
 	taterTVGuideCacheFile       = "tube-tv-guide-cache.json"
 )
@@ -1490,6 +1491,13 @@ func taterTVEnsureGuide(cfg *config.Config, baseURL string, now time.Time) (tate
 				"planned_until", cached.PlannedUntil)
 		}
 	}
+	if taterTVGuideStartsInFuture(taterTVGuideCache, now) {
+		slog.Warn("Discarding future-dated Tube TV guide after a server clock correction",
+			"started_at", taterTVGuideCache.StartedAt,
+			"server_now", now)
+		taterTVGuideCache = nil
+		taterTVDeleteGuideCache(cfg)
+	}
 	if taterTVGuideNeedsRefresh(taterTVGuideCache, now) {
 		targetEndSeconds := taterTVGuideHorizon.Seconds()
 		var existing []taterTVChannel
@@ -1552,6 +1560,9 @@ func taterTVGuideNeedsRefresh(entry *taterTVGuideCacheEntry, now time.Time) bool
 	if entry == nil || entry.StartedAt.IsZero() {
 		return true
 	}
+	if taterTVGuideStartsInFuture(entry, now) {
+		return true
+	}
 	if !entry.UpdatedAt.IsZero() && now.Before(entry.UpdatedAt.Add(taterTVGuideRetryInterval)) {
 		return false
 	}
@@ -1559,6 +1570,11 @@ func taterTVGuideNeedsRefresh(entry *taterTVGuideCacheEntry, now time.Time) bool
 		return true
 	}
 	return now.After(entry.PlannedUntil.Add(-taterTVGuideRefillThreshold))
+}
+
+func taterTVGuideStartsInFuture(entry *taterTVGuideCacheEntry, now time.Time) bool {
+	return entry != nil && !entry.StartedAt.IsZero() && !now.IsZero() &&
+		entry.StartedAt.After(now.Add(taterTVGuideFutureTolerance))
 }
 
 // taterTVCachedGuide returns the last guide immediately. Player home uses this
@@ -1579,6 +1595,13 @@ func taterTVCachedGuide(cfg *config.Config) (taterTVGuideCacheEntry, bool) {
 			return taterTVGuideCacheEntry{}, false
 		}
 		taterTVGuideCache = cached
+	}
+	if taterTVGuideStartsInFuture(taterTVGuideCache, time.Now()) {
+		slog.Warn("Discarding future-dated Tube TV guide from the player home cache",
+			"started_at", taterTVGuideCache.StartedAt)
+		taterTVGuideCache = nil
+		taterTVDeleteGuideCache(cfg)
+		return taterTVGuideCacheEntry{}, false
 	}
 	if len(taterTVGuideCache.Channels) == 0 {
 		return taterTVGuideCacheEntry{}, false
