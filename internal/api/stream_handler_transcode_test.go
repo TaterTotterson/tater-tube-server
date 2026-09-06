@@ -97,6 +97,33 @@ func TestBuildFFmpegVideoOnlyArgsFileSeek(t *testing.T) {
 	require.NotContains(t, joined, "-i pipe:0")
 }
 
+func TestBuildFFmpegVideoOnlyArgsToneMapsHDRAndCopiesAudio(t *testing.T) {
+	args := buildFFmpegVideoOnlyArgsWithToneMap(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_1080p"],
+		"qsv", "h264", "/media/movie.mkv", 0, "hdr10", "sdr",
+	)
+	joined := strings.Join(args, " ")
+
+	require.Contains(t, joined, "-vf tonemapx=tonemap=bt2390")
+	require.Contains(t, joined, "transfer=bt709:matrix=bt709:primaries=bt709:range=tv")
+	require.Contains(t, joined, ",scale=w=1920:h=1080")
+	require.Contains(t, joined, "-color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv")
+	require.Contains(t, joined, "-c:a copy")
+}
+
+func TestBuildFFmpegVideoOnlyArgsUsesPortableToneMapFallback(t *testing.T) {
+	args := buildFFmpegVideoOnlyArgsWithToneMapFilter(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_1080p"],
+		"none", "h264", "/media/movie.mkv", 0, "hlg", "sdr", "zscale",
+	)
+	joined := strings.Join(args, " ")
+
+	require.Contains(t, joined, "zscale=t=linear:npl=100")
+	require.Contains(t, joined, "tonemap=tonemap=mobius")
+	require.Contains(t, joined, "zscale=p=bt709:t=bt709:m=bt709:r=tv")
+	require.Contains(t, joined, "-c:a copy")
+}
+
 func TestBuildFFmpegTranscodeArgsVAAPI(t *testing.T) {
 	args := buildFFmpegTranscodeArgs(config.TranscodingConfig{}, transcodeProfiles["hdmi_1080p"], "vaapi", "", 0)
 	joined := strings.Join(args, " ")

@@ -96,6 +96,104 @@ func TestBuildTaterPlaybackPlanUnknownAudioHonorsCompatibilityMode(t *testing.T)
 	require.Equal(t, "audio", playbackPlanQuery(t, plan.StreamURL).Get("transcode"))
 }
 
+func TestBuildTaterPlaybackPlanHDR10DirectWhenDecoderAndDisplaySupportIt(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Capabilities: taterPlaybackCapabilities{
+			VideoCodecs:       []string{"hevc"},
+			AudioCodecs:       []string{"aac"},
+			VideoHDRFormats:   []string{"hdr10", "hlg"},
+			DisplayHDRFormats: []string{"hdr10"},
+			DisplayHDREnabled: true,
+			MaxVideoBitDepth:  10,
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "hevc", VideoRange: "hdr10", VideoBitDepth: 10,
+		AudioCodec: "aac", AudioChannels: 2,
+	})
+
+	require.Equal(t, "direct", plan.Mode)
+	require.Equal(t, "hdr10", plan.OutputVideoRange)
+	require.False(t, plan.ToneMapped)
+	require.Contains(t, plan.QualityLabel, "HDR10 Direct")
+	require.Equal(t, "hdr10", playbackPlanQuery(t, plan.StreamURL).Get("tater_source_video_range"))
+	require.Empty(t, playbackPlanQuery(t, plan.StreamURL).Get("tater_tone_map"))
+}
+
+func TestBuildTaterPlaybackPlanHDR10ToneMapsVideoAndPreservesAudio(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Capabilities: taterPlaybackCapabilities{
+			VideoCodecs:      []string{"hevc"},
+			AudioCodecs:      []string{"eac3"},
+			MaxVideoBitDepth: 8,
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "hevc", VideoRange: "hdr10", VideoBitDepth: 10,
+		AudioCodec: "eac3", AudioChannels: 6,
+	})
+
+	require.Equal(t, "video_transcode", plan.Mode)
+	require.Equal(t, "transcode", plan.VideoMode)
+	require.Equal(t, "direct", plan.AudioMode)
+	require.Equal(t, "sdr", plan.OutputVideoRange)
+	require.True(t, plan.ToneMapped)
+	require.Contains(t, plan.QualityLabel, "HDR10 → SDR Tone Map")
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Equal(t, "1", query.Get("tater_tone_map"))
+	require.Equal(t, "hdr10", query.Get("tater_source_video_range"))
+	require.Equal(t, "sdr", query.Get("tater_output_video_range"))
+	require.Equal(t, "eac3", query.Get("audio_codec"))
+}
+
+func TestBuildTaterPlaybackPlanDolbyVisionUsesHDR10BaseLayer(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Capabilities: taterPlaybackCapabilities{
+			VideoCodecs:       []string{"hevc"},
+			AudioCodecs:       []string{"aac"},
+			VideoHDRFormats:   []string{"hdr10"},
+			DisplayHDRFormats: []string{"hdr10"},
+			DisplayHDREnabled: true,
+			MaxVideoBitDepth:  10,
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "hevc", VideoRange: "dolby_vision", VideoBitDepth: 10,
+		DolbyVisionProfile: 7, AudioCodec: "aac", AudioChannels: 2,
+	})
+
+	require.Equal(t, "direct", plan.Mode)
+	require.Equal(t, "hdr10", plan.OutputVideoRange)
+	require.False(t, plan.ToneMapped)
+	require.Contains(t, plan.QualityLabel, "Dolby Vision → HDR10")
+}
+
+func TestTaterPlaybackVideoRangeDetectsHDRAndDolbyVision(t *testing.T) {
+	videoRange, profile, compatibilityID := taterPlaybackVideoRange(
+		"smpte2084", "bt2020", nil,
+	)
+	require.Equal(t, "hdr10", videoRange)
+	require.Zero(t, profile)
+	require.Zero(t, compatibilityID)
+
+	videoRange, profile, compatibilityID = taterPlaybackVideoRange(
+		"smpte2084", "bt2020", []taterFFprobePlaybackSideData{{
+			SideDataType:               "DOVI configuration record",
+			DolbyVisionProfile:         8,
+			DolbyVisionCompatibilityID: 1,
+		}},
+	)
+	require.Equal(t, "dolby_vision", videoRange)
+	require.Equal(t, 8, profile)
+	require.Equal(t, 1, compatibilityID)
+}
+
+func TestTaterPlaybackBitDepthUsesPixelFormatFallback(t *testing.T) {
+	require.Equal(t, 12, taterPlaybackBitDepth("", "yuv420p12le"))
+	require.Equal(t, 10, taterPlaybackBitDepth("10", "yuv420p"))
+	require.Equal(t, 8, taterPlaybackBitDepth("", "yuv420p"))
+}
+
 func playbackPlanQuery(t *testing.T, rawURL string) url.Values {
 	t.Helper()
 	u, err := url.Parse(rawURL)
