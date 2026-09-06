@@ -5,7 +5,9 @@
 </p>
 
 <p align="center">
-  <a href="https://tatertube.tv">tatertube.tv</a>
+  <a href="https://tatertube.tv">
+    <img alt="Visit Tater Tube" src="https://img.shields.io/badge/Tater%20Tube-Visit%20Website-F28C28?style=for-the-badge&logo=googlechrome&logoColor=white" />
+  </a>
 </p>
 
 <p align="center">
