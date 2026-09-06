@@ -23,6 +23,15 @@ The server UI is available at `http://localhost:8080`.
 Configure NNTP providers and the Newznab Stream catalog from the web UI, then
 enter the server URL and download key in Tater Tube's Usenet module.
 
+## Date and Time
+
+The running container uses the Docker host's system clock; the image does not
+store or maintain its own clock. Keep automatic time synchronization/NTP
+enabled on the Docker host. If the host clock is corrected, restart Tater Tube
+Server so its in-memory guide and scheduled work restart from the corrected
+time. A `TZ` container setting changes the displayed local timezone only and
+does not repair an inaccurate host clock.
+
 ## Volume
 
 `/config` stores `config.yaml`, the database, logs, metadata, imports, and
