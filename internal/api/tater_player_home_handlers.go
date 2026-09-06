@@ -58,6 +58,7 @@ type taterPlayerHomeChannel struct {
 	Title     string                  `json:"title"`
 	StreamURL string                  `json:"streamUrl,omitempty"`
 	LogoPath  string                  `json:"logoPath,omitempty"`
+	LogoURL   string                  `json:"logoUrl,omitempty"`
 	Now       *taterPlayerHomeProgram `json:"now,omitempty"`
 	Next      *taterPlayerHomeProgram `json:"next,omitempty"`
 }
@@ -293,6 +294,7 @@ func taterPlayerHomeChannels(cfg *config.Config, baseURL, playerToken string, no
 			Title:     channel.Title,
 			StreamURL: taterTVChannelStreamURL(baseURL, channel.Number, playerToken),
 			LogoPath:  channel.LogoPath,
+			LogoURL:   taterTVChannelLogoURL(baseURL, channel.Number, playerToken, channel.LogoPath),
 		}
 		currentIndex := -1
 		nextIndex := -1

@@ -49,6 +49,8 @@ const DEFAULT_TUBE_TV: TubeTVConfig = {
 	commercials_enabled: true,
 	midroll_commercials: false,
 	channel_logos_enabled: true,
+	auto_channel_logo_overlay_enabled: true,
+	auto_channel_logo_position: "bottom_right",
 	commercial_categories: [],
 	custom_channels: [],
 };
@@ -120,8 +122,10 @@ function logoPreviewURL(path?: string) {
 	);
 }
 
-function normalizeLogoPosition(value?: string) {
-	return LOGO_POSITION_OPTIONS.some((option) => option.value === value) ? value : "bottom_right";
+function normalizeLogoPosition(value?: string): string {
+	return LOGO_POSITION_OPTIONS.some((option) => option.value === value)
+		? (value as string)
+		: "bottom_right";
 }
 
 function normalize(config: ConfigResponse): TubeTVConfig {
@@ -132,6 +136,8 @@ function normalize(config: ConfigResponse): TubeTVConfig {
 		commercials_enabled: source.commercials_enabled ?? true,
 		midroll_commercials: source.midroll_commercials ?? false,
 		channel_logos_enabled: source.channel_logos_enabled ?? true,
+		auto_channel_logo_overlay_enabled: source.auto_channel_logo_overlay_enabled ?? true,
+		auto_channel_logo_position: normalizeLogoPosition(source.auto_channel_logo_position),
 		commercial_categories: source.commercial_categories ?? [],
 		custom_channels: (source.custom_channels ?? []).map((channel) => ({
 			id: channel.id || slug(channel.title || "channel"),
@@ -732,7 +738,7 @@ export function TubeTVConfigSection({
 							/>
 						</label>
 						<label className="flex items-center justify-between gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4">
-							<span className="font-bold text-sm">Channel Logos</span>
+							<span className="font-bold text-sm">Custom Channel Logos</span>
 							<input
 								type="checkbox"
 								className="toggle toggle-primary"
@@ -743,6 +749,42 @@ export function TubeTVConfigSection({
 								}
 							/>
 						</label>
+					</div>
+					<div className="mt-4 grid gap-4 rounded-xl border border-base-300 bg-base-100/70 p-4 md:grid-cols-[1fr_auto] md:items-center">
+						<div>
+							<div className="font-bold text-sm">Auto Channel Logo Overlay</div>
+							<p className="mt-1 text-base-content/60 text-xs">
+								Show the Tater-themed channel logo over video. The same logo is always used in the guide.
+							</p>
+						</div>
+						<div className="flex flex-wrap items-center gap-3">
+							<select
+								className="select select-bordered select-sm min-w-40"
+								value={formData.auto_channel_logo_position}
+								disabled={isReadOnly || !formData.auto_channel_logo_overlay_enabled}
+								onChange={(event) =>
+									update({ ...formData, auto_channel_logo_position: event.target.value })
+								}
+							>
+								{LOGO_POSITION_OPTIONS.map((option) => (
+									<option key={option.value} value={option.value}>
+										{option.label}
+									</option>
+								))}
+							</select>
+							<input
+								type="checkbox"
+								className="toggle toggle-primary"
+								checked={formData.auto_channel_logo_overlay_enabled}
+								disabled={isReadOnly}
+								onChange={(event) =>
+									update({
+										...formData,
+										auto_channel_logo_overlay_enabled: event.target.checked,
+									})
+								}
+							/>
+						</div>
 					</div>
 				</div>
 			)}

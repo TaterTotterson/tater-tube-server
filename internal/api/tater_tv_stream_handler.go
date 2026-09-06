@@ -182,7 +182,7 @@ func (h *TaterTVStreamHandler) serveItem(w http.ResponseWriter, r *http.Request)
 	}
 
 	logoFile := ""
-	if taterTVChannelLogosEnabled(cfg) && channel.LogoPath != "" {
+	if taterTVChannelLogoEnabled(cfg, channel) && channel.LogoPath != "" {
 		if resolvedLogo, logoErr := taterTVResolveLogoFile(streamReq.Context(), cfg, channel.LogoPath); logoErr == nil {
 			logoFile = resolvedLogo
 		} else {
@@ -370,7 +370,7 @@ func (h *TaterTVStreamHandler) serveChannel(w http.ResponseWriter, r *http.Reque
 			"hardware_acceleration", effectiveAccel,
 			"video_codec", videoCodec)
 		logoFile := ""
-		if taterTVChannelLogosEnabled(cfg) && channel.LogoPath != "" {
+		if taterTVChannelLogoEnabled(cfg, channel) && channel.LogoPath != "" {
 			resolvedLogo, logoErr := taterTVResolveLogoFile(streamReq.Context(), cfg, channel.LogoPath)
 			if logoErr != nil {
 				slog.WarnContext(streamReq.Context(), "Tube TV channel logo unavailable",
