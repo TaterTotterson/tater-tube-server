@@ -56,6 +56,8 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 	require.NoError(t, os.WriteFile(moviePath, []byte("media"), 0o644))
 	posterBytes := []byte("poster-image")
 	require.NoError(t, os.WriteFile(filepath.Join(movieDir, "poster.jpg"), posterBytes, 0o644))
+	backdropBytes := []byte("backdrop-image")
+	require.NoError(t, os.WriteFile(filepath.Join(movieDir, "backdrop.jpg"), backdropBytes, 0o644))
 
 	localEnabled := true
 	tubeTVDisabled := false
@@ -147,6 +149,8 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 	require.NotEmpty(t, envelope.Data.Libraries)
 	require.Contains(t, envelope.Data.ContinueWatching[0].Poster, "/api/v1/player/artwork/local")
 	require.Contains(t, envelope.Data.ContinueWatching[0].Poster, "player_token=home-token")
+	require.Contains(t, envelope.Data.ContinueWatching[0].Backdrop, "/api/v1/player/artwork/local")
+	require.Contains(t, envelope.Data.ContinueWatching[0].Backdrop, "kind=backdrop")
 
 	posterURL, err := url.Parse(envelope.Data.ContinueWatching[0].Poster)
 	require.NoError(t, err)
@@ -157,6 +161,15 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 	servedPoster, err := io.ReadAll(artworkResponse.Body)
 	require.NoError(t, err)
 	require.Equal(t, posterBytes, servedPoster)
+
+	backdropURL, err := url.Parse(envelope.Data.ContinueWatching[0].Backdrop)
+	require.NoError(t, err)
+	backdropResponse, err := app.Test(httptest.NewRequest(http.MethodGet, backdropURL.RequestURI(), nil))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, backdropResponse.StatusCode)
+	servedBackdrop, err := io.ReadAll(backdropResponse.Body)
+	require.NoError(t, err)
+	require.Equal(t, backdropBytes, servedBackdrop)
 
 	libraryRequest := httptest.NewRequest(http.MethodGet, "http://tube.local/api/v1/player/library", nil)
 	libraryRequest.Header.Set(fiber.HeaderAuthorization, "Bearer home-token")
@@ -213,11 +226,14 @@ func TestTaterPlayerLocalArtworkRejectsEscapingPath(t *testing.T) {
 func TestTaterPlayerHomeProgramReportsCurrentProgress(t *testing.T) {
 	startedAt := time.Date(2026, time.September, 2, 12, 0, 0, 0, time.UTC)
 	program := taterPlayerHomeProgramFromSchedule(nil, "", "", startedAt, map[string]any{
-		"title":     "Saturday Cartoons",
-		"kind":      "episode",
-		"mediaType": "episode",
-		"start":     100.0,
-		"end":       200.0,
+		"title":        "Saturday Cartoons",
+		"kind":         "episode",
+		"mediaType":    "episode",
+		"poster":       "https://art.example/poster.jpg",
+		"backdrop":     "https://art.example/backdrop.jpg",
+		"episodeStill": "https://art.example/episode.jpg",
+		"start":        100.0,
+		"end":          200.0,
 	}, 125)
 
 	require.NotNil(t, program)
@@ -225,6 +241,8 @@ func TestTaterPlayerHomeProgramReportsCurrentProgress(t *testing.T) {
 	require.Equal(t, 25.0, program.ProgressPercent)
 	require.Equal(t, startedAt.Add(100*time.Second), program.StartsAt)
 	require.True(t, strings.EqualFold("episode", program.Kind))
+	require.Equal(t, "https://art.example/backdrop.jpg", program.Backdrop)
+	require.Equal(t, "https://art.example/episode.jpg", program.EpisodeStill)
 }
 
 func TestTaterPlayerHomeChannelsNeverWaitsForGuideRefresh(t *testing.T) {
