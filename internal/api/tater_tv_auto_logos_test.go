@@ -2,12 +2,15 @@ package api
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/gofiber/fiber/v2"
 )
 
 func TestTaterTVAutoLogoFileMatchesThemedAndBaseChannels(t *testing.T) {
@@ -84,5 +87,26 @@ func TestTaterTVAutoLogoPlaybackSettingIsIndependent(t *testing.T) {
 	}
 	if !taterTVChannelLogoEnabled(cfg, taterTVChannel{}) {
 		t.Fatal("custom channel overlay setting should remain enabled")
+	}
+}
+
+func TestTaterTVChannelLogoAcceptsPlayerTokenFromImageURL(t *testing.T) {
+	cfg := config.DefaultConfig(t.TempDir())
+	cfg.Players.Paired = []config.PlayerConfig{{
+		ID:        "guide-player",
+		TokenHash: hashTaterSecret("guide-token"),
+	}}
+	server := &Server{configManager: &mockConfigManager{cfg: cfg}}
+	app := fiber.New()
+	app.Get("/api/v1/player/artwork/channel-logo", server.handleTaterTVChannelLogo)
+
+	request := httptest.NewRequest(http.MethodGet,
+		"/api/v1/player/artwork/channel-logo?player_token=guide-token", nil)
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("authenticated image request status = %d, want %d", response.StatusCode, http.StatusBadRequest)
 	}
 }
