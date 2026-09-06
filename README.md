@@ -1,7 +1,7 @@
 # Tater Tube Server
 
 <p align="center">
-  <img src="./frontend/public/tater-tube-logo.png" alt="Tater Tube" width="520" />
+  <img src="./frontend/public/tater-tube-logo-leaning-transparent.png" alt="Tater Tube" width="520" />
 </p>
 
 <p align="center">
