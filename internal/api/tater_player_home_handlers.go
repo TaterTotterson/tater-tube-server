@@ -44,6 +44,10 @@ type taterPlayerHomeProgram struct {
 	Kind            string    `json:"kind,omitempty"`
 	MediaType       string    `json:"mediaType,omitempty"`
 	Poster          string    `json:"poster,omitempty"`
+	Backdrop        string    `json:"backdrop,omitempty"`
+	SeriesPoster    string    `json:"seriesPoster,omitempty"`
+	SeasonPoster    string    `json:"seasonPoster,omitempty"`
+	EpisodeStill    string    `json:"episodeStill,omitempty"`
 	StartsAt        time.Time `json:"startsAt"`
 	EndsAt          time.Time `json:"endsAt"`
 	ProgressPercent float64   `json:"progressPercent,omitempty"`
@@ -341,14 +345,26 @@ func taterPlayerHomeProgramFromSchedule(cfg *config.Config, baseURL, playerToken
 		program.ProgressPercent = ((elapsed - start) / (end - start)) * 100
 	}
 	item := taterUsenetItem{
-		Poster:      rowString(row, "poster"),
-		CategoryID:  rowString(row, "categoryId"),
-		SourceIndex: int(rowFloat(row, "sourceIndex")),
-		Path:        rowString(row, "path"),
+		MediaType:    program.MediaType,
+		Poster:       rowString(row, "poster"),
+		Backdrop:     rowString(row, "backdrop"),
+		SeriesPoster: rowString(row, "seriesPoster"),
+		SeasonPoster: rowString(row, "seasonPoster"),
+		EpisodeStill: rowString(row, "episodeStill"),
+		CategoryID:   rowString(row, "categoryId"),
+		SourceIndex:  int(rowFloat(row, "sourceIndex")),
+		Path:         rowString(row, "path"),
+	}
+	if item.MediaType == "" {
+		item.MediaType = program.Kind
 	}
 	items := []taterUsenetItem{item}
 	decorateTaterPlayerHomeItems(cfg, baseURL, playerToken, items)
 	program.Poster = items[0].Poster
+	program.Backdrop = items[0].Backdrop
+	program.SeriesPoster = items[0].SeriesPoster
+	program.SeasonPoster = items[0].SeasonPoster
+	program.EpisodeStill = items[0].EpisodeStill
 	return program
 }
 
@@ -361,12 +377,14 @@ func decorateTaterPlayerHomeItems(cfg *config.Config, baseURL, playerToken strin
 		}
 		category, categoryFound := taterLocalMediaCategory(cfg, taterRawLocalCategoryID(item.CategoryID))
 		isTV := categoryFound && strings.EqualFold(strings.TrimSpace(category.LibraryType), "tv")
+		if strings.TrimSpace(item.Backdrop) == "" {
+			item.Backdrop = taterPlayerAvailableLocalArtworkURL(
+				cfg, baseURL, playerToken, item.CategoryID, item.SourceIndex, item.Path, "backdrop",
+			)
+		}
 		if isTV {
 			item.SeriesPoster = taterPlayerAvailableLocalArtworkURL(
 				cfg, baseURL, playerToken, item.CategoryID, item.SourceIndex, item.Path, "series-poster",
-			)
-			item.Backdrop = taterPlayerAvailableLocalArtworkURL(
-				cfg, baseURL, playerToken, item.CategoryID, item.SourceIndex, item.Path, "backdrop",
 			)
 			mediaType := strings.ToLower(strings.TrimSpace(item.MediaType))
 			if mediaType == "season" || mediaType == "episode" {
