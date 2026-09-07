@@ -84,6 +84,7 @@ func taterContinueWatchingItems(cfg *config.Config, baseURL, playerToken string)
 	for _, state := range states {
 		row := taterPlayStateToItem(state, baseURL, playerToken)
 		if row.PlayStateID != "" {
+			taterApplyPlayStateMetadata(cfg, &row)
 			rows = append(rows, row)
 		}
 	}
@@ -150,6 +151,69 @@ func (s *Server) handleTaterPlayStateSave(c *fiber.Ctx) error {
 	}
 
 	return RespondSuccess(c, fiber.Map{"saved": true})
+}
+
+func (s *Server) handleTaterPlayStateClear(c *fiber.Ctx) error {
+	cfg, _, ok := s.taterAuthorizedConfig(c)
+	if !ok {
+		return nil
+	}
+
+	var req taterPlayState
+	if err := c.BodyParser(&req); err != nil {
+		return RespondValidationError(c, "Invalid play state", err.Error())
+	}
+
+	req.CategoryID = "local:" + taterRawLocalCategoryID(req.CategoryID)
+	req.Path = cleanLocalRelativePath(req.Path)
+	req.MediaType = strings.TrimSpace(req.MediaType)
+	req.ID = strings.TrimSpace(req.ID)
+	req.SeriesID = strings.TrimSpace(req.SeriesID)
+	if req.ID == "" && req.Path != "" {
+		req.ID = taterLocalPlayStateID(req.CategoryID, req.SourceIndex, req.Path)
+	}
+	if req.SeriesID == "" && strings.EqualFold(req.MediaType, "episode") && req.Path != "" {
+		req.SeriesID = taterLocalSeriesStateID(req.CategoryID, req.SourceIndex, req.Path)
+	}
+
+	ids := map[string]bool{}
+	for _, id := range []string{req.ID, req.SeriesID} {
+		if id = strings.TrimSpace(id); id != "" {
+			ids[id] = true
+		}
+	}
+	if req.Path != "" {
+		if id := taterLocalPlayStateID(req.CategoryID, req.SourceIndex, req.Path); id != "" {
+			ids[id] = true
+		}
+		if strings.EqualFold(req.MediaType, "episode") {
+			if id := taterLocalSeriesStateID(req.CategoryID, req.SourceIndex, req.Path); id != "" {
+				ids[id] = true
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return RespondValidationError(c, "Invalid play state", "playStateId or local path is required")
+	}
+
+	store, err := loadTaterPlayStateStore(cfg)
+	if err != nil {
+		return RespondServiceUnavailable(c, "Failed to load play state", err.Error())
+	}
+	cleared := false
+	for id := range ids {
+		if _, exists := store.Items[id]; exists {
+			delete(store.Items, id)
+			cleared = true
+		}
+	}
+	if cleared {
+		if err := saveTaterPlayStateStore(cfg, store); err != nil {
+			return RespondServiceUnavailable(c, "Failed to clear play state", err.Error())
+		}
+	}
+
+	return RespondSuccess(c, fiber.Map{"cleared": true})
 }
 
 func (s *Server) handleTaterPlayStateNext(c *fiber.Ctx) error {
@@ -316,6 +380,22 @@ func taterPlayStateToItem(state taterPlayState, baseURL, playerToken string) tat
 	}
 	taterApplyPlayStateToItem(&row, state)
 	return row
+}
+
+func taterApplyPlayStateMetadata(cfg *config.Config, item *taterUsenetItem) {
+	if cfg == nil || item == nil || strings.TrimSpace(item.Path) == "" {
+		return
+	}
+	category, ok := taterLocalMediaCategory(cfg, taterRawLocalCategoryID(item.CategoryID))
+	if !ok {
+		return
+	}
+	roots := taterLocalMediaCategoryPaths(category)
+	if item.SourceIndex < 0 || item.SourceIndex >= len(roots) {
+		return
+	}
+	mediaPath := filepath.Join(roots[item.SourceIndex], filepath.FromSlash(item.Path))
+	taterApplyLocalMetadata(mediaPath, item)
 }
 
 func taterContinueDisplayState(cfg *config.Config, state taterPlayState) (taterPlayState, bool) {

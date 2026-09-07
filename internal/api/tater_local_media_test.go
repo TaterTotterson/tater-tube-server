@@ -186,6 +186,95 @@ func TestTaterAttachLocalPlayStatesUsesLatestSeriesEpisode(t *testing.T) {
 	}
 }
 
+func TestTaterContinueWatchingUsesLocalMetadata(t *testing.T) {
+	root := t.TempDir()
+	movieDir := filepath.Join(root, "Moonrise.Manor.2024")
+	if err := os.MkdirAll(movieDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	moviePath := filepath.Join(movieDir, "Moonrise.Manor.2024.mkv")
+	if err := os.WriteFile(moviePath, []byte("media"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(movieDir, "movie.nfo"), []byte(
+		`<movie><title>Moonrise Manor</title><year>2024</year><plot>A quiet mystery unfolds.</plot><mpaa>PG-13</mpaa><rating>7.8</rating><genre>Mystery</genre></movie>`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	configDir := t.TempDir()
+	cfg := config.DefaultConfig(configDir)
+	cfg.LocalMedia.Enabled = boolPtr(true)
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID: "movies", Name: "Movies", LibraryType: "movies", Paths: []string{root}, Enabled: boolPtr(true),
+	}}
+	relPath := "Moonrise.Manor.2024/Moonrise.Manor.2024.mkv"
+	stateID := taterLocalPlayStateID("local:movies", 0, relPath)
+	if err := saveTaterPlayStateStore(cfg, taterPlayStateStore{Items: map[string]taterPlayState{
+		stateID: {
+			ID: stateID, Title: "Moonrise Manor", MediaType: "movie", CategoryID: "local:movies",
+			Path: relPath, PositionMS: 60_000, DurationMS: 600_000, UpdatedAt: time.Now().UTC(),
+		},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := taterContinueWatchingItems(cfg, "http://server", "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Description != "A quiet mystery unfolds." || rows[0].Date != "2024" {
+		t.Fatalf("expected local metadata on continue-watching item, got %#v", rows)
+	}
+	if rows[0].ContentRating != "PG-13" || rows[0].CommunityRating != 7.8 {
+		t.Fatalf("expected content and community ratings, got %#v", rows[0])
+	}
+}
+
+func TestTaterPlayStateClearRemovesSavedProgress(t *testing.T) {
+	configDir := t.TempDir()
+	cfg := config.DefaultConfig(configDir)
+	cfg.Players.Paired = []config.PlayerConfig{{
+		ID: "local-player", Name: "Local Player", TokenHash: hashTaterSecret("clear-token"),
+	}}
+	relPath := "Moonrise Manor/Moonrise Manor.mkv"
+	stateID := taterLocalPlayStateID("local:movies", 0, relPath)
+	if err := saveTaterPlayStateStore(cfg, taterPlayStateStore{Items: map[string]taterPlayState{
+		stateID: {
+			ID: stateID, Title: "Moonrise Manor", MediaType: "movie", CategoryID: "local:movies",
+			Path: relPath, PositionMS: 60_000, DurationMS: 600_000, UpdatedAt: time.Now().UTC(),
+		},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	server := &Server{configManager: &mockConfigManager{cfg: cfg}}
+	app := fiber.New()
+	app.Delete("/playstate", server.handleTaterPlayStateClear)
+	body, err := json.Marshal(taterPlayState{
+		ID: stateID, MediaType: "movie", CategoryID: "local:movies", Path: relPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/playstate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer clear-token")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected clear request to succeed, got %d", resp.StatusCode)
+	}
+	store, err := loadTaterPlayStateStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := store.Items[stateID]; exists {
+		t.Fatalf("expected play state %q to be removed", stateID)
+	}
+}
+
 func TestTaterContinueDisplayStateAdvancesCompletedEpisode(t *testing.T) {
 	root := t.TempDir()
 	seasonDir := filepath.Join(root, "Some.Show.2020", "Season 01")
