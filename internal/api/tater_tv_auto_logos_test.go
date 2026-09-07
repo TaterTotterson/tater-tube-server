@@ -31,6 +31,24 @@ func TestTaterTVAutoLogoFileMatchesThemedAndBaseChannels(t *testing.T) {
 	}
 }
 
+func TestTaterTVDecadeLabelsMatchThemedLogoCatalog(t *testing.T) {
+	tests := map[int]string{
+		1950: "50S",
+		1960: "60S",
+		1970: "70S",
+		1980: "80S",
+		1990: "90S",
+		2000: "2000S",
+		2010: "2010S",
+		2020: "2020S",
+	}
+	for decade, want := range tests {
+		if got := taterTVDecadeLabel(decade); got != want {
+			t.Fatalf("taterTVDecadeLabel(%d) = %q, want %q", decade, got, want)
+		}
+	}
+}
+
 func TestTaterTVAutoLogoCatalogAssetsAreEmbedded(t *testing.T) {
 	files := []string{"movies.png", "tv.png"}
 	for _, logo := range taterTVAutoLogoNames {

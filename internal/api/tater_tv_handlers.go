@@ -130,7 +130,7 @@ const (
 	taterTVGuidePlannerInterval = 5 * time.Minute
 	taterTVGuideRetryInterval   = 5 * time.Minute
 	taterTVGuideFutureTolerance = time.Minute
-	taterTVGuideCacheVersion    = 7
+	taterTVGuideCacheVersion    = 8
 	taterTVGuideCacheFile       = "tube-tv-guide-cache.json"
 )
 
@@ -1953,7 +1953,7 @@ func taterTVDecadeLabel(decade int) string {
 	if decade >= 2000 {
 		return fmt.Sprintf("%dS", decade)
 	}
-	return fmt.Sprintf("%02dS", (decade/10)%100)
+	return fmt.Sprintf("%02dS", decade%100)
 }
 
 func taterTVDedupeSources(sources []taterTVSource) []taterTVSource {

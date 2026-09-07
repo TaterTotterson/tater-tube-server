@@ -241,6 +241,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/tater/playstate/continue", s.handleTaterPlayStateContinue)
 	api.Post("/tater/playstate/next", s.handleTaterPlayStateNext)
 	api.Post("/tater/playstate", s.handleTaterPlayStateSave)
+	api.Delete("/tater/playstate", s.handleTaterPlayStateClear)
 	api.Get("/tater/music/libraries", s.handleTaterMusicLibraries)
 	api.Get("/tater/music/albums", s.handleTaterMusicAlbums)
 	api.Get("/tater/music/tracks", s.handleTaterMusicTracks)
