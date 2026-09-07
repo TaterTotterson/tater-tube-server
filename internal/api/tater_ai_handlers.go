@@ -76,6 +76,7 @@ type taterRecommendationRequest struct {
 	ProfileID      string                         `json:"profile_id"`
 	AssistantName  string                         `json:"assistant_name"`
 	Summary        string                         `json:"summary"`
+	PicksBriefing  string                         `json:"picks_briefing"`
 	BootSummary    string                         `json:"boot_summary"`
 	ExpiresInHours int                            `json:"expires_in_hours"`
 	Items          []taterRecommendationSelection `json:"items"`
@@ -334,6 +335,10 @@ func (s *Server) handleTaterCoreSaveRecommendations(c *fiber.Ctx) error {
 	if len(req.Items) == 0 {
 		return RespondValidationError(c, "At least one recommendation is required", "")
 	}
+	picksBriefing := cleanTaterText(req.PicksBriefing)
+	if picksBriefing == "" {
+		return RespondValidationError(c, "Tater Picks group briefing is required", "")
+	}
 	cfg := s.configManager.GetConfig()
 	if cfg == nil {
 		return RespondServiceUnavailable(c, "Configuration not available", "")
@@ -357,8 +362,9 @@ func (s *Server) handleTaterCoreSaveRecommendations(c *fiber.Ctx) error {
 	}
 	batch := database.TaterRecommendationBatch{
 		ID: batchID, ProfileID: profileID, CoreID: core.ID,
-		Summary:     cleanTaterText(req.Summary),
-		BootSummary: cleanTaterText(req.BootSummary), GeneratedAt: now,
+		Summary:       cleanTaterText(req.Summary),
+		PicksBriefing: picksBriefing,
+		BootSummary:   cleanTaterText(req.BootSummary), GeneratedAt: now,
 		ExpiresAt: now.Add(time.Duration(hours) * time.Hour),
 	}
 	items := make([]database.TaterRecommendation, 0, min(len(req.Items), 12))
@@ -404,6 +410,9 @@ func (s *Server) handleTaterPlayerRecommendations(c *fiber.Ctx) error {
 	if _, ok := findTaterPlayerByToken(cfg, token); !ok {
 		return RespondUnauthorized(c, "Invalid player token", "")
 	}
+	if s.queueRepo == nil {
+		return RespondServiceUnavailable(c, "Database not available", "")
+	}
 	profileID := cleanTaterProfileID(c.Query("profile_id"))
 	batch, items, err := s.queueRepo.GetActiveTaterRecommendations(c.Context(), profileID, time.Now().UTC())
 	if err == sql.ErrNoRows {
@@ -422,10 +431,7 @@ func (s *Server) handleTaterPlayerRecommendations(c *fiber.Ctx) error {
 		if err := json.Unmarshal([]byte(item.LaunchJSON), &launch); err != nil {
 			continue
 		}
-		categoryID := taterRawLocalCategoryID(launch.CategoryID)
-		if launch.Type == "localFile" && categoryID != "" {
-			launch.StreamURL = taterLocalStreamURL(baseURL, categoryID, launch.SourceIndex, launch.Path, token)
-		}
+		launch = refreshTaterRecommendationLaunch(cfg, baseURL, token, launch)
 		raw, _ := json.Marshal(launch)
 		launchMap := map[string]any{}
 		_ = json.Unmarshal(raw, &launchMap)
@@ -492,7 +498,7 @@ func (s *Server) handleTaterPlayerCreateTTSRequest(c *fiber.Ctx) error {
 				)
 			}
 		} else {
-			text, err = s.queueRepo.GetActiveTaterRecommendationSummary(
+			text, err = s.queueRepo.GetActiveTaterPicksBriefing(
 				c.Context(), batchID, profileID, time.Now().UTC(),
 			)
 		}
