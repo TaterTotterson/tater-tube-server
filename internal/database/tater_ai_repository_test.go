@@ -65,8 +65,10 @@ func TestTaterAIRepositoryLifecycle(t *testing.T) {
 
 	batch := TaterRecommendationBatch{
 		ID: "batch-1", ProfileID: "household", CoreID: "core-1",
-		Summary: "Movie night", BootSummary: "You have been watching movies. Try Another Movie next.",
-		GeneratedAt: now, ExpiresAt: now.Add(24 * time.Hour),
+		Summary:       "Movie night",
+		PicksBriefing: "You have been enjoying mysteries, so these picks keep that relaxed puzzle-box feeling going.",
+		BootSummary:   "You have been watching movies. Try Another Movie next.",
+		GeneratedAt:   now, ExpiresAt: now.Add(24 * time.Hour),
 	}
 	require.NoError(t, repo.SaveTaterRecommendations(ctx, batch, []TaterRecommendation{{
 		ID: "pick-1", BatchID: batch.ID, Rank: 1, CandidateID: "candidate-1",
@@ -77,6 +79,7 @@ func TestTaterAIRepositoryLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, batch.ID, activeBatch.ID)
 	require.Equal(t, batch.BootSummary, activeBatch.BootSummary)
+	require.Equal(t, batch.PicksBriefing, activeBatch.PicksBriefing)
 	require.Equal(t, "Totty", activeBatch.AssistantName)
 	require.Len(t, picks, 1)
 	require.Equal(t, "pick-1", picks[0].ID)
@@ -90,6 +93,9 @@ func TestTaterAIRepositoryLifecycle(t *testing.T) {
 	summary, err := repo.GetActiveTaterRecommendationSummary(ctx, "batch-1", "household", now)
 	require.NoError(t, err)
 	require.Equal(t, "Movie night", summary)
+	picksBriefing, err := repo.GetActiveTaterPicksBriefing(ctx, "batch-1", "household", now)
+	require.NoError(t, err)
+	require.Equal(t, batch.PicksBriefing, picksBriefing)
 	bootSummary, err := repo.GetActiveTaterRecommendationBootSummary(ctx, "batch-1", "household", now)
 	require.NoError(t, err)
 	require.Equal(t, batch.BootSummary, bootSummary)
