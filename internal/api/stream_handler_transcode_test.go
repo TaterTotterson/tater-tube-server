@@ -72,6 +72,11 @@ func TestBuildFFmpegAudioOnlyVideoArgsFileSeek(t *testing.T) {
 	require.NotContains(t, joined, "-i pipe:0")
 }
 
+func TestBuildFFmpegAudioOnlyVideoArgsSelectsRequestedTrack(t *testing.T) {
+	args := buildFFmpegAudioOnlyVideoArgsWithTrack("192k", "", 0, 2)
+	require.Contains(t, strings.Join(args, " "), "-map 0:a:2?")
+}
+
 func TestBuildFFmpegVideoOnlyArgsCopiesAudio(t *testing.T) {
 	args := buildFFmpegVideoOnlyArgs(
 		config.TranscodingConfig{}, transcodeProfiles["hdmi_1080p"],
@@ -95,6 +100,14 @@ func TestBuildFFmpegVideoOnlyArgsFileSeek(t *testing.T) {
 
 	require.Contains(t, joined, "-ss 12.500 -i /media/movie.mkv")
 	require.NotContains(t, joined, "-i pipe:0")
+}
+
+func TestBuildFFmpegVideoOnlyArgsSelectsRequestedTrack(t *testing.T) {
+	args := buildFFmpegVideoOnlyArgsWithToneMapFilterAndAudioTrack(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_1080p"],
+		"none", "h264", "", 0, "", "", "", 3,
+	)
+	require.Contains(t, strings.Join(args, " "), "-map 0:a:3?")
 }
 
 func TestBuildFFmpegVideoOnlyArgsToneMapsHDRAndCopiesAudio(t *testing.T) {
@@ -235,6 +248,15 @@ func TestShouldTranscodeRequestAcceptsVideoOnlyMode(t *testing.T) {
 
 	require.True(t, isVideoOnlyTranscodeRequest(req))
 	require.True(t, handler.shouldTranscode(req, "/media/movie.mkv"))
+}
+
+func TestRequestedTaterAudioTrack(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/files/stream/movie.mkv?tater_audio_track=4", nil)
+	require.Equal(t, 4, requestedTaterAudioTrack(req))
+	require.Equal(t, "0:a:4?", taterAudioMap(requestedTaterAudioTrack(req), true))
+
+	req = httptest.NewRequest("GET", "/api/files/stream/movie.mkv?tater_audio_track=-1", nil)
+	require.Zero(t, requestedTaterAudioTrack(req))
 }
 
 func TestShouldTranscodeRequestCanForceOff(t *testing.T) {

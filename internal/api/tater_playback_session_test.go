@@ -29,6 +29,76 @@ func TestBuildTaterPlaybackPlanDirect(t *testing.T) {
 	require.NotContains(t, plan.StreamURL, "transcode=")
 }
 
+func TestBuildTaterPlaybackPlanPrefersBestEnglishAudioTrack(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Capabilities: taterPlaybackCapabilities{
+			VideoCodecs:  []string{"h264"},
+			AudioCodecs:  []string{"aac", "truehd"},
+			AudioDownmix: true,
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "h264",
+		AudioTracks: []taterPlaybackAudioTrack{
+			{Index: 0, Codec: "truehd", Channels: 8, Language: "jpn", Default: true},
+			{Index: 1, Codec: "aac", Channels: 2, Language: "eng"},
+			{Index: 2, Codec: "truehd", Channels: 8, Language: "en-US"},
+			{Index: 3, Codec: "truehd", Channels: 8, Language: "eng", Commentary: true},
+		},
+	})
+
+	require.Equal(t, 2, plan.SelectedAudioTrack)
+	require.Equal(t, "truehd", plan.Source.AudioCodec)
+	require.Equal(t, 8, plan.Source.AudioChannels)
+	require.Equal(t, "2", playbackPlanQuery(t, plan.StreamURL).Get("tater_audio_track"))
+}
+
+func TestBuildTaterPlaybackPlanPrefersCompatibleEnglishSurroundTrack(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Capabilities: taterPlaybackCapabilities{
+			VideoCodecs:      []string{"h264"},
+			AudioCodecs:      []string{"aac", "ac3", "eac3"},
+			MaxAudioChannels: 6,
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "h264",
+		AudioTracks: []taterPlaybackAudioTrack{
+			{Index: 0, Codec: "truehd", Channels: 8, Language: "eng", Default: true},
+			{Index: 1, Codec: "ac3", Channels: 6, Language: "eng"},
+			{Index: 2, Codec: "aac", Channels: 2, Language: "eng"},
+		},
+	})
+
+	require.Equal(t, 1, plan.SelectedAudioTrack)
+	require.Equal(t, "ac3", plan.Source.AudioCodec)
+	require.Equal(t, 6, plan.Source.AudioChannels)
+	require.Equal(t, "direct", plan.AudioMode)
+	require.NotContains(t, plan.StreamURL, "transcode=")
+}
+
+func TestBuildTaterPlaybackPlanHonorsRequestedAudioTrack(t *testing.T) {
+	requested := 0
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL:  "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		AudioTrack: &requested,
+		Capabilities: taterPlaybackCapabilities{
+			VideoCodecs: []string{"h264"},
+			AudioCodecs: []string{"aac"},
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "h264",
+		AudioTracks: []taterPlaybackAudioTrack{
+			{Index: 0, Codec: "aac", Channels: 2, Language: "spa"},
+			{Index: 1, Codec: "aac", Channels: 2, Language: "eng"},
+		},
+	})
+
+	require.Equal(t, 0, plan.SelectedAudioTrack)
+	require.Equal(t, "spa", plan.Source.AudioTracks[0].Language)
+	require.Equal(t, "0", playbackPlanQuery(t, plan.StreamURL).Get("tater_audio_track"))
+}
+
 func TestBuildTaterPlaybackPlanAudioOnlyTranscode(t *testing.T) {
 	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
 		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
@@ -46,6 +116,29 @@ func TestBuildTaterPlaybackPlanAudioOnlyTranscode(t *testing.T) {
 	require.Equal(t, "transcode", plan.AudioMode)
 	require.Equal(t, "aac", plan.AudioCodec)
 	require.Equal(t, "audio", playbackPlanQuery(t, plan.StreamURL).Get("transcode"))
+}
+
+func TestBuildTaterPlaybackPlanLetsNativePlayerDownmix(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Capabilities: taterPlaybackCapabilities{
+			AudioCodecs:      []string{"dts_hd"},
+			VideoCodecs:      []string{"vc1"},
+			MaxAudioChannels: 2,
+			AudioDownmix:     true,
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "vc1", AudioCodec: "dts_hd", AudioChannels: 6,
+	})
+
+	require.Equal(t, "direct", plan.Mode)
+	require.Equal(t, "direct", plan.VideoMode)
+	require.Equal(t, "direct", plan.AudioMode)
+}
+
+func TestCleanTaterCodecNameNormalizesDTSHD(t *testing.T) {
+	require.Equal(t, "dts_hd", cleanTaterCodecName("DTS-HD MA"))
+	require.Equal(t, "dts_hd", cleanTaterCodecName("dts_hd"))
 }
 
 func TestBuildTaterPlaybackPlanVideoOnlyPreservesBitstreamAudio(t *testing.T) {

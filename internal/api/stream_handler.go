@@ -388,6 +388,28 @@ func requestedTaterTrackMode(r *http.Request, key, fallback string) string {
 	}
 }
 
+func requestedTaterAudioTrack(r *http.Request) int {
+	if r == nil {
+		return 0
+	}
+	track, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("tater_audio_track")))
+	if err != nil || track < 0 || track > 255 {
+		return 0
+	}
+	return track
+}
+
+func taterAudioMap(track int, optional bool) string {
+	if track < 0 {
+		track = 0
+	}
+	suffix := ""
+	if optional {
+		suffix = "?"
+	}
+	return fmt.Sprintf("0:a:%d%s", track, suffix)
+}
+
 type transcodeProfile struct {
 	Name         string
 	MaxWidth     int
@@ -604,6 +626,7 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	args := buildFFmpegTranscodeArgsWithOptions(
 		transcodeCfg, profile, accel, videoCodecPreference, transcodeOutputOptions{
 			InputPath: inputPath, StartSeconds: startSeconds,
+			AudioTrack:    requestedTaterAudioTrack(r),
 			ToneMapSource: toneMapSource, ToneMapTarget: toneMapTarget,
 			ToneMapFilter: toneMapFilter,
 		},
@@ -676,7 +699,9 @@ func (h *StreamHandler) serveAudioOnlyVideoTranscoded(
 	if startSeconds > 0 {
 		inputPath = path
 	}
-	args := buildFFmpegAudioOnlyVideoArgs(profile.AudioBitrate, inputPath, startSeconds)
+	args := buildFFmpegAudioOnlyVideoArgsWithTrack(
+		profile.AudioBitrate, inputPath, startSeconds, requestedTaterAudioTrack(r),
+	)
 	durationSeconds := h.probeMediaDuration(ctx, path)
 	streamID := h.markTranscodedStream(
 		w, file, audioOnlyProfileID, audioOnlyProfileName,
@@ -778,9 +803,9 @@ func (h *StreamHandler) serveVideoOnlyTranscoded(
 		http.Error(w, "Tone mapping unavailable in the configured FFmpeg build", http.StatusServiceUnavailable)
 		return
 	}
-	args := buildFFmpegVideoOnlyArgsWithToneMapFilter(
+	args := buildFFmpegVideoOnlyArgsWithToneMapFilterAndAudioTrack(
 		transcodeCfg, profile, accel, videoCodecPreference, inputPath, startSeconds,
-		toneMapSource, toneMapTarget, toneMapFilter,
+		toneMapSource, toneMapTarget, toneMapFilter, requestedTaterAudioTrack(r),
 	)
 	videoCodec, _ := transcodeVideoSettingsForCodec(
 		accel, transcodeCfg.HardwareDevice, profile, videoCodecPreference,
@@ -1098,6 +1123,10 @@ func buildFFmpegAudioSyncArgs(inputPath string, startSeconds float64) []string {
 }
 
 func buildFFmpegAudioOnlyVideoArgs(audioBitrate, inputPath string, startSeconds float64) []string {
+	return buildFFmpegAudioOnlyVideoArgsWithTrack(audioBitrate, inputPath, startSeconds, 0)
+}
+
+func buildFFmpegAudioOnlyVideoArgsWithTrack(audioBitrate, inputPath string, startSeconds float64, audioTrack int) []string {
 	if strings.TrimSpace(audioBitrate) == "" {
 		audioBitrate = "192k"
 	}
@@ -1122,7 +1151,7 @@ func buildFFmpegAudioOnlyVideoArgs(audioBitrate, inputPath string, startSeconds 
 	}
 	args = append(args,
 		"-map", "0:v:0",
-		"-map", "0:a:0?",
+		"-map", taterAudioMap(audioTrack, true),
 		"-sn",
 		"-dn",
 		"-c:v", "copy",
@@ -1151,6 +1180,13 @@ func buildFFmpegVideoOnlyArgsWithToneMap(cfg config.TranscodingConfig, profile t
 }
 
 func buildFFmpegVideoOnlyArgsWithToneMapFilter(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec, inputPath string, startSeconds float64, toneMapSource, toneMapTarget, toneMapFilter string) []string {
+	return buildFFmpegVideoOnlyArgsWithToneMapFilterAndAudioTrack(
+		cfg, profile, accel, preferredCodec, inputPath, startSeconds,
+		toneMapSource, toneMapTarget, toneMapFilter, 0,
+	)
+}
+
+func buildFFmpegVideoOnlyArgsWithToneMapFilterAndAudioTrack(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec, inputPath string, startSeconds float64, toneMapSource, toneMapTarget, toneMapFilter string, audioTrack int) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
@@ -1172,7 +1208,7 @@ func buildFFmpegVideoOnlyArgsWithToneMapFilter(cfg config.TranscodingConfig, pro
 	filters = appendTaterToneMapFilter(filters, toneMapSource, toneMapTarget, toneMapFilter)
 	args = append(args,
 		"-map", "0:v:0",
-		"-map", "0:a:0?",
+		"-map", taterAudioMap(audioTrack, true),
 		"-sn",
 		"-dn",
 	)
@@ -1207,6 +1243,7 @@ type transcodeOutputOptions struct {
 	InputPath       string
 	StartSeconds    float64
 	DurationSeconds float64
+	AudioTrack      int
 	LogoFile        string
 	LogoPosition    string
 	ToneMapSource   string
@@ -1247,13 +1284,13 @@ func buildFFmpegTranscodeArgsWithOptions(cfg config.TranscodingConfig, profile t
 		args = append(args,
 			"-filter_complex", taterTVChannelLogoFilter(filters, profile, options.LogoPosition),
 			"-map", "[vout]",
-			"-map", "0:a:0?",
+			"-map", taterAudioMap(options.AudioTrack, true),
 			"-sn",
 		)
 	} else {
 		args = append(args,
 			"-map", "0:v:0",
-			"-map", "0:a:0?",
+			"-map", taterAudioMap(options.AudioTrack, true),
 			"-sn",
 		)
 	}
