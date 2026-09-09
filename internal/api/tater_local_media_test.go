@@ -2098,6 +2098,44 @@ func TestTaterTVPersonalizeChannelSummariesOmitSchedules(t *testing.T) {
 	}
 }
 
+func TestTaterTVPlayerGuideWindowKeepsCurrentBreakAndNextPrograms(t *testing.T) {
+	startedAt := time.Date(2026, time.September, 9, 12, 0, 0, 0, time.UTC)
+	channels := []taterTVChannel{{
+		Number: "02",
+		Title:  "Cartoons",
+		Schedule: []map[string]any{
+			{"title": "Already Aired", "kind": "movie", "start": 0.0, "end": 50.0},
+			{"title": "Ad One", "kind": "commercial", "start": 50.0, "end": 60.0},
+			{"title": "Tater", "kind": taterTVBrandBumperKind, "start": 60.0, "end": 70.0},
+			{"title": "Ad Two", "kind": "commercial", "start": 70.0, "end": 80.0},
+			{"title": "Program One", "kind": "movie", "start": 80.0, "end": 130.0},
+			{"title": "Break Two", "kind": "commercial", "start": 130.0, "end": 140.0},
+			{"title": "Program Two", "kind": "movie", "start": 140.0, "end": 190.0},
+			{"title": "Program Three", "kind": "movie", "start": 190.0, "end": 240.0},
+			{"title": "Program Four", "kind": "movie", "start": 240.0, "end": 290.0},
+			{"title": "Program Five", "kind": "movie", "start": 290.0, "end": 340.0},
+		},
+	}}
+
+	window := taterTVPlayerGuideWindow(channels, startedAt, startedAt.Add(65*time.Second))
+	if len(window) != 1 {
+		t.Fatalf("unexpected channel window: %#v", window)
+	}
+	schedule := window[0].Schedule
+	if len(schedule) != 8 {
+		t.Fatalf("expected current break and four programs, got %#v", schedule)
+	}
+	if rowString(schedule[0], "title") != "Ad One" {
+		t.Fatalf("expected the complete current commercial break, got %#v", schedule)
+	}
+	if rowString(schedule[len(schedule)-1], "title") != "Program Four" {
+		t.Fatalf("expected the fourth upcoming program last, got %#v", schedule)
+	}
+	if len(channels[0].Schedule) != 10 {
+		t.Fatal("building a player guide window mutated the full server guide")
+	}
+}
+
 func TestTaterTVChannelItemFromPath(t *testing.T) {
 	number, index, ok := taterTVChannelItemFromPath("/api/tater/tv/channel/09/item/42")
 	if !ok || number != "09" || index != 42 {
