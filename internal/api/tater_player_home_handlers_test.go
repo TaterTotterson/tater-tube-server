@@ -209,6 +209,69 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 	require.True(t, foundRecentlyAdded)
 }
 
+func TestTaterPlayerHomeCanLoadShelvesWithoutLiveGuide(t *testing.T) {
+	configDir := t.TempDir()
+	enabled := true
+	cfg := config.DefaultConfig(configDir)
+	cfg.LocalMedia.Enabled = &enabled
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID: "movies", Name: "Movies", LibraryType: "movies",
+		Paths: []string{t.TempDir()}, Enabled: &enabled,
+	}}
+	cfg.TubeTV.Enabled = &enabled
+	cfg.Players.Paired = []config.PlayerConfig{{
+		ID: "home-player", TokenHash: hashTaterSecret("home-token"),
+	}}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	taterTVGuideMu.Lock()
+	previousGuide := taterTVGuideCache
+	taterTVGuideCache = &taterTVGuideCacheEntry{
+		StartedAt:    now.Add(-time.Minute),
+		GeneratedAt:  now.Add(-time.Minute),
+		UpdatedAt:    now,
+		PlannedUntil: now.Add(time.Hour),
+		Fingerprint:  taterTVGuideFingerprint(cfg),
+		Channels: []taterTVChannel{{
+			Number: "12", Title: "Movie Night", TotalDuration: 3600,
+			Schedule: []map[string]any{{
+				"title": "Playing Now", "kind": "movie", "start": 0.0, "end": 3600.0,
+			}},
+		}},
+	}
+	taterTVGuideMu.Unlock()
+	t.Cleanup(func() {
+		taterTVGuideMu.Lock()
+		taterTVGuideCache = previousGuide
+		taterTVGuideMu.Unlock()
+	})
+
+	server := &Server{configManager: &mockConfigManager{cfg: cfg}}
+	app := fiber.New()
+	app.Get("/api/v1/player/home", server.handleTaterPlayerHome)
+
+	requestHome := func(path string) taterPlayerHomeResponse {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set(fiber.HeaderAuthorization, "Bearer home-token")
+		response, err := app.Test(request)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, response.StatusCode)
+		var envelope testAPIResponse[taterPlayerHomeResponse]
+		require.NoError(t, json.NewDecoder(response.Body).Decode(&envelope))
+		require.True(t, envelope.Success)
+		return envelope.Data
+	}
+
+	combined := requestHome("/api/v1/player/home")
+	require.True(t, combined.Capabilities.TubeTV)
+	require.Len(t, combined.LiveChannels, 1)
+
+	shelvesOnly := requestHome("/api/v1/player/home?include_live=0")
+	require.True(t, shelvesOnly.Capabilities.TubeTV)
+	require.Empty(t, shelvesOnly.LiveChannels)
+}
+
 func writeTaterPlayerTestJPEG(t *testing.T, path string, width, height int, fill color.Color) {
 	t.Helper()
 	source := image.NewRGBA(image.Rect(0, 0, width, height))
