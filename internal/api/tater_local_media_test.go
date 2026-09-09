@@ -1317,6 +1317,61 @@ func TestTaterTVCommercialCategoriesProbeDurations(t *testing.T) {
 	}
 }
 
+func TestTaterTVAutoChannelsRequireSelectedCommercialGroups(t *testing.T) {
+	cfg := config.DefaultConfig(t.TempDir())
+	cfg.TubeTV.CommercialsEnabled = boolPtr(true)
+	cfg.TubeTV.CommercialCategories = nil
+	source := taterTVSource{
+		Title:      "Auto Movies",
+		SourceType: "auto",
+	}
+	for index := 0; index < 12; index++ {
+		source.Programs = append(source.Programs, taterUsenetItem{
+			Title:           fmt.Sprintf("Feature %d", index+1),
+			StreamURL:       fmt.Sprintf("http://server/feature-%d", index+1),
+			DurationSeconds: 600,
+		})
+	}
+	commercials := []taterTVCommercialCategory{{
+		ID: "ads",
+		Videos: []taterTVCommercial{{
+			Title:         "Ad",
+			CategoryID:    "ads",
+			Name:          "ad.mp4",
+			Duration:      15,
+			FullDuration:  15,
+			DurationKnown: true,
+		}},
+	}}
+
+	schedule, _ := taterTVBuildSchedule(cfg, source, commercials, rand.New(rand.NewSource(9)))
+	brandBumpers := 0
+	for _, row := range schedule {
+		switch rowString(row, "kind") {
+		case "commercial":
+			t.Fatalf("auto channel scheduled an unselected commercial: %#v", row)
+		case taterTVBrandBumperKind:
+			brandBumpers++
+		}
+	}
+	if brandBumpers == 0 {
+		t.Fatal("expected Tater bumpers to remain enabled without commercial groups")
+	}
+
+	cfg.TubeTV.CommercialCategories = []string{"ads"}
+	schedule, _ = taterTVBuildSchedule(cfg, source, commercials, rand.New(rand.NewSource(9)))
+	hasCommercial := false
+	for _, row := range schedule {
+		if rowString(row, "kind") == "commercial" {
+			hasCommercial = true
+			break
+		}
+	}
+	if !hasCommercial {
+		t.Fatal("expected selected commercial group in auto-channel schedule")
+	}
+}
+
 func TestTaterTVBumpersWrapCommercialBreaksAndDoNotRepeatEarly(t *testing.T) {
 	configDir := t.TempDir()
 	cfg := config.DefaultConfig(configDir)
