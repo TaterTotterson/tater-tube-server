@@ -1,9 +1,14 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/jpeg"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -54,10 +59,10 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 	require.NoError(t, os.MkdirAll(movieDir, 0o755))
 	moviePath := filepath.Join(movieDir, "Modern.Movie.2026.mkv")
 	require.NoError(t, os.WriteFile(moviePath, []byte("media"), 0o644))
-	posterBytes := []byte("poster-image")
-	require.NoError(t, os.WriteFile(filepath.Join(movieDir, "poster.jpg"), posterBytes, 0o644))
-	backdropBytes := []byte("backdrop-image")
-	require.NoError(t, os.WriteFile(filepath.Join(movieDir, "backdrop.jpg"), backdropBytes, 0o644))
+	writeTaterPlayerTestJPEG(t, filepath.Join(movieDir, "poster.jpg"), 1200, 1800,
+		color.RGBA{R: 210, G: 90, B: 30, A: 255})
+	writeTaterPlayerTestJPEG(t, filepath.Join(movieDir, "backdrop.jpg"), 1920, 1080,
+		color.RGBA{R: 35, G: 70, B: 110, A: 255})
 
 	localEnabled := true
 	tubeTVDisabled := false
@@ -149,8 +154,10 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 	require.NotEmpty(t, envelope.Data.Libraries)
 	require.Contains(t, envelope.Data.ContinueWatching[0].Poster, "/api/v1/player/artwork/local")
 	require.Contains(t, envelope.Data.ContinueWatching[0].Poster, "player_token=home-token")
+	require.Contains(t, envelope.Data.ContinueWatching[0].Poster, "thumbnail=poster")
 	require.Contains(t, envelope.Data.ContinueWatching[0].Backdrop, "/api/v1/player/artwork/local")
 	require.Contains(t, envelope.Data.ContinueWatching[0].Backdrop, "kind=backdrop")
+	require.Contains(t, envelope.Data.ContinueWatching[0].Backdrop, "thumbnail=wide")
 
 	posterURL, err := url.Parse(envelope.Data.ContinueWatching[0].Poster)
 	require.NoError(t, err)
@@ -159,9 +166,14 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, artworkResponse.StatusCode)
 	require.Equal(t, "image/jpeg", artworkResponse.Header.Get(fiber.HeaderContentType))
+	require.Equal(t, "private, max-age=31536000, immutable",
+		artworkResponse.Header.Get(fiber.HeaderCacheControl))
 	servedPoster, err := io.ReadAll(artworkResponse.Body)
 	require.NoError(t, err)
-	require.Equal(t, posterBytes, servedPoster)
+	posterConfig, _, err := image.DecodeConfig(bytes.NewReader(servedPoster))
+	require.NoError(t, err)
+	require.Equal(t, 600, posterConfig.Width)
+	require.Equal(t, 900, posterConfig.Height)
 
 	backdropURL, err := url.Parse(envelope.Data.ContinueWatching[0].Backdrop)
 	require.NoError(t, err)
@@ -170,7 +182,10 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 	require.Equal(t, http.StatusOK, backdropResponse.StatusCode)
 	servedBackdrop, err := io.ReadAll(backdropResponse.Body)
 	require.NoError(t, err)
-	require.Equal(t, backdropBytes, servedBackdrop)
+	backdropConfig, _, err := image.DecodeConfig(bytes.NewReader(servedBackdrop))
+	require.NoError(t, err)
+	require.Equal(t, 960, backdropConfig.Width)
+	require.Equal(t, 540, backdropConfig.Height)
 
 	libraryRequest := httptest.NewRequest(http.MethodGet, "http://tube.local/api/v1/player/library", nil)
 	libraryRequest.Header.Set(fiber.HeaderAuthorization, "Bearer home-token")
@@ -192,6 +207,16 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 		}
 	}
 	require.True(t, foundRecentlyAdded)
+}
+
+func writeTaterPlayerTestJPEG(t *testing.T, path string, width, height int, fill color.Color) {
+	t.Helper()
+	source := image.NewRGBA(image.Rect(0, 0, width, height))
+	draw.Draw(source, source.Bounds(), &image.Uniform{C: fill}, image.Point{}, draw.Src)
+	file, err := os.Create(path)
+	require.NoError(t, err)
+	require.NoError(t, jpeg.Encode(file, source, &jpeg.Options{Quality: 90}))
+	require.NoError(t, file.Close())
 }
 
 func TestTaterPlayerLocalArtworkRejectsEscapingPath(t *testing.T) {
