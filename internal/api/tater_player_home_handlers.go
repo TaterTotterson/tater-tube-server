@@ -126,7 +126,10 @@ func (s *Server) handleTaterPlayerHome(c *fiber.Ctx) error {
 		response.Libraries = append(response.Libraries, taterLocalRootRow(cfg).Children...)
 	}
 
-	if response.Capabilities.TubeTV {
+	// The modern player can request the local shelves without live-channel data
+	// so artwork can begin loading before a large guide has been prepared and
+	// personalized. Existing clients retain the combined response by default.
+	if response.Capabilities.TubeTV && c.QueryBool("include_live", true) {
 		channels, channelErr := taterPlayerHomeChannels(cfg, baseURL, playerToken, response.GeneratedAt)
 		if channelErr != nil {
 			response.Warnings = append(response.Warnings, "Tube TV is temporarily unavailable")
