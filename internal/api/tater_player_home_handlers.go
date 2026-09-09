@@ -431,8 +431,15 @@ func taterPlayerLocalArtworkURLForKind(baseURL, playerToken, categoryID string, 
 	query.Set("source", strconv.Itoa(sourceIndex))
 	query.Set("path", cleanLocalRelativePath(relPath))
 	query.Set("player_token", playerToken)
-	if normalizedKind := taterPlayerArtworkKind(kind); normalizedKind != "poster" {
+	normalizedKind := taterPlayerArtworkKind(kind)
+	if normalizedKind != "poster" {
 		query.Set("kind", normalizedKind)
+	}
+	switch normalizedKind {
+	case "backdrop", "episode-still":
+		query.Set("thumbnail", "wide")
+	default:
+		query.Set("thumbnail", "poster")
 	}
 	u.RawQuery = query.Encode()
 	return u.String()
@@ -630,6 +637,26 @@ func (s *Server) handleTaterPlayerLocalArtwork(c *fiber.Ctx) error {
 	if !found {
 		return RespondNotFound(c, "Local media artwork", fmt.Sprintf("%s:%d:%s", categoryID, sourceIndex, relPath))
 	}
+	thumbnailMode := strings.ToLower(strings.TrimSpace(c.Query("thumbnail")))
+	if thumbnailMode != "" && thumbnailMode != "0" && thumbnailMode != "false" {
+		maximumWidth, maximumHeight := taterArtworkThumbnailWidth, taterArtworkThumbnailHeight
+		switch thumbnailMode {
+		case "wide":
+			maximumWidth, maximumHeight = taterArtworkWideWidth, taterArtworkWideHeight
+		case "poster":
+			maximumWidth, maximumHeight = taterArtworkPosterWidth, taterArtworkPosterHeight
+		}
+		if thumbnail, thumbnailErr := taterArtworkThumbnailSized(
+			artworkPath, maximumWidth, maximumHeight); thumbnailErr == nil {
+			c.Set(fiber.HeaderContentType, "image/jpeg")
+			if strings.TrimSpace(c.Query("v")) != "" {
+				c.Set(fiber.HeaderCacheControl, "private, max-age=31536000, immutable")
+			} else {
+				c.Set(fiber.HeaderCacheControl, "private, max-age=86400")
+			}
+			return c.Send(thumbnail)
+		}
+	}
 	switch strings.ToLower(filepath.Ext(artworkPath)) {
 	case ".jpg", ".jpeg":
 		c.Set(fiber.HeaderContentType, "image/jpeg")
@@ -638,6 +665,10 @@ func (s *Server) handleTaterPlayerLocalArtwork(c *fiber.Ctx) error {
 	case ".webp":
 		c.Set(fiber.HeaderContentType, "image/webp")
 	}
-	c.Set(fiber.HeaderCacheControl, "private, max-age=86400")
+	if strings.TrimSpace(c.Query("v")) != "" {
+		c.Set(fiber.HeaderCacheControl, "private, max-age=31536000, immutable")
+	} else {
+		c.Set(fiber.HeaderCacheControl, "private, max-age=86400")
+	}
 	return c.SendFile(artworkPath, false)
 }

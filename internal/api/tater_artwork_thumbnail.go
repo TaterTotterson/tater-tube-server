@@ -17,6 +17,10 @@ import (
 const (
 	taterArtworkThumbnailWidth  = 320
 	taterArtworkThumbnailHeight = 480
+	taterArtworkPosterWidth     = 600
+	taterArtworkPosterHeight    = 900
+	taterArtworkWideWidth       = 960
+	taterArtworkWideHeight      = 540
 	taterArtworkMaximumPixels   = 80_000_000
 )
 
@@ -34,6 +38,13 @@ var taterArtworkThumbnailCache = struct {
 var taterArtworkThumbnailSlots = make(chan struct{}, 2)
 
 func taterArtworkThumbnail(path string) ([]byte, error) {
+	return taterArtworkThumbnailSized(path, taterArtworkThumbnailWidth, taterArtworkThumbnailHeight)
+}
+
+func taterArtworkThumbnailSized(path string, maximumWidth, maximumHeight int) ([]byte, error) {
+	if maximumWidth <= 0 || maximumHeight <= 0 {
+		return nil, fmt.Errorf("artwork thumbnail dimensions are invalid")
+	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
@@ -46,8 +57,9 @@ func taterArtworkThumbnail(path string) ([]byte, error) {
 		return nil, err
 	}
 
+	cacheKey := fmt.Sprintf("%s\x00%dx%d", absPath, maximumWidth, maximumHeight)
 	taterArtworkThumbnailCache.Lock()
-	if cached, ok := taterArtworkThumbnailCache.Items[absPath]; ok &&
+	if cached, ok := taterArtworkThumbnailCache.Items[cacheKey]; ok &&
 		cached.Size == info.Size() && cached.ModTimeUnixNano == info.ModTime().UnixNano() && len(cached.JPEG) > 0 {
 		result := append([]byte(nil), cached.JPEG...)
 		taterArtworkThumbnailCache.Unlock()
@@ -80,7 +92,7 @@ func taterArtworkThumbnail(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	result, err := encodeTaterArtworkThumbnail(source)
+	result, err := encodeTaterArtworkThumbnailSized(source, maximumWidth, maximumHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +101,7 @@ func taterArtworkThumbnail(path string) ([]byte, error) {
 	if len(taterArtworkThumbnailCache.Items) >= 256 {
 		taterArtworkThumbnailCache.Items = map[string]taterArtworkThumbnailCacheEntry{}
 	}
-	taterArtworkThumbnailCache.Items[absPath] = taterArtworkThumbnailCacheEntry{
+	taterArtworkThumbnailCache.Items[cacheKey] = taterArtworkThumbnailCacheEntry{
 		Size: info.Size(), ModTimeUnixNano: info.ModTime().UnixNano(), JPEG: append([]byte(nil), result...),
 	}
 	taterArtworkThumbnailCache.Unlock()
@@ -115,11 +127,19 @@ func taterArtworkThumbnailBytes(raw []byte) ([]byte, error) {
 }
 
 func encodeTaterArtworkThumbnail(source image.Image) ([]byte, error) {
+	return encodeTaterArtworkThumbnailSized(
+		source, taterArtworkThumbnailWidth, taterArtworkThumbnailHeight)
+}
+
+func encodeTaterArtworkThumbnailSized(source image.Image, maximumWidth, maximumHeight int) ([]byte, error) {
+	if maximumWidth <= 0 || maximumHeight <= 0 {
+		return nil, fmt.Errorf("artwork thumbnail dimensions are invalid")
+	}
 	width := source.Bounds().Dx()
 	height := source.Bounds().Dy()
 	scale := min(
-		float64(taterArtworkThumbnailWidth)/float64(width),
-		float64(taterArtworkThumbnailHeight)/float64(height),
+		float64(maximumWidth)/float64(width),
+		float64(maximumHeight)/float64(height),
 	)
 	if scale > 1 {
 		scale = 1

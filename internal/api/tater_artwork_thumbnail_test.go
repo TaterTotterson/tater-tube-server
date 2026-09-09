@@ -48,6 +48,54 @@ func TestTaterArtworkThumbnailShrinksAndCachesPoster(t *testing.T) {
 	}
 }
 
+func TestTaterArtworkThumbnailKeepsSeparateWideAndPosterSizes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "backdrop.jpg")
+	source := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	for y := 0; y < source.Bounds().Dy(); y++ {
+		for x := 0; x < source.Bounds().Dx(); x++ {
+			source.SetRGBA(x, y, color.RGBA{R: 40, G: uint8(x % 255), B: uint8(y % 255), A: 255})
+		}
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := jpeg.Encode(file, source, &jpeg.Options{Quality: 90}); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	wide, err := taterArtworkThumbnailSized(path, taterArtworkWideWidth, taterArtworkWideHeight)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wideConfig, _, err := image.DecodeConfig(bytes.NewReader(wide))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wideConfig.Width != 960 || wideConfig.Height != 540 {
+		t.Fatalf("unexpected wide thumbnail dimensions: %dx%d", wideConfig.Width, wideConfig.Height)
+	}
+
+	poster, err := taterArtworkThumbnailSized(path, taterArtworkPosterWidth, taterArtworkPosterHeight)
+	if err != nil {
+		t.Fatal(err)
+	}
+	posterConfig, _, err := image.DecodeConfig(bytes.NewReader(poster))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if posterConfig.Width != 600 || posterConfig.Height != 337 {
+		t.Fatalf("unexpected poster-bound dimensions: %dx%d", posterConfig.Width, posterConfig.Height)
+	}
+	if bytes.Equal(wide, poster) {
+		t.Fatal("sized thumbnail cache reused the wrong dimensions")
+	}
+}
+
 func TestTaterVideoAdminArtworkURLRequestsThumbnail(t *testing.T) {
 	url := taterLocalVideoAdminArtworkURL(taterLocalVideoIndex{
 		ID: "video-id", HasArtwork: true, ArtworkUpdated: 123,
