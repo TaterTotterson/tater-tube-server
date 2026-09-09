@@ -754,7 +754,8 @@ export function TubeTVConfigSection({
 						<div>
 							<div className="font-bold text-sm">Auto Channel Logo Overlay</div>
 							<p className="mt-1 text-base-content/60 text-xs">
-								Show the Tater-themed channel logo over video. The same logo is always used in the guide.
+								Show the Tater-themed channel logo over video. The same logo is always used in the
+								guide.
 							</p>
 						</div>
 						<div className="flex flex-wrap items-center gap-3">
@@ -868,7 +869,22 @@ export function TubeTVConfigSection({
 						</label>
 					</div>
 
-					<div className="mt-5 space-y-3">
+					<div className="mt-5 flex flex-col gap-2 rounded-xl border border-base-300 bg-base-100/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+						<div>
+							<div className="font-bold text-sm">Auto-Channel Commercials</div>
+							<p className="mt-1 text-base-content/60 text-xs">
+								Check the groups that auto-generated channels may use. Leave every group unchecked
+								for no auto-channel commercials.
+							</p>
+						</div>
+						<span className="badge badge-outline whitespace-nowrap">
+							{formData.commercial_categories.length === 0
+								? "None selected"
+								: `${formData.commercial_categories.length} selected`}
+						</span>
+					</div>
+
+					<div className="mt-3 space-y-3">
 						{(library?.categories ?? []).length === 0 && (
 							<div className="rounded-xl border border-base-300 bg-base-100/70 p-4 text-base-content/60 text-sm">
 								No commercial categories yet.

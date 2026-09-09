@@ -878,7 +878,10 @@ type taterTVScheduleDecks struct {
 
 func taterTVNewScheduleDecks(cfg *config.Config, source taterTVSource, commercialCategories []taterTVCommercialCategory, bumperGroups []taterTVBumperGroup) *taterTVScheduleDecks {
 	beforeBumpers, afterBumpers := taterTVBumperPools(bumperGroups, source.BumperGroups)
-	commercials := taterTVCommercialPool(cfg, commercialCategories, source.CommercialCategory)
+	requireGlobalCommercialSelection := source.SourceType == "auto" || source.SourceType == "auto_theme"
+	commercials := taterTVCommercialPool(
+		cfg, commercialCategories, source.CommercialCategory, requireGlobalCommercialSelection,
+	)
 	taterBumpers := []taterTVBumper{}
 	if cfg != nil && taterBumperSettingEnabled(cfg.TaterBumpers.LiveTV) {
 		taterBumpers = taterTVBuiltInBumpers(cfg)
@@ -1298,7 +1301,7 @@ func taterTVCommercialDuration(cfg *config.Config, path string) (float64, bool) 
 	return 0, false
 }
 
-func taterTVCommercialPool(cfg *config.Config, categories []taterTVCommercialCategory, channelCategory string) []taterTVCommercial {
+func taterTVCommercialPool(cfg *config.Config, categories []taterTVCommercialCategory, channelCategory string, emptySelectionDisables bool) []taterTVCommercial {
 	selected := map[string]bool{}
 	for _, id := range cfg.TubeTV.CommercialCategories {
 		selected[taterTVCategoryID(id, "")] = true
@@ -1306,6 +1309,8 @@ func taterTVCommercialPool(cfg *config.Config, categories []taterTVCommercialCat
 	channelCategory = taterTVCategoryID(channelCategory, "")
 	if channelCategory != "" {
 		selected = map[string]bool{channelCategory: true}
+	} else if emptySelectionDisables && len(selected) == 0 {
+		return []taterTVCommercial{}
 	}
 	pool := []taterTVCommercial{}
 	for _, category := range categories {
