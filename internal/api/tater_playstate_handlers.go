@@ -24,9 +24,17 @@ type taterPlayState struct {
 	Title       string    `json:"title"`
 	SeriesTitle string    `json:"seriesTitle,omitempty"`
 	MediaType   string    `json:"mediaType,omitempty"`
+	Category    string    `json:"category,omitempty"`
 	CategoryID  string    `json:"categoryId,omitempty"`
 	SourceIndex int       `json:"sourceIndex,omitempty"`
 	Path        string    `json:"path,omitempty"`
+	NzbURL      string    `json:"nzbUrl,omitempty"`
+	StreamIndex int       `json:"discoverStreamIndex,omitempty"`
+	SourceTitle string    `json:"discoverSourceTitle,omitempty"`
+	Poster      string    `json:"poster,omitempty"`
+	Backdrop    string    `json:"backdrop,omitempty"`
+	Description string    `json:"description,omitempty"`
+	Date        string    `json:"date,omitempty"`
 	PositionMS  int64     `json:"positionMs,omitempty"`
 	DurationMS  int64     `json:"durationMs,omitempty"`
 	Completed   bool      `json:"completed,omitempty"`
@@ -106,26 +114,45 @@ func (s *Server) handleTaterPlayStateSave(c *fiber.Ctx) error {
 		return RespondValidationError(c, "Invalid play state", err.Error())
 	}
 
-	req.CategoryID = "local:" + taterRawLocalCategoryID(req.CategoryID)
-	req.Path = cleanLocalRelativePath(req.Path)
+	req.NzbURL = taterStripNewznabAuth(req.NzbURL)
 	req.MediaType = strings.TrimSpace(req.MediaType)
 	req.Title = cleanTaterText(req.Title)
 	req.SeriesTitle = cleanTaterText(req.SeriesTitle)
+	req.Category = cleanTaterText(req.Category)
+	req.Description = cleanTaterText(req.Description)
+	req.Date = cleanTaterText(req.Date)
+	req.SourceTitle = cleanTaterText(req.SourceTitle)
+	req.Poster = strings.TrimSpace(req.Poster)
+	req.Backdrop = strings.TrimSpace(req.Backdrop)
 	req.ID = strings.TrimSpace(req.ID)
-	if req.ID == "" {
-		req.ID = taterLocalPlayStateID(req.CategoryID, req.SourceIndex, req.Path)
-	}
-	if req.ID == "" || req.Path == "" {
-		return RespondValidationError(c, "Invalid play state", "playStateId or local path is required")
-	}
-	if req.SeriesID == "" && strings.EqualFold(req.MediaType, "episode") {
-		req.SeriesID = taterLocalSeriesStateID(req.CategoryID, req.SourceIndex, req.Path)
-	}
-	if req.SeriesTitle == "" && strings.EqualFold(req.MediaType, "episode") {
-		req.SeriesTitle = taterSeriesTitleFromPath(req.Path)
-	}
-	if strings.EqualFold(req.MediaType, "episode") && req.SeriesID != "" {
-		req.ID = req.SeriesID
+	if req.NzbURL != "" {
+		req.CategoryID = "discover"
+		req.Path = ""
+		req.SeriesID = ""
+		if req.ID == "" {
+			req.ID = taterNzbWatchAgainID(req.Title, req.NzbURL)
+		}
+		if req.ID == "" {
+			return RespondValidationError(c, "Invalid play state", "Discover playStateId is required")
+		}
+	} else {
+		req.CategoryID = "local:" + taterRawLocalCategoryID(req.CategoryID)
+		req.Path = cleanLocalRelativePath(req.Path)
+		if req.ID == "" {
+			req.ID = taterLocalPlayStateID(req.CategoryID, req.SourceIndex, req.Path)
+		}
+		if req.ID == "" || req.Path == "" {
+			return RespondValidationError(c, "Invalid play state", "playStateId or local path is required")
+		}
+		if req.SeriesID == "" && strings.EqualFold(req.MediaType, "episode") {
+			req.SeriesID = taterLocalSeriesStateID(req.CategoryID, req.SourceIndex, req.Path)
+		}
+		if req.SeriesTitle == "" && strings.EqualFold(req.MediaType, "episode") {
+			req.SeriesTitle = taterSeriesTitleFromPath(req.Path)
+		}
+		if strings.EqualFold(req.MediaType, "episode") && req.SeriesID != "" {
+			req.ID = req.SeriesID
+		}
 	}
 	if req.PositionMS < 0 {
 		req.PositionMS = 0
@@ -133,7 +160,7 @@ func (s *Server) handleTaterPlayStateSave(c *fiber.Ctx) error {
 	if req.DurationMS < 0 {
 		req.DurationMS = 0
 	}
-	if req.Title == "" {
+	if req.Title == "" && req.Path != "" {
 		req.Title = cleanMovieTitleFromName(strings.TrimSuffix(filepath.Base(req.Path), filepath.Ext(req.Path)))
 	}
 	req.UpdatedAt = time.Now().UTC()
@@ -348,6 +375,35 @@ func taterApplyPlayStateToItem(item *taterUsenetItem, state taterPlayState) {
 }
 
 func taterPlayStateToItem(state taterPlayState, baseURL, playerToken string) taterUsenetItem {
+	if strings.TrimSpace(state.NzbURL) != "" {
+		row := taterUsenetItem{
+			Title:         state.Title,
+			Key:           state.ID,
+			RatingKey:     state.ID,
+			NzbURL:        state.NzbURL,
+			Type:          "watchAgain",
+			MediaType:     state.MediaType,
+			Category:      state.Category,
+			CategoryID:    "discover",
+			DiscoverIndex: state.StreamIndex,
+			DiscoverTitle: state.SourceTitle,
+			PlayStateID:   state.ID,
+			ViewOffset:    state.PositionMS,
+			ViewOffsetSec: float64(state.PositionMS) / 1000.0,
+			Poster:        state.Poster,
+			Backdrop:      state.Backdrop,
+			Description:   state.Description,
+			Date:          state.Date,
+			SeekMode:      "client",
+			SizeText:      "RESUME",
+		}
+		if state.DurationMS > 0 {
+			attachTaterDuration(&row, float64(state.DurationMS)/1000.0)
+		}
+		taterApplyPlayStateToItem(&row, state)
+		return row
+	}
+
 	categoryID := "local:" + taterRawLocalCategoryID(state.CategoryID)
 	row := taterUsenetItem{
 		Title:         state.Title,
@@ -415,7 +471,10 @@ func taterContinueDisplayState(cfg *config.Config, state taterPlayState) (taterP
 }
 
 func taterShouldContinue(state taterPlayState) bool {
-	if state.Completed || strings.TrimSpace(state.ID) == "" || strings.TrimSpace(state.Path) == "" {
+	if state.Completed || strings.TrimSpace(state.ID) == "" {
+		return false
+	}
+	if strings.TrimSpace(state.Path) == "" && strings.TrimSpace(state.NzbURL) == "" {
 		return false
 	}
 	return !taterPlayStateCompleted(state)
