@@ -148,19 +148,22 @@ func (s *Server) handleTaterTVLineup(c *fiber.Ctx) error {
 		return RespondServiceUnavailable(c, "Tube TV is not enabled", "")
 	}
 	baseURL := resolveBaseURL(c, "")
-	guide, err := taterTVEnsureGuide(cfg, baseURL, time.Now())
+	now := time.Now()
+	guide, err := taterTVEnsureGuide(cfg, baseURL, now)
 	if err != nil {
 		return RespondServiceUnavailable(c, "Failed to build TV lineup", err.Error())
 	}
 	channels := taterTVPersonalizeChannels(guide.Channels, baseURL, playerToken)
 	if taterTVLineupSummaryRequested(c) {
 		channels = taterTVPersonalizeChannelSummaries(guide.Channels, baseURL, playerToken)
+	} else if strings.EqualFold(strings.TrimSpace(c.Query("window")), "player") {
+		channels = taterTVPlayerGuideWindow(channels, guide.StartedAt, now)
 	}
 	return RespondSuccess(c, fiber.Map{
 		"channels":     channels,
 		"startedAt":    guide.StartedAt,
 		"plannedUntil": guide.PlannedUntil,
-		"serverNow":    time.Now(),
+		"serverNow":    now,
 		"settings": fiber.Map{
 			"enabled":               cfg.TubeTV.Enabled == nil || *cfg.TubeTV.Enabled,
 			"auto_channels":         cfg.TubeTV.AutoChannels == nil || *cfg.TubeTV.AutoChannels,
@@ -169,6 +172,50 @@ func (s *Server) handleTaterTVLineup(c *fiber.Ctx) error {
 			"commercial_categories": cfg.TubeTV.CommercialCategories,
 		},
 	})
+}
+
+func taterTVPlayerGuideWindow(channels []taterTVChannel, startedAt, now time.Time) []taterTVChannel {
+	elapsed := now.Sub(startedAt).Seconds()
+	out := make([]taterTVChannel, 0, len(channels))
+	for _, channel := range channels {
+		next := channel
+		if len(channel.Schedule) == 0 {
+			out = append(out, next)
+			continue
+		}
+
+		first := -1
+		for index, row := range channel.Schedule {
+			start := rowFloat(row, "start")
+			end := rowFloat(row, "end")
+			if (start <= elapsed && elapsed < end) || start > elapsed {
+				first = index
+				break
+			}
+		}
+		if first < 0 {
+			first = len(channel.Schedule) - 1
+		}
+		for first > 0 && taterTVIsInterstitial(rowString(channel.Schedule[first], "kind")) &&
+			taterTVIsInterstitial(rowString(channel.Schedule[first-1], "kind")) {
+			first--
+		}
+
+		last := first
+		programs := 0
+		for last < len(channel.Schedule) && last-first < 40 {
+			if !taterTVIsInterstitial(rowString(channel.Schedule[last], "kind")) {
+				programs++
+			}
+			last++
+			if programs >= 4 {
+				break
+			}
+		}
+		next.Schedule = append([]map[string]any{}, channel.Schedule[first:last]...)
+		out = append(out, next)
+	}
+	return out
 }
 
 func taterTVLineupSummaryRequested(c *fiber.Ctx) bool {
