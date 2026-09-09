@@ -230,6 +230,78 @@ func TestTaterContinueWatchingUsesLocalMetadata(t *testing.T) {
 	}
 }
 
+func TestTaterDiscoverPlayStateAppearsInContinueWatching(t *testing.T) {
+	configDir := t.TempDir()
+	cfg := config.DefaultConfig(configDir)
+	cfg.Players.Paired = []config.PlayerConfig{{
+		ID: "discover-player", Name: "Discover Player", TokenHash: hashTaterSecret("discover-token"),
+	}}
+
+	server := &Server{configManager: &mockConfigManager{cfg: cfg}}
+	app := fiber.New()
+	app.Post("/playstate", server.handleTaterPlayStateSave)
+	body, err := json.Marshal(taterPlayState{
+		ID:          "nzb:moonrise",
+		Title:       "Moonrise Manor",
+		MediaType:   "movie",
+		Category:    "Movies",
+		NzbURL:      "https://indexer.example/api?t=get&id=42&apikey=private-key",
+		StreamIndex: 2,
+		Poster:      "https://art.example/moonrise-poster.jpg",
+		Backdrop:    "https://art.example/moonrise-backdrop.jpg",
+		Description: "A quiet mystery unfolds.",
+		Date:        "2026",
+		PositionMS:  90_000,
+		DurationMS:  600_000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/playstate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer discover-token")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected Discover progress save to succeed, got %d", resp.StatusCode)
+	}
+
+	store, err := loadTaterPlayStateStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, ok := store.Items["nzb:moonrise"]
+	if !ok {
+		t.Fatalf("expected Discover play state to be persisted: %#v", store.Items)
+	}
+	if strings.Contains(state.NzbURL, "private-key") || strings.Contains(state.NzbURL, "apikey") {
+		t.Fatalf("Discover play state retained indexer authentication: %q", state.NzbURL)
+	}
+	if state.CategoryID != "discover" || state.Path != "" {
+		t.Fatalf("Discover play state was treated as local media: %#v", state)
+	}
+
+	rows, err := taterContinueWatchingItems(cfg, "http://server", "current-player-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected one Discover Continue Watching row, got %#v", rows)
+	}
+	row := rows[0]
+	if row.Type != "watchAgain" || row.PlayStateID != "nzb:moonrise" || row.StreamURL != "" {
+		t.Fatalf("expected a re-preparable Discover row, got %#v", row)
+	}
+	if row.DiscoverIndex != 2 || row.ViewOffset != 90_000 || row.ProgressPercent != 15 {
+		t.Fatalf("expected saved Discover stream and progress, got %#v", row)
+	}
+	if row.Poster != "https://art.example/moonrise-poster.jpg" || row.Description == "" {
+		t.Fatalf("expected Discover artwork and metadata to survive, got %#v", row)
+	}
+}
+
 func TestTaterPlayStateClearRemovesSavedProgress(t *testing.T) {
 	configDir := t.TempDir()
 	cfg := config.DefaultConfig(configDir)

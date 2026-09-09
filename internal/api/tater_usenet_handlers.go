@@ -63,6 +63,8 @@ type taterUsenetItem struct {
 	SearchQuery     string           `json:"searchQuery,omitempty"`
 	CategoryID      string           `json:"categoryId,omitempty"`
 	SourceIndex     int              `json:"sourceIndex,omitempty"`
+	DiscoverIndex   int              `json:"discoverStreamIndex,omitempty"`
+	DiscoverTitle   string           `json:"discoverSourceTitle,omitempty"`
 	Path            string           `json:"path,omitempty"`
 	StreamURL       string           `json:"streamUrl,omitempty"`
 	SeekMode        string           `json:"seekMode,omitempty"`
@@ -567,7 +569,12 @@ func (s *Server) handleTaterUsenetPlay(c *fiber.Ctx) error {
 	if !ok {
 		return RespondInternalError(c, "Unexpected stream result", "")
 	}
-	if err := s.waitAndRespondWithStreamAuth(c, itemID, baseURL, "player_token", playerToken, nzbName, nil, req.Timeout); err != nil {
+	safeNzbURL := taterStripNewznabAuth(req.NzbURL)
+	responseMetadata := &taterStreamResponseMetadata{
+		PlayStateID: taterNzbWatchAgainID(watchTitle, safeNzbURL),
+		NzbURL:      safeNzbURL,
+	}
+	if err := s.waitAndRespondWithStreamAuth(c, itemID, baseURL, "player_token", playerToken, nzbName, nil, req.Timeout, responseMetadata); err != nil {
 		return err
 	}
 	if err := taterRecordNzbWatchAgain(cfg, watchTitle, req.NzbURL, req.Category); err != nil {

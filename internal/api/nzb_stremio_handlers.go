@@ -66,10 +66,34 @@ type StremioStreamsResponse struct {
 	Streams     []StremioStream `json:"streams"`
 	QueueItemID int64           `json:"_queue_item_id"`
 	QueueStatus string          `json:"_queue_status"`
+	// Tater Tube Player uses these optional fields to persist Discover progress
+	// without retaining an indexer credential or a player-specific stream URL.
+	TaterPlayStateID string `json:"_tater_play_state_id,omitempty"`
+	TaterNzbURL      string `json:"_tater_nzb_url,omitempty"`
 	// Cached is true when streams were served from an already-completed queue item
 	// without re-processing. Callers such as AIOStreams can use this to show an
 	// "instant" indicator to the user.
 	Cached bool `json:"_cached"`
+}
+
+type taterStreamResponseMetadata struct {
+	PlayStateID string
+	NzbURL      string
+}
+
+func stremioStreamsResponse(streams []StremioStream, queueItemID int64,
+	queueStatus string, cached bool, tater *taterStreamResponseMetadata) StremioStreamsResponse {
+	response := StremioStreamsResponse{
+		Streams:     streams,
+		QueueItemID: queueItemID,
+		QueueStatus: queueStatus,
+		Cached:      cached,
+	}
+	if tater != nil {
+		response.TaterPlayStateID = strings.TrimSpace(tater.PlayStateID)
+		response.TaterNzbURL = strings.TrimSpace(tater.NzbURL)
+	}
+	return response
 }
 
 // handleNzbStreams handles POST /api/nzb/streams.
@@ -307,10 +331,10 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 // reach a terminal state (completed or failed), then returns the appropriate Stremio response.
 // This avoids polling by using an event-driven approach via the ProgressBroadcaster.
 func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey, nzbName string, selector *stremioEpisodeSelector, timeoutSecs int) error {
-	return s.waitAndRespondWithStreamAuth(c, itemID, baseURL, "download_key", downloadKey, nzbName, selector, timeoutSecs)
+	return s.waitAndRespondWithStreamAuth(c, itemID, baseURL, "download_key", downloadKey, nzbName, selector, timeoutSecs, nil)
 }
 
-func (s *Server) waitAndRespondWithStreamAuth(c *fiber.Ctx, itemID int64, baseURL, streamAuthParam, streamAuthValue, nzbName string, selector *stremioEpisodeSelector, timeoutSecs int) error {
+func (s *Server) waitAndRespondWithStreamAuth(c *fiber.Ctx, itemID int64, baseURL, streamAuthParam, streamAuthValue, nzbName string, selector *stremioEpisodeSelector, timeoutSecs int, tater *taterStreamResponseMetadata) error {
 	ctx := c.Context()
 
 	// Subscribe before the status check to eliminate the race between AddToQueue and the event.
@@ -332,12 +356,8 @@ func (s *Server) waitAndRespondWithStreamAuth(c *fiber.Ctx, itemID int64, baseUR
 		if err != nil {
 			return RespondInternalError(c, "Failed to list output media files", err.Error())
 		}
-		return c.JSON(StremioStreamsResponse{
-			Streams:     streams,
-			QueueItemID: current.ID,
-			QueueStatus: string(current.Status),
-			Cached:      true,
-		})
+		return c.JSON(stremioStreamsResponse(
+			streams, current.ID, string(current.Status), true, tater))
 	case database.QueueStatusFailed:
 		errMsg := ""
 		if current.ErrorMessage != nil {
@@ -349,11 +369,8 @@ func (s *Server) waitAndRespondWithStreamAuth(c *fiber.Ctx, itemID int64, baseUR
 		// event fired before we subscribed — return the streams immediately.
 		if current.StoragePath != nil && *current.StoragePath != "" {
 			if streams, err := s.buildStreamsWithAuth(current, baseURL, streamAuthParam, streamAuthValue, nzbName, selector); err == nil && len(streams) > 0 {
-				return c.JSON(StremioStreamsResponse{
-					Streams:     streams,
-					QueueItemID: current.ID,
-					QueueStatus: "streamable",
-				})
+				return c.JSON(stremioStreamsResponse(
+					streams, current.ID, "streamable", false, tater))
 			}
 		}
 	}
@@ -378,11 +395,8 @@ func (s *Server) waitAndRespondWithStreamAuth(c *fiber.Ctx, itemID int64, baseUR
 				if update.StoragePath != "" {
 					fakeItem := &database.ImportQueueItem{ID: itemID, StoragePath: &update.StoragePath}
 					if streams, err := s.buildStreamsWithAuth(fakeItem, baseURL, streamAuthParam, streamAuthValue, nzbName, selector); err == nil && len(streams) > 0 {
-						return c.JSON(StremioStreamsResponse{
-							Streams:     streams,
-							QueueItemID: itemID,
-							QueueStatus: "streamable",
-						})
+						return c.JSON(stremioStreamsResponse(
+							streams, itemID, "streamable", false, tater))
 					}
 				}
 				// StoragePath empty or no media files yet — fall through to wait for completed.
@@ -395,11 +409,8 @@ func (s *Server) waitAndRespondWithStreamAuth(c *fiber.Ctx, itemID int64, baseUR
 				if err != nil {
 					return RespondInternalError(c, "Failed to list output media files", err.Error())
 				}
-				return c.JSON(StremioStreamsResponse{
-					Streams:     streams,
-					QueueItemID: item.ID,
-					QueueStatus: string(item.Status),
-				})
+				return c.JSON(stremioStreamsResponse(
+					streams, item.ID, string(item.Status), false, tater))
 			case "failed":
 				item, _ := s.queueRepo.GetQueueItem(ctx, itemID)
 				errMsg := "Processing failed"
