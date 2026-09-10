@@ -616,7 +616,7 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	startSeconds := parseTranscodeStartSeconds(r.URL.Query().Get("start"))
 	inputPath := ""
 	if startSeconds > 0 {
-		inputPath = taterSeekableVirtualInputURL(r, cfg)
+		inputPath = taterSeekableTranscodeInput(r, cfg, path)
 		if inputPath == "" {
 			http.Error(w, "Unable to prepare seekable transcode input", http.StatusServiceUnavailable)
 			return
@@ -702,7 +702,7 @@ func (h *StreamHandler) serveAudioOnlyVideoTranscoded(
 	startSeconds := parseTranscodeStartSeconds(r.URL.Query().Get("start"))
 	inputPath := ""
 	if startSeconds > 0 {
-		inputPath = taterSeekableVirtualInputURL(r, cfg)
+		inputPath = taterSeekableTranscodeInput(r, cfg, path)
 		if inputPath == "" {
 			http.Error(w, "Unable to prepare seekable transcode input", http.StatusServiceUnavailable)
 			return
@@ -804,7 +804,7 @@ func (h *StreamHandler) serveVideoOnlyTranscoded(
 	startSeconds := parseTranscodeStartSeconds(r.URL.Query().Get("start"))
 	inputPath := ""
 	if startSeconds > 0 {
-		inputPath = taterSeekableVirtualInputURL(r, cfg)
+		inputPath = taterSeekableTranscodeInput(r, cfg, path)
 		if inputPath == "" {
 			http.Error(w, "Unable to prepare seekable transcode input", http.StatusServiceUnavailable)
 			return
@@ -898,7 +898,7 @@ func (h *StreamHandler) serveAudioSyncTranscoded(
 	startSeconds := parseTranscodeStartSeconds(r.URL.Query().Get("start"))
 	inputPath := ""
 	if startSeconds > 0 {
-		inputPath = taterSeekableVirtualInputURL(r, cfg)
+		inputPath = taterSeekableTranscodeInput(r, cfg, path)
 		if inputPath == "" {
 			http.Error(w, "Unable to prepare seekable transcode input", http.StatusServiceUnavailable)
 			return
@@ -965,6 +965,17 @@ func parseTranscodeStartSeconds(value string) float64 {
 		return 0
 	}
 	return start
+}
+
+// taterSeekableTranscodeInput returns the seekable source FFmpeg should open
+// for a resumed transcode. Local-library handlers already resolved path to an
+// operating-system file and must keep using it. Only the NZB virtual stream
+// needs to be reconstructed as a loopback HTTP range request.
+func taterSeekableTranscodeInput(r *http.Request, cfg *config.Config, path string) string {
+	if r == nil || r.URL == nil || r.URL.Path != "/api/files/stream" {
+		return strings.TrimSpace(path)
+	}
+	return taterSeekableVirtualInputURL(r, cfg)
 }
 
 // taterSeekableVirtualInputURL gives FFmpeg a seekable view of an NZB virtual

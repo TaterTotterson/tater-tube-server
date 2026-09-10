@@ -63,6 +63,35 @@ func TestTaterSeekableVirtualInputURLCarriesBearerToken(t *testing.T) {
 	)
 }
 
+func TestTaterSeekableTranscodeInputKeepsLocalFilesystemPath(t *testing.T) {
+	req := httptest.NewRequest(
+		"GET",
+		"http://media.example/api/tater/local/stream?category_id=movies&source=0&path=Movie.mkv&player_token=paired-token&transcode=audio&start=182.5",
+		nil,
+	)
+
+	require.Equal(t, "/media/Movies/Movie.mkv",
+		taterSeekableTranscodeInput(req, &config.Config{
+			Server: config.ServerConfig{Port: 8080},
+		}, "/media/Movies/Movie.mkv"),
+	)
+}
+
+func TestTaterSeekableTranscodeInputUsesLoopbackForNZB(t *testing.T) {
+	req := httptest.NewRequest(
+		"GET",
+		"http://media.example/api/files/stream?path=queue%2FMovie.mkv&player_token=paired-token&transcode=video&start=182.5",
+		nil,
+	)
+
+	require.Equal(t,
+		"http://127.0.0.1:8080/api/files/stream?path=queue%2FMovie.mkv&player_token=paired-token",
+		taterSeekableTranscodeInput(req, &config.Config{
+			Server: config.ServerConfig{Port: 8080},
+		}, "queue/Movie.mkv"),
+	)
+}
+
 func TestBuildFFmpegAudioSyncArgs(t *testing.T) {
 	args := buildFFmpegAudioSyncArgs("", 0)
 	joined := strings.Join(args, " ")
