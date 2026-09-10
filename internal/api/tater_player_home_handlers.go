@@ -2,11 +2,13 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -197,6 +199,10 @@ func (s *Server) handleTaterPlayerLibrary(c *fiber.Ctx) error {
 	}
 
 	baseURL := resolveBaseURL(c, "")
+	shuffleSeed := strings.TrimSpace(c.Query("shuffle_seed"))
+	if len(shuffleSeed) > 128 {
+		shuffleSeed = shuffleSeed[:128]
+	}
 	continueWatching, err := taterContinueWatchingItems(cfg, baseURL, playerToken)
 	if err == nil && len(continueWatching) > 0 {
 		continueWatching = limitTaterPlayerHomeItems(continueWatching)
@@ -217,6 +223,9 @@ func (s *Server) handleTaterPlayerLibrary(c *fiber.Ctx) error {
 		items := taterFilterLocalDiscoverItems(allItems, def.ID)
 		if len(items) == 0 {
 			continue
+		}
+		if taterPlayerLibraryShuffleEligible(def.ID) {
+			taterShufflePlayerLibraryItems(items, shuffleSeed, def.ID)
 		}
 		items = limitTaterPlayerHomeItems(items)
 		decorateTaterPlayerHomeItems(cfg, baseURL, playerToken, items)
@@ -282,6 +291,48 @@ func limitTaterPlayerHomeItems(items []taterUsenetItem) []taterUsenetItem {
 		return items[:taterPlayerHomeItemLimit]
 	}
 	return items
+}
+
+func taterPlayerLibraryShuffleEligible(discoverID string) bool {
+	key := strings.TrimPrefix(strings.TrimSpace(discoverID), "local-discover:")
+	return strings.HasPrefix(key, "genre:")
+}
+
+func taterShufflePlayerLibraryItems(items []taterUsenetItem, seed, rowID string) {
+	seed = strings.TrimSpace(seed)
+	if len(items) < 2 || seed == "" {
+		return
+	}
+	if len(seed) > 128 {
+		seed = seed[:128]
+	}
+	type shuffledItem struct {
+		item taterUsenetItem
+		key  string
+	}
+	shuffled := make([]shuffledItem, len(items))
+	for index, item := range items {
+		identity := strings.Join([]string{
+			seed,
+			rowID,
+			item.CategoryID,
+			strconv.Itoa(item.SourceIndex),
+			item.Path,
+			item.Key,
+			item.Title,
+		}, "\x00")
+		digest := sha256.Sum256([]byte(identity))
+		shuffled[index] = shuffledItem{item: item, key: string(digest[:])}
+	}
+	sort.SliceStable(shuffled, func(i, j int) bool {
+		if shuffled[i].key != shuffled[j].key {
+			return shuffled[i].key < shuffled[j].key
+		}
+		return strings.ToLower(shuffled[i].item.Title) < strings.ToLower(shuffled[j].item.Title)
+	})
+	for index := range shuffled {
+		items[index] = shuffled[index].item
+	}
 }
 
 func taterPlayerHomeChannels(cfg *config.Config, baseURL, playerToken string, now time.Time) ([]taterPlayerHomeChannel, error) {

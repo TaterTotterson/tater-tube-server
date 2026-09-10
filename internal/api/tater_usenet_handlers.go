@@ -290,9 +290,15 @@ func (s *Server) handleTaterUsenetItems(c *fiber.Ctx) error {
 		if c.QueryBool("full", false) {
 			limit = 0
 		}
-		items, err := taterLocalDiscoverItemsWithLimit(cfg, resolveBaseURL(c, ""), playerToken, categoryID, limit)
+		items, err := taterLocalDiscoverItemsWithLimit(cfg, resolveBaseURL(c, ""), playerToken, categoryID, 0)
 		if err != nil {
 			return RespondValidationError(c, "Failed to load local discovery", err.Error())
+		}
+		if taterPlayerLibraryShuffleEligible(categoryID) {
+			taterShufflePlayerLibraryItems(items, c.Query("shuffle_seed"), categoryID)
+		}
+		if limit > 0 && len(items) > limit {
+			items = items[:limit]
 		}
 		items = taterAttachLocalPlayStates(cfg, items)
 		decorateTaterPlayerHomeItems(cfg, resolveBaseURL(c, ""), playerToken, items)
