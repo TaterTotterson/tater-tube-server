@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -285,6 +286,64 @@ func TestTaterPlaybackBitDepthUsesPixelFormatFallback(t *testing.T) {
 	require.Equal(t, 12, taterPlaybackBitDepth("", "yuv420p12le"))
 	require.Equal(t, 10, taterPlaybackBitDepth("10", "yuv420p"))
 	require.Equal(t, 8, taterPlaybackBitDepth("", "yuv420p"))
+}
+
+func TestTaterPlaybackProbeTargetUsesLoopbackForDiscoveryStream(t *testing.T) {
+	cfg := &config.Config{Server: config.ServerConfig{Port: 4229}}
+	target, found, err := taterPlaybackProbeTarget(cfg,
+		"https://public.example/api/files/stream?path=%2Fcomplete%2Fmovie.mkv&player_token=untrusted",
+		"paired-player-token")
+	require.NoError(t, err)
+	require.True(t, found)
+
+	parsed, err := url.Parse(target)
+	require.NoError(t, err)
+	require.Equal(t, "http", parsed.Scheme)
+	require.Equal(t, "127.0.0.1:4229", parsed.Host)
+	require.Equal(t, "/api/files/stream", parsed.Path)
+	require.Equal(t, "/complete/movie.mkv", parsed.Query().Get("path"))
+	require.Equal(t, "paired-player-token", parsed.Query().Get("player_token"))
+}
+
+func TestTaterPlaybackProbeTargetIgnoresUnrelatedURLs(t *testing.T) {
+	cfg := &config.Config{Server: config.ServerConfig{Port: 4229}}
+	target, found, err := taterPlaybackProbeTarget(cfg,
+		"https://public.example/api/files/streams/history?path=%2Fcomplete%2Fmovie.mkv",
+		"paired-player-token")
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Empty(t, target)
+}
+
+func TestTaterPlaybackReleaseNameFallbackProtectsDeckFromUnknown4KDV(t *testing.T) {
+	streamURL := "http://tube.local/api/files/stream?path=%2Fcomplete%2FMovie.2026.2160p.WEB-DL.DV.HDR10%2B.DDP5.1.mkv"
+	source := taterPlaybackMediaInfoFromReleaseName(streamURL)
+	require.Equal(t, "mkv", source.Container)
+	require.Equal(t, "hevc", source.VideoCodec)
+	require.Equal(t, 3840, source.Width)
+	require.Equal(t, 2160, source.Height)
+	require.Equal(t, "dolby_vision", source.VideoRange)
+	require.Equal(t, 10, source.VideoBitDepth)
+	require.Equal(t, "eac3", source.AudioCodec)
+	require.Equal(t, 6, source.AudioChannels)
+
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: streamURL,
+		Profile:   "hdmi_720p",
+		Capabilities: taterPlaybackCapabilities{
+			VideoCodecs:      []string{"hevc", "h264"},
+			AudioCodecs:      []string{"eac3", "aac"},
+			MaxWidth:         1280,
+			MaxHeight:        800,
+			MaxAudioChannels: 6,
+			MaxVideoBitDepth: 8,
+		},
+	}, source)
+	require.Equal(t, "video_transcode", plan.Mode)
+	require.Equal(t, "transcode", plan.VideoMode)
+	require.Equal(t, "direct", plan.AudioMode)
+	require.True(t, plan.ToneMapped)
+	require.Contains(t, plan.QualityLabel, "Dolby Vision → SDR Tone Map")
 }
 
 func playbackPlanQuery(t *testing.T, rawURL string) url.Values {

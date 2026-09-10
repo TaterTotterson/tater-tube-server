@@ -145,7 +145,7 @@ type taterFFprobePlaybackResult struct {
 }
 
 func (s *Server) handleTaterPlayerPlaybackSession(c *fiber.Ctx) error {
-	cfg, _, ok := s.taterAuthorizedConfig(c)
+	cfg, playerToken, ok := s.taterAuthorizedConfig(c)
 	if !ok {
 		return nil
 	}
@@ -162,19 +162,117 @@ func (s *Server) handleTaterPlayerPlaybackSession(c *fiber.Ctx) error {
 		return RespondValidationError(c, "Playback URL is invalid", "stream_url must be absolute")
 	}
 
-	source := taterPlaybackMediaInfo{
-		Container: cleanTaterCodecName(filepath.Ext(parsedPlaybackPath(req.StreamURL))),
-	}
-	if localPath, found, err := taterPlaybackLocalSourcePath(cfg, req.StreamURL); err != nil {
+	source := taterPlaybackMediaInfoFromReleaseName(req.StreamURL)
+	if probeTarget, found, err := taterPlaybackProbeTarget(cfg, req.StreamURL, playerToken); err != nil {
 		return RespondValidationError(c, "Playback source is invalid", err.Error())
 	} else if found {
-		if probed, probeErr := probeTaterPlaybackMedia(c.Context(), cfg, localPath); probeErr == nil {
+		if probed, probeErr := probeTaterPlaybackMedia(c.Context(), cfg, probeTarget); probeErr == nil {
 			source = probed
 		}
 	}
 
 	plan := buildTaterPlaybackPlan(req, source)
 	return RespondSuccess(c, plan)
+}
+
+func taterPlaybackMediaInfoFromReleaseName(rawURL string) taterPlaybackMediaInfo {
+	path := parsedPlaybackPath(rawURL)
+	release := strings.ToLower(filepath.Base(path))
+	searchable := "." + strings.NewReplacer("_", ".", "-", ".", " ", ".").Replace(release) + "."
+	has := func(value string) bool { return strings.Contains(searchable, "."+value+".") }
+
+	info := taterPlaybackMediaInfo{Container: cleanTaterContainerName(filepath.Ext(path))}
+	switch {
+	case has("2160p") || has("4k"):
+		info.Width, info.Height = 3840, 2160
+	case has("1080p") || has("1080i"):
+		info.Width, info.Height = 1920, 1080
+	case has("720p"):
+		info.Width, info.Height = 1280, 720
+	}
+
+	switch {
+	case has("dv") || has("dovi") || strings.Contains(searchable, ".dolby.vision."):
+		info.VideoRange = "dolby_vision"
+		info.VideoCodec = "hevc"
+		info.VideoBitDepth = 10
+	case has("hdr10+") || has("hdr10plus"):
+		info.VideoRange = "hdr10plus"
+		info.VideoBitDepth = 10
+	case has("hdr10") || has("hdr"):
+		info.VideoRange = "hdr10"
+		info.VideoBitDepth = 10
+	}
+	if info.VideoCodec == "" {
+		switch {
+		case has("hevc") || has("h265") || has("x265"):
+			info.VideoCodec = "hevc"
+		case has("av1"):
+			info.VideoCodec = "av1"
+		case has("h264") || has("x264") || has("avc"):
+			info.VideoCodec = "h264"
+		}
+	}
+
+	switch {
+	case has("truehd"):
+		info.AudioCodec = "truehd"
+	case strings.Contains(searchable, ".dts.hd.") || has("dtshd") || has("dtsma"):
+		info.AudioCodec = "dts_hd"
+	case has("eac3") || has("ddp") || strings.Contains(searchable, ".ddp5.1.") || strings.Contains(searchable, ".ddp7.1."):
+		info.AudioCodec = "eac3"
+	case has("ac3") || has("dd"):
+		info.AudioCodec = "ac3"
+	case has("dts"):
+		info.AudioCodec = "dts"
+	case has("aac"):
+		info.AudioCodec = "aac"
+	}
+	switch {
+	case strings.Contains(searchable, "7.1."):
+		info.AudioChannels = 8
+	case strings.Contains(searchable, "5.1."):
+		info.AudioChannels = 6
+	case strings.Contains(searchable, "2.0."):
+		info.AudioChannels = 2
+	}
+	return info
+}
+
+func taterPlaybackProbeTarget(cfg *config.Config, rawURL, playerToken string) (string, bool, error) {
+	if localPath, found, err := taterPlaybackLocalSourcePath(cfg, rawURL); found || err != nil {
+		return localPath, found, err
+	}
+
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || strings.TrimRight(u.Path, "/") != "/api/files/stream" {
+		return "", false, nil
+	}
+	virtualPath := strings.TrimSpace(u.Query().Get("path"))
+	if virtualPath == "" {
+		return "", true, fmt.Errorf("discovery stream path is empty")
+	}
+	playerToken = strings.TrimSpace(playerToken)
+	if playerToken == "" {
+		return "", true, fmt.Errorf("discovery stream authorization is empty")
+	}
+	if cfg == nil || cfg.Server.Port <= 0 {
+		return "", true, fmt.Errorf("server playback port is unavailable")
+	}
+
+	// Probe the prepared virtual file through the server's own streaming endpoint.
+	// Rebuild the URL instead of trusting the client-supplied host or token, which
+	// keeps this path from becoming an SSRF primitive for paired players.
+	probeURL := url.URL{
+		Scheme: "http",
+		Host:   "127.0.0.1:" + strconv.Itoa(cfg.Server.Port),
+		Path:   "/api/files/stream",
+	}
+	query := probeURL.Query()
+	query.Set("path", virtualPath)
+	query.Set("player_token", playerToken)
+	probeURL.RawQuery = query.Encode()
+	return probeURL.String(), true, nil
 }
 
 func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybackMediaInfo) taterPlaybackSessionResponse {
