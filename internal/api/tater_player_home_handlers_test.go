@@ -158,6 +158,7 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 	app := fiber.New()
 	app.Get("/api/v1/player/home", server.handleTaterPlayerHome)
 	app.Get("/api/v1/player/library", server.handleTaterPlayerLibrary)
+	app.Get("/api/tater/playstate/continue", server.handleTaterPlayStateContinue)
 	app.Get("/api/v1/player/artwork/local", server.handleTaterPlayerLocalArtwork)
 
 	request := httptest.NewRequest(http.MethodGet, "http://tube.local/api/v1/player/home", nil)
@@ -235,6 +236,25 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 		}
 	}
 	require.True(t, foundRecentlyAdded)
+
+	continueRequest := httptest.NewRequest(http.MethodGet,
+		"http://tube.local/api/tater/playstate/continue", nil)
+	continueRequest.Header.Set(fiber.HeaderAuthorization, "Bearer home-token")
+	continueResponse, err := app.Test(continueRequest)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, continueResponse.StatusCode)
+	var continueEnvelope testAPIResponse[struct {
+		Items []taterUsenetItem `json:"items"`
+	}]
+	require.NoError(t, json.NewDecoder(continueResponse.Body).Decode(&continueEnvelope))
+	require.True(t, continueEnvelope.Success)
+	require.Len(t, continueEnvelope.Data.Items, 1)
+	require.Contains(t, continueEnvelope.Data.Items[0].Poster,
+		"/api/v1/player/artwork/local")
+	require.Contains(t, continueEnvelope.Data.Items[0].Poster,
+		"player_token=home-token")
+	require.Contains(t, continueEnvelope.Data.Items[0].Poster,
+		"thumbnail=poster")
 }
 
 func TestTaterPlayerHomeCanLoadShelvesWithoutLiveGuide(t *testing.T) {

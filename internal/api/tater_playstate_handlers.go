@@ -52,10 +52,12 @@ func (s *Server) handleTaterPlayStateContinue(c *fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
-	rows, err := taterContinueWatchingItems(cfg, resolveBaseURL(c, ""), playerToken)
+	baseURL := resolveBaseURL(c, "")
+	rows, err := taterContinueWatchingItems(cfg, baseURL, playerToken)
 	if err != nil {
 		return RespondServiceUnavailable(c, "Failed to load play state", err.Error())
 	}
+	decorateTaterPlayerHomeItems(cfg, baseURL, playerToken, rows)
 	return RespondSuccess(c, fiber.Map{"items": rows})
 }
 
