@@ -9,6 +9,7 @@ import (
 	"math"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -582,7 +583,7 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 		profileID = cfg.Transcoding.Profile
 	}
 	if profileID == audioSyncProfileID {
-		h.serveAudioSyncTranscoded(w, r, ctx, path, file, ffmpegPath)
+		h.serveAudioSyncTranscoded(w, r, ctx, path, file, ffmpegPath, cfg)
 		return
 	}
 	profile, ok := transcodeProfiles[profileID]
@@ -615,7 +616,11 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	startSeconds := parseTranscodeStartSeconds(r.URL.Query().Get("start"))
 	inputPath := ""
 	if startSeconds > 0 {
-		inputPath = path
+		inputPath = taterSeekableVirtualInputURL(r, cfg)
+		if inputPath == "" {
+			http.Error(w, "Unable to prepare seekable transcode input", http.StatusServiceUnavailable)
+			return
+		}
 	}
 	toneMapSource, toneMapTarget := requestedTaterToneMap(r)
 	toneMapFilter := taterToneMapFilterForFFmpeg(r.Context(), ffmpegPath, toneMapSource)
@@ -697,7 +702,11 @@ func (h *StreamHandler) serveAudioOnlyVideoTranscoded(
 	startSeconds := parseTranscodeStartSeconds(r.URL.Query().Get("start"))
 	inputPath := ""
 	if startSeconds > 0 {
-		inputPath = path
+		inputPath = taterSeekableVirtualInputURL(r, cfg)
+		if inputPath == "" {
+			http.Error(w, "Unable to prepare seekable transcode input", http.StatusServiceUnavailable)
+			return
+		}
 	}
 	args := buildFFmpegAudioOnlyVideoArgsWithTrack(
 		profile.AudioBitrate, inputPath, startSeconds, requestedTaterAudioTrack(r),
@@ -795,7 +804,11 @@ func (h *StreamHandler) serveVideoOnlyTranscoded(
 	startSeconds := parseTranscodeStartSeconds(r.URL.Query().Get("start"))
 	inputPath := ""
 	if startSeconds > 0 {
-		inputPath = path
+		inputPath = taterSeekableVirtualInputURL(r, cfg)
+		if inputPath == "" {
+			http.Error(w, "Unable to prepare seekable transcode input", http.StatusServiceUnavailable)
+			return
+		}
 	}
 	toneMapSource, toneMapTarget := requestedTaterToneMap(r)
 	toneMapFilter := taterToneMapFilterForFFmpeg(r.Context(), ffmpegPath, toneMapSource)
@@ -880,11 +893,16 @@ func (h *StreamHandler) serveAudioSyncTranscoded(
 	path string,
 	file afero.File,
 	ffmpegPath string,
+	cfg *config.Config,
 ) {
 	startSeconds := parseTranscodeStartSeconds(r.URL.Query().Get("start"))
 	inputPath := ""
 	if startSeconds > 0 {
-		inputPath = path
+		inputPath = taterSeekableVirtualInputURL(r, cfg)
+		if inputPath == "" {
+			http.Error(w, "Unable to prepare seekable transcode input", http.StatusServiceUnavailable)
+			return
+		}
 	}
 	args := buildFFmpegAudioSyncArgs(inputPath, startSeconds)
 	durationSeconds := h.probeMediaDuration(ctx, path)
@@ -947,6 +965,44 @@ func parseTranscodeStartSeconds(value string) float64 {
 		return 0
 	}
 	return start
+}
+
+// taterSeekableVirtualInputURL gives FFmpeg a seekable view of an NZB virtual
+// file. The path accepted by /api/files/stream is not an operating-system path,
+// so passing it directly to FFmpeg works at start=0 (through stdin) but fails
+// when a resumed transcode asks FFmpeg to seek it by filename. Looping back
+// through the non-transcoding stream endpoint preserves HTTP byte ranges and
+// lets FFmpeg perform an efficient input seek.
+func taterSeekableVirtualInputURL(r *http.Request, cfg *config.Config) string {
+	if r == nil || cfg == nil || cfg.Server.Port <= 0 {
+		return ""
+	}
+	path := strings.TrimSpace(r.URL.Query().Get("path"))
+	if path == "" {
+		return ""
+	}
+
+	query := url.Values{}
+	query.Set("path", path)
+	playerToken := strings.TrimSpace(r.URL.Query().Get("player_token"))
+	if playerToken == "" {
+		playerToken = bearerToken(r.Header.Get("Authorization"))
+	}
+	if playerToken == "" {
+		playerToken = strings.TrimSpace(r.Header.Get("X-Tater-Player-Token"))
+	}
+	if playerToken != "" {
+		query.Set("player_token", playerToken)
+	} else if downloadKey := strings.TrimSpace(r.URL.Query().Get("download_key")); downloadKey != "" {
+		query.Set("download_key", downloadKey)
+	}
+
+	return (&url.URL{
+		Scheme:   "http",
+		Host:     "127.0.0.1:" + strconv.Itoa(cfg.Server.Port),
+		Path:     "/api/files/stream",
+		RawQuery: query.Encode(),
+	}).String()
 }
 
 func (h *StreamHandler) probeMediaDuration(ctx context.Context, path string) float64 {

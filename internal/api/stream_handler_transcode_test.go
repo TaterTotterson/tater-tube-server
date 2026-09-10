@@ -30,6 +30,39 @@ func TestBuildFFmpegTranscodeArgsFileSeek(t *testing.T) {
 	require.NotContains(t, joined, "-i pipe:0")
 }
 
+func TestTaterSeekableVirtualInputURLUsesLoopbackRangeStream(t *testing.T) {
+	req := httptest.NewRequest(
+		"GET",
+		"http://media.example/api/files/stream?path=queue%2FMovie.mkv&player_token=paired-token&transcode=video&profile=hdmi_1080p&start=182.5",
+		nil,
+	)
+	inputURL := taterSeekableVirtualInputURL(req, &config.Config{
+		Server: config.ServerConfig{Port: 8080},
+	})
+
+	require.Equal(t,
+		"http://127.0.0.1:8080/api/files/stream?path=queue%2FMovie.mkv&player_token=paired-token",
+		inputURL,
+	)
+	require.NotContains(t, inputURL, "transcode")
+	require.NotContains(t, inputURL, "start")
+	require.NotContains(t, inputURL, "profile")
+}
+
+func TestTaterSeekableVirtualInputURLCarriesBearerToken(t *testing.T) {
+	req := httptest.NewRequest(
+		"GET", "http://media.example/api/files/stream?path=queue%2FMovie.mkv", nil,
+	)
+	req.Header.Set("Authorization", "Bearer paired-token")
+
+	require.Equal(t,
+		"http://127.0.0.1:8080/api/files/stream?path=queue%2FMovie.mkv&player_token=paired-token",
+		taterSeekableVirtualInputURL(req, &config.Config{
+			Server: config.ServerConfig{Port: 8080},
+		}),
+	)
+}
+
 func TestBuildFFmpegAudioSyncArgs(t *testing.T) {
 	args := buildFFmpegAudioSyncArgs("", 0)
 	joined := strings.Join(args, " ")
