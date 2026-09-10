@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -43,6 +44,33 @@ func TestTaterPlayerLibraryRequiresPairedPlayer(t *testing.T) {
 	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/api/v1/player/library", nil))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusUnauthorized, response.StatusCode)
+}
+
+func TestTaterPlayerLibraryShuffleIsStableForOnePlayerSession(t *testing.T) {
+	items := make([]taterUsenetItem, 16)
+	for index := range items {
+		items[index] = taterUsenetItem{
+			Title:       fmt.Sprintf("Movie %02d", index),
+			CategoryID:  "local:movies",
+			SourceIndex: 0,
+			Path:        fmt.Sprintf("Movie %02d/movie.mkv", index),
+		}
+	}
+
+	first := append([]taterUsenetItem(nil), items...)
+	second := append([]taterUsenetItem(nil), items...)
+	nextSession := append([]taterUsenetItem(nil), items...)
+	taterShufflePlayerLibraryItems(first, "player-session-one", "local-discover:genre:action")
+	taterShufflePlayerLibraryItems(second, "player-session-one", "local-discover:genre:action")
+	taterShufflePlayerLibraryItems(nextSession, "player-session-two", "local-discover:genre:action")
+
+	require.Equal(t, first, second)
+	require.NotEqual(t, items, first)
+	require.NotEqual(t, first, nextSession)
+	require.True(t, taterPlayerLibraryShuffleEligible("local-discover:genre:action"))
+	require.False(t, taterPlayerLibraryShuffleEligible("local-discover:decade:1980"))
+	require.False(t, taterPlayerLibraryShuffleEligible("local-discover:recent"))
+	require.False(t, taterPlayerLibraryShuffleEligible("local-discover:movies"))
 }
 
 func TestTaterPlayerLinkedHeroFallsBackWithoutTaterLink(t *testing.T) {
