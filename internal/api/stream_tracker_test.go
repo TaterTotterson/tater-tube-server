@@ -371,6 +371,96 @@ func TestStreamTracker_GetActive_IncludesTrackedAndRecentHLSPlayback(t *testing.
 	assert.False(t, hasStale)
 }
 
+func TestStreamTracker_PlayerPresenceContinuesAfterTransferCompletes(t *testing.T) {
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+
+	transfer := tracker.AddStream(
+		"Moonrise.Manor.2026.2160p.mkv",
+		"API",
+		"Living Room",
+		"10.0.0.2",
+		"TaterTubePlayer",
+		4096,
+	)
+	tracker.SetPlayerID(transfer.ID, "player-living-room")
+	tracker.SetTranscodingInfo(
+		transfer.ID, "hdmi_1080p", "HDMI 1080p", "qsv", "/dev/dri/renderD128", "h264_qsv", true,
+	)
+	tracker.SetVideoResolutionInfo(transfer.ID, 3840, 2160, 1920, 1080)
+	tracker.UpdateProgress(transfer.ID, 4096)
+	tracker.Remove(transfer.ID)
+
+	presence := nzbfilesystem.ActiveStream{
+		FilePath:         "Moonrise.Manor.2026.2160p.mkv",
+		Source:           "Discovery",
+		PlayerID:         "player-living-room",
+		UserName:         "Living Room",
+		PlaybackPosition: 120,
+		MediaDuration:    600,
+	}
+	tracker.SetPlayerPlaybackPresence(presence, true)
+
+	active := tracker.GetActive()
+	assert.Len(t, active, 1)
+	assert.Equal(t, "player-playback:player-living-room", active[0].ID)
+	assert.Equal(t, "Playing", active[0].Status)
+	assert.Equal(t, 120.0, active[0].PlaybackPosition)
+	assert.True(t, active[0].Transcoded)
+	assert.True(t, active[0].HardwareActive)
+	assert.Equal(t, 3840, active[0].SourceWidth)
+	assert.Equal(t, 2160, active[0].SourceHeight)
+	assert.Equal(t, 1920, active[0].OutputWidth)
+	assert.Equal(t, 1080, active[0].OutputHeight)
+
+	tracker.SetPlayerPlaybackPresence(presence, false)
+	assert.Empty(t, tracker.GetActive())
+}
+
+func TestStreamTracker_PlayerPresenceDoesNotDuplicateActiveTransfer(t *testing.T) {
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+
+	transfer := tracker.AddStream(
+		"/movies/Moonrise Manor.mkv",
+		"Local",
+		"Living Room",
+		"10.0.0.2",
+		"TaterTubePlayer",
+		4096,
+	)
+	tracker.SetPlayerID(transfer.ID, "player-living-room")
+	tracker.SetPlayerPlaybackPresence(nzbfilesystem.ActiveStream{
+		FilePath: "Moonrise Manor.mkv",
+		Source:   "Local",
+		PlayerID: "player-living-room",
+		UserName: "Living Room",
+	}, true)
+
+	active := tracker.GetActive()
+	assert.Len(t, active, 1)
+	assert.Equal(t, "/movies/Moonrise Manor.mkv", active[0].FilePath)
+	assert.NotEqual(t, "player-playback:player-living-room", active[0].ID)
+}
+
+func TestStreamTracker_PlayerPresenceExpiresWithoutHeartbeat(t *testing.T) {
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+
+	tracker.playbackPresences.Store("player-away", nzbfilesystem.ActiveStream{
+		ID:           "player-playback:player-away",
+		FilePath:     "Old Movie.mkv",
+		PlayerID:     "player-away",
+		LastActivity: time.Now().Add(-playerPlaybackPresenceWindow),
+		Status:       "Playing",
+		IsActive:     true,
+	})
+
+	assert.Empty(t, tracker.GetActive())
+	_, exists := tracker.playbackPresences.Load("player-away")
+	assert.False(t, exists)
+}
+
 func TestStreamTracker_RestoresPersistentPlaybackActivity(t *testing.T) {
 	store := &memoryPlaybackHistoryStore{}
 	started := time.Now().Add(-90 * time.Second)

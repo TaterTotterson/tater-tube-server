@@ -18,6 +18,7 @@ import (
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"github.com/gofiber/fiber/v2"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestTaterLocalMovieItemsScansCleanMovieRows(t *testing.T) {
@@ -299,6 +300,101 @@ func TestTaterDiscoverPlayStateAppearsInContinueWatching(t *testing.T) {
 	}
 	if row.Poster != "https://art.example/moonrise-poster.jpg" || row.Description == "" {
 		t.Fatalf("expected Discover artwork and metadata to survive, got %#v", row)
+	}
+}
+
+func TestTaterPlayStateHeartbeatTracksPlayerUntilStopped(t *testing.T) {
+	configDir := t.TempDir()
+	cfg := config.DefaultConfig(configDir)
+	cfg.Players.Paired = []config.PlayerConfig{{
+		ID: "living-room-player", Name: "Living Room", TokenHash: hashTaterSecret("player-token"),
+	}}
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+	server := &Server{
+		configManager: &mockConfigManager{cfg: cfg},
+		streamTracker: tracker,
+	}
+	app := fiber.New()
+	app.Post("/playstate", server.handleTaterPlayStateSave)
+
+	active := true
+	state := taterPlayState{
+		Title:          "Moonrise Manor",
+		MediaType:      "movie",
+		CategoryID:     "local:movies",
+		Path:           "Moonrise Manor/Moonrise Manor.mkv",
+		PositionMS:     30_000,
+		DurationMS:     600_000,
+		PlaybackActive: &active,
+	}
+	post := func(value taterPlayState) *http.Response {
+		body, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/playstate", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer player-token")
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+
+	assert.Equal(t, http.StatusOK, post(state).StatusCode)
+	streams := tracker.GetActive()
+	assert.Len(t, streams, 1)
+	assert.Equal(t, "living-room-player", streams[0].PlayerID)
+	assert.Equal(t, "Living Room", streams[0].UserName)
+	assert.Equal(t, 30.0, streams[0].PlaybackPosition)
+	assert.Equal(t, 600.0, streams[0].MediaDuration)
+
+	// Reaching the completion threshold removes the item from Continue
+	// Watching, but must not make an actively playing credits sequence vanish
+	// from Active Streams.
+	state.PositionMS = 590_000
+	assert.Equal(t, http.StatusOK, post(state).StatusCode)
+	assert.Len(t, tracker.GetActive(), 1)
+
+	store, err := loadTaterPlayStateStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, saved := range store.Items {
+		assert.Nil(t, saved.PlaybackActive)
+		assert.True(t, saved.Completed)
+	}
+
+	active = false
+	state.PlaybackActive = &active
+	assert.Equal(t, http.StatusOK, post(state).StatusCode)
+	assert.Empty(t, tracker.GetActive())
+}
+
+func TestTaterPlayStateCompletedUsesCreditsThreshold(t *testing.T) {
+	tests := []struct {
+		name       string
+		positionMS int64
+		durationMS int64
+		completed  bool
+	}{
+		{name: "movie before credits threshold", positionMS: 6_840_000, durationMS: 7_200_000},
+		{name: "movie at five minute cap", positionMS: 6_900_000, durationMS: 7_200_000, completed: true},
+		{name: "episode before five percent", positionMS: 1_709_000, durationMS: 1_800_000},
+		{name: "episode at five percent", positionMS: 1_710_000, durationMS: 1_800_000, completed: true},
+		{name: "short video before ten seconds", positionMS: 229_000, durationMS: 240_000},
+		{name: "short video at ten seconds", positionMS: 230_000, durationMS: 240_000, completed: true},
+		{name: "unknown duration", positionMS: 1_000, durationMS: 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.completed, taterPlayStateCompleted(taterPlayState{
+				PositionMS: test.positionMS,
+				DurationMS: test.durationMS,
+			}))
+		})
 	}
 }
 

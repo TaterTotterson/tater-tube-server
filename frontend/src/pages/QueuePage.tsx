@@ -150,7 +150,8 @@ function clockLabel(date?: Date) {
 function isLive(stream: ActiveStream) {
 	const status = String(stream.status || "").toLowerCase();
 	const activeStatus =
-		["starting", "buffering", "streaming"].includes(status) || status.startsWith("transcoding");
+		["starting", "buffering", "streaming", "playing"].includes(status) ||
+		status.startsWith("transcoding");
 	if (typeof stream.is_active === "boolean") return stream.is_active && activeStatus;
 	const date = activityDate(stream);
 	const age = date ? Date.now() - date.getTime() : Number.POSITIVE_INFINITY;
