@@ -15,30 +15,34 @@ import (
 	"time"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/TaterTotterson/tater-tube-server/internal/nzbfilesystem"
 	"github.com/gofiber/fiber/v2"
 )
 
 type taterPlayState struct {
-	ID          string    `json:"id"`
-	SeriesID    string    `json:"seriesId,omitempty"`
-	Title       string    `json:"title"`
-	SeriesTitle string    `json:"seriesTitle,omitempty"`
-	MediaType   string    `json:"mediaType,omitempty"`
-	Category    string    `json:"category,omitempty"`
-	CategoryID  string    `json:"categoryId,omitempty"`
-	SourceIndex int       `json:"sourceIndex,omitempty"`
-	Path        string    `json:"path,omitempty"`
-	NzbURL      string    `json:"nzbUrl,omitempty"`
-	StreamIndex int       `json:"discoverStreamIndex,omitempty"`
-	SourceTitle string    `json:"discoverSourceTitle,omitempty"`
-	Poster      string    `json:"poster,omitempty"`
-	Backdrop    string    `json:"backdrop,omitempty"`
-	Description string    `json:"description,omitempty"`
-	Date        string    `json:"date,omitempty"`
-	PositionMS  int64     `json:"positionMs,omitempty"`
-	DurationMS  int64     `json:"durationMs,omitempty"`
-	Completed   bool      `json:"completed,omitempty"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID          string `json:"id"`
+	SeriesID    string `json:"seriesId,omitempty"`
+	Title       string `json:"title"`
+	SeriesTitle string `json:"seriesTitle,omitempty"`
+	MediaType   string `json:"mediaType,omitempty"`
+	Category    string `json:"category,omitempty"`
+	CategoryID  string `json:"categoryId,omitempty"`
+	SourceIndex int    `json:"sourceIndex,omitempty"`
+	Path        string `json:"path,omitempty"`
+	NzbURL      string `json:"nzbUrl,omitempty"`
+	StreamIndex int    `json:"discoverStreamIndex,omitempty"`
+	SourceTitle string `json:"discoverSourceTitle,omitempty"`
+	Poster      string `json:"poster,omitempty"`
+	Backdrop    string `json:"backdrop,omitempty"`
+	Description string `json:"description,omitempty"`
+	Date        string `json:"date,omitempty"`
+	PositionMS  int64  `json:"positionMs,omitempty"`
+	DurationMS  int64  `json:"durationMs,omitempty"`
+	Completed   bool   `json:"completed,omitempty"`
+	// PlaybackActive is an ephemeral paired-player heartbeat. It is cleared
+	// before persistence and therefore never becomes part of watch history.
+	PlaybackActive *bool     `json:"playbackActive,omitempty"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 type taterPlayStateStore struct {
@@ -106,7 +110,7 @@ func taterContinueWatchingItems(cfg *config.Config, baseURL, playerToken string)
 }
 
 func (s *Server) handleTaterPlayStateSave(c *fiber.Ctx) error {
-	cfg, _, ok := s.taterAuthorizedConfig(c)
+	cfg, playerToken, ok := s.taterAuthorizedConfig(c)
 	if !ok {
 		return nil
 	}
@@ -166,9 +170,12 @@ func (s *Server) handleTaterPlayStateSave(c *fiber.Ctx) error {
 		req.Title = cleanMovieTitleFromName(strings.TrimSuffix(filepath.Base(req.Path), filepath.Ext(req.Path)))
 	}
 	req.UpdatedAt = time.Now().UTC()
+	explicitlyCompleted := req.Completed
 	if taterPlayStateCompleted(req) {
 		req.Completed = true
 	}
+	playbackActive := req.PlaybackActive
+	req.PlaybackActive = nil
 
 	store, err := loadTaterPlayStateStore(cfg)
 	if err != nil {
@@ -177,6 +184,30 @@ func (s *Server) handleTaterPlayStateSave(c *fiber.Ctx) error {
 	store.Items[req.ID] = req
 	if err := saveTaterPlayStateStore(cfg, store); err != nil {
 		return RespondServiceUnavailable(c, "Failed to save play state", err.Error())
+	}
+
+	if playbackActive != nil && s.streamTracker != nil {
+		if player, found := findTaterPlayerByToken(cfg, playerToken); found {
+			filePath := req.Path
+			source := "Local"
+			if req.NzbURL != "" {
+				filePath = req.SourceTitle
+				source = "Discovery"
+			}
+			if strings.TrimSpace(filePath) == "" {
+				filePath = req.Title
+			}
+			s.streamTracker.SetPlayerPlaybackPresence(nzbfilesystem.ActiveStream{
+				FilePath:         filePath,
+				Source:           source,
+				PlayerID:         player.ID,
+				UserName:         taterPlayerDisplayName(player),
+				ClientIP:         c.IP(),
+				UserAgent:        c.Get("User-Agent"),
+				PlaybackPosition: float64(req.PositionMS) / 1000,
+				MediaDuration:    float64(req.DurationMS) / 1000,
+			}, *playbackActive && !explicitlyCompleted)
+		}
 	}
 
 	return RespondSuccess(c, fiber.Map{"saved": true})
@@ -490,9 +521,11 @@ func taterPlayStateCompleted(state taterPlayState) bool {
 		return false
 	}
 	remaining := state.DurationMS - state.PositionMS
-	threshold := int64(30_000)
+	threshold := state.DurationMS / 20
 	if state.DurationMS < 300_000 {
 		threshold = 10_000
+	} else {
+		threshold = max(int64(30_000), min(int64(300_000), threshold))
 	}
 	return remaining <= threshold
 }

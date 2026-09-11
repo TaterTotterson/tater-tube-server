@@ -22,6 +22,7 @@ import (
 const defaultStreamTimeout = 4 * time.Hour
 const playbackHistoryLimit = 250
 const recentPlaybackActivityWindow = 20 * time.Second
+const playerPlaybackPresenceWindow = 45 * time.Second
 
 type playbackHistoryStore interface {
 	UpsertPlaybackHistory(context.Context, *database.PlaybackHistoryEntry) error
@@ -37,15 +38,19 @@ type StreamChangeNotifier interface {
 
 // StreamTracker tracks active streams
 type StreamTracker struct {
-	streams        sync.Map
-	history        []nzbfilesystem.ActiveStream
-	done           chan struct{}
-	mu             sync.Mutex // For history protection
-	timeout        time.Duration
-	metricsTracker usenet.MetricsTracker
-	historyStore   playbackHistoryStore
-	persistQueue   chan nzbfilesystem.ActiveStream
-	persistDone    chan struct{}
+	streams sync.Map
+	// playbackPresences tracks the paired player's viewing session separately
+	// from the HTTP reader. A player can continue consuming mpv's buffer after
+	// that reader has closed, so transfer lifetime alone is not playback state.
+	playbackPresences sync.Map
+	history           []nzbfilesystem.ActiveStream
+	done              chan struct{}
+	mu                sync.Mutex // For history protection
+	timeout           time.Duration
+	metricsTracker    usenet.MetricsTracker
+	historyStore      playbackHistoryStore
+	persistQueue      chan nzbfilesystem.ActiveStream
+	persistDone       chan struct{}
 
 	// activeCount is the exact number of entries currently in the streams map.
 	// Maintained as an int64 counter so ActiveStreams() is O(1) and safe to
@@ -409,6 +414,51 @@ func (t *StreamTracker) SetPlayerID(id, playerID string) {
 		stream := val.(*streamInternal)
 		stream.PlayerID = strings.TrimSpace(playerID)
 	}
+}
+
+// SetPlayerPlaybackPresence records whether a paired player still has a
+// non-live item open. It does not count as an active transfer for pool
+// admission; GetHistory/GetActive use it only when no real reader for the same
+// player is active. Missing heartbeats expire automatically.
+func (t *StreamTracker) SetPlayerPlaybackPresence(record nzbfilesystem.ActiveStream, active bool) {
+	if t == nil {
+		return
+	}
+	playerKey := strings.ToLower(strings.TrimSpace(record.PlayerID))
+	if playerKey == "" {
+		return
+	}
+	if !active {
+		t.playbackPresences.Delete(playerKey)
+		return
+	}
+
+	now := time.Now()
+	record.ID = "player-playback:" + playerKey
+	record.PlayerID = strings.TrimSpace(record.PlayerID)
+	record.UserName = strings.TrimSpace(record.UserName)
+	record.FilePath = strings.TrimSpace(record.FilePath)
+	if record.FilePath == "" {
+		record.FilePath = "Tater Tube playback"
+	}
+	if record.Source == "" {
+		record.Source = "Tater Tube Player"
+	}
+	if previous, ok := t.playbackPresences.Load(playerKey); ok {
+		previousRecord := previous.(nzbfilesystem.ActiveStream)
+		if record.StartedAt.IsZero() {
+			record.StartedAt = previousRecord.StartedAt
+		}
+	}
+	if record.StartedAt.IsZero() {
+		record.StartedAt = now
+	}
+	record.LastActivity = now
+	record.Status = "Playing"
+	record.IsActive = true
+	record.ActivityAgeSeconds = 0
+	updateWatchedDuration(&record)
+	t.playbackPresences.Store(playerKey, record)
 }
 
 // UpdateProgress updates the bytes sent for a stream by ID
@@ -794,6 +844,51 @@ func (t *StreamTracker) GetHistory() []nzbfilesystem.ActiveStream {
 		}
 	}
 
+	// A completed transfer is not necessarily completed playback: mpv may have
+	// buffered the remainder of the item. Add the player's short-lived presence
+	// heartbeat only after determining which real readers are active, and hide
+	// it while a reader for that same paired player is already represented.
+	activePlayers := make(map[string]bool)
+	latestByPlayer := make(map[string]nzbfilesystem.ActiveStream)
+	for _, stream := range streams {
+		playerKey := strings.ToLower(strings.TrimSpace(stream.PlayerID))
+		if playerKey == "" {
+			continue
+		}
+		if stream.IsActive {
+			activePlayers[playerKey] = true
+		}
+		if previous, ok := latestByPlayer[playerKey]; !ok ||
+			streamSortTime(stream).After(streamSortTime(previous)) {
+			latestByPlayer[playerKey] = stream
+		}
+	}
+	t.playbackPresences.Range(func(key, value any) bool {
+		playerKey, _ := key.(string)
+		presence, ok := value.(nzbfilesystem.ActiveStream)
+		if !ok {
+			t.playbackPresences.Delete(key)
+			return true
+		}
+		age := now.Sub(presence.LastActivity)
+		if age < 0 || age >= playerPlaybackPresenceWindow {
+			t.playbackPresences.Delete(key)
+			return true
+		}
+		if activePlayers[playerKey] {
+			return true
+		}
+		if transfer, ok := latestByPlayer[playerKey]; ok {
+			copyStreamPresentation(&presence, transfer)
+		}
+		presence.IsActive = true
+		presence.Status = "Playing"
+		presence.ActivityAgeSeconds = int64(age / time.Second)
+		updateWatchedDuration(&presence)
+		streams = append(streams, presence)
+		return true
+	})
+
 	sort.SliceStable(streams, func(i, j int) bool {
 		return streamSortTime(streams[i]).After(streamSortTime(streams[j]))
 	})
@@ -801,6 +896,39 @@ func (t *StreamTracker) GetHistory() []nzbfilesystem.ActiveStream {
 		streams = streams[:playbackHistoryLimit]
 	}
 	return streams
+}
+
+// copyStreamPresentation retains the useful server-side processing details on
+// a player presence after the byte-transfer record itself has completed.
+func copyStreamPresentation(dst *nzbfilesystem.ActiveStream, src nzbfilesystem.ActiveStream) {
+	if dst == nil {
+		return
+	}
+	dst.TotalSize = src.TotalSize
+	dst.BytesSent = src.BytesSent
+	dst.BytesDownloaded = src.BytesDownloaded
+	dst.CurrentOffset = src.CurrentOffset
+	dst.BufferedOffset = src.BufferedOffset
+	dst.Transcoded = src.Transcoded
+	dst.TranscodeProfile = src.TranscodeProfile
+	dst.TranscodeName = src.TranscodeName
+	dst.HardwareAccel = src.HardwareAccel
+	dst.HardwareDevice = src.HardwareDevice
+	dst.VideoCodec = src.VideoCodec
+	dst.VideoMode = src.VideoMode
+	dst.AudioMode = src.AudioMode
+	dst.AudioCodec = src.AudioCodec
+	dst.SourceWidth = src.SourceWidth
+	dst.SourceHeight = src.SourceHeight
+	dst.OutputWidth = src.OutputWidth
+	dst.OutputHeight = src.OutputHeight
+	dst.SourceVideoRange = src.SourceVideoRange
+	dst.OutputVideoRange = src.OutputVideoRange
+	dst.ToneMapped = src.ToneMapped
+	dst.HardwareActive = src.HardwareActive
+	if dst.MediaDuration <= 0 {
+		dst.MediaDuration = src.MediaDuration
+	}
 }
 
 // GetActive returns every playback session that is currently active. In
@@ -959,7 +1087,7 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 
 func playbackStatusIsLive(status string) bool {
 	status = strings.ToLower(strings.TrimSpace(status))
-	return status == "starting" || status == "buffering" || status == "streaming" || strings.HasPrefix(status, "transcoding")
+	return status == "starting" || status == "buffering" || status == "streaming" || status == "playing" || strings.HasPrefix(status, "transcoding")
 }
 
 func streamSortTime(stream nzbfilesystem.ActiveStream) time.Time {
