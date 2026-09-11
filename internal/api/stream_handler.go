@@ -554,6 +554,7 @@ func (h *StreamHandler) shouldTranscode(r *http.Request, path string) bool {
 		transcodeValue == "true" ||
 		transcodeValue == "on" ||
 		transcodeValue == "yes" ||
+		isRemuxRequest(r) ||
 		isAudioOnlyTranscodeRequest(r) ||
 		isVideoOnlyTranscodeRequest(r)
 	if !forceTranscode {
@@ -602,6 +603,27 @@ func isVideoOnlyTranscodeRequest(r *http.Request) bool {
 	}
 }
 
+func isRemuxRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("transcode")), "remux")
+}
+
+func requestedTaterOutputContainer(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	return cleanTaterPreferredStreamContainer(r.URL.Query().Get("tater_output_container"))
+}
+
+func taterPartialTranscodeOutput(container string) (format, contentType, suffix string) {
+	if cleanTaterPreferredStreamContainer(container) == "mpegts" {
+		return "mpegts", "video/mp2t", ".ts"
+	}
+	return "matroska", "video/x-matroska", ".mkv"
+}
+
 func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, ctx context.Context, path string, file afero.File) {
 	cfg := h.configGetter()
 	if cfg == nil {
@@ -613,6 +635,10 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	if _, err := exec.LookPath(ffmpegPath); err != nil {
 		slog.ErrorContext(ctx, "FFmpeg not available for transcoding", "path", ffmpegPath, "error", err)
 		http.Error(w, "Transcoding unavailable: ffmpeg not found", http.StatusServiceUnavailable)
+		return
+	}
+	if isRemuxRequest(r) {
+		h.serveRemuxed(w, r, ctx, path, file, ffmpegPath, cfg)
 		return
 	}
 	if isAudioOnlyTranscodeRequest(r) {
@@ -729,6 +755,79 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
+func (h *StreamHandler) serveRemuxed(
+	w http.ResponseWriter,
+	r *http.Request,
+	ctx context.Context,
+	path string,
+	file afero.File,
+	ffmpegPath string,
+	cfg *config.Config,
+) {
+	if requestedTaterOutputContainer(r) != "mpegts" {
+		http.Error(w, "Requested stream container is unavailable", http.StatusBadRequest)
+		return
+	}
+
+	startSeconds := parseTranscodeStartSeconds(r.URL.Query().Get("start"))
+	inputPath := ""
+	if startSeconds > 0 {
+		inputPath = taterSeekableTranscodeInput(r, cfg, path)
+		if inputPath == "" {
+			http.Error(w, "Unable to prepare seekable stream input", http.StatusServiceUnavailable)
+			return
+		}
+	}
+	args := buildFFmpegRemuxArgs(inputPath, startSeconds, requestedTaterAudioTrack(r))
+	durationSeconds := h.probeMediaDuration(ctx, path)
+	streamID := streamIDForResponse(w, file)
+	if h.streamTracker != nil && streamID != "" {
+		h.streamTracker.SetTrackProcessingInfo(
+			streamID,
+			requestedTaterTrackMode(r, "tater_video_mode", "direct"),
+			requestedTaterTrackMode(r, "tater_audio_mode", "direct"),
+			cleanTaterCodecName(r.URL.Query().Get("tater_audio_codec")),
+			"Remuxing stream",
+		)
+		if durationSeconds > 0 || startSeconds > 0 {
+			h.streamTracker.SetMediaInfo(streamID, durationSeconds, startSeconds)
+		}
+		applyTaterRequestedDynamicRangeInfo(h.streamTracker, streamID, r)
+		applyTaterRequestedResolutionInfo(h.streamTracker, streamID, r)
+	}
+
+	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
+	if inputPath == "" {
+		cmd.Stdin = file
+	}
+	var stderr limitedBuffer
+	cmd.Stderr = &stderr
+	cmd.Stdout = flushWriter{w: w}
+
+	w.Header().Set("Content-Type", "video/mp2t")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Disposition", `inline; filename="`+filepath.Base(path)+`.remux.ts"`)
+	w.Header().Set("X-Tater-Transcode-Profile", "mpegts_remux")
+	w.Header().Set("X-Tater-Video-Mode", requestedTaterTrackMode(r, "tater_video_mode", "direct"))
+	w.Header().Set("X-Tater-Audio-Mode", requestedTaterTrackMode(r, "tater_audio_mode", "direct"))
+	w.Header().Set("X-Tater-Audio-Codec", cleanTaterCodecName(r.URL.Query().Get("tater_audio_codec")))
+	w.Header().Del("Accept-Ranges")
+	w.WriteHeader(http.StatusOK)
+
+	slog.InfoContext(ctx, "Starting FFmpeg MPEG-TS remux stream",
+		"path", path,
+		"container", "mpegts",
+		"start_seconds", startSeconds)
+
+	if err := cmd.Run(); err != nil && r.Context().Err() == nil {
+		slog.ErrorContext(ctx, "FFmpeg MPEG-TS remux failed",
+			"path", path,
+			"start_seconds", startSeconds,
+			"error", err,
+			"stderr", stderr.String())
+	}
+}
+
 func (h *StreamHandler) serveAudioOnlyVideoTranscoded(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -755,8 +854,10 @@ func (h *StreamHandler) serveAudioOnlyVideoTranscoded(
 			return
 		}
 	}
-	args := buildFFmpegAudioOnlyVideoArgsWithTrack(
-		profile.AudioBitrate, inputPath, startSeconds, requestedTaterAudioTrack(r),
+	outputContainer := requestedTaterOutputContainer(r)
+	outputFormat, contentType, suffix := taterPartialTranscodeOutput(outputContainer)
+	args := buildFFmpegAudioOnlyVideoArgsWithTrackAndContainer(
+		profile.AudioBitrate, inputPath, startSeconds, requestedTaterAudioTrack(r), outputContainer,
 	)
 	durationSeconds := h.probeMediaDuration(ctx, path)
 	streamID := h.markTranscodedStream(
@@ -780,9 +881,9 @@ func (h *StreamHandler) serveAudioOnlyVideoTranscoded(
 	cmd.Stderr = &stderr
 	cmd.Stdout = flushWriter{w: w}
 
-	w.Header().Set("Content-Type", "video/x-matroska")
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Disposition", `inline; filename="`+filepath.Base(path)+`.audio-aac.mkv"`)
+	w.Header().Set("Content-Disposition", `inline; filename="`+filepath.Base(path)+`.audio-aac`+suffix+`"`)
 	w.Header().Set("X-Tater-Transcode-Profile", audioOnlyProfileID)
 	w.Header().Set("X-Tater-Video-Mode", "direct")
 	w.Header().Set("X-Tater-Audio-Mode", "transcode")
@@ -792,6 +893,7 @@ func (h *StreamHandler) serveAudioOnlyVideoTranscoded(
 
 	slog.InfoContext(ctx, "Starting FFmpeg audio-only transcode stream",
 		"path", path,
+		"container", outputFormat,
 		"video_mode", "direct",
 		"audio_mode", "transcode",
 		"audio_codec", "aac",
@@ -864,9 +966,11 @@ func (h *StreamHandler) serveVideoOnlyTranscoded(
 		http.Error(w, "Tone mapping unavailable in the configured FFmpeg build", http.StatusServiceUnavailable)
 		return
 	}
-	args := buildFFmpegVideoOnlyArgsWithToneMapFilterAndAudioTrack(
+	outputContainer := requestedTaterOutputContainer(r)
+	outputFormat, contentType, suffix := taterPartialTranscodeOutput(outputContainer)
+	args := buildFFmpegVideoOnlyArgsWithToneMapFilterAndAudioTrackAndContainer(
 		transcodeCfg, profile, accel, videoCodecPreference, inputPath, startSeconds,
-		toneMapSource, toneMapTarget, toneMapFilter, requestedTaterAudioTrack(r),
+		toneMapSource, toneMapTarget, toneMapFilter, requestedTaterAudioTrack(r), outputContainer,
 	)
 	videoCodec, _ := transcodeVideoSettingsForCodec(
 		accel, transcodeCfg.HardwareDevice, profile, videoCodecPreference,
@@ -902,9 +1006,9 @@ func (h *StreamHandler) serveVideoOnlyTranscoded(
 	cmd.Stderr = &stderr
 	cmd.Stdout = flushWriter{w: w}
 
-	w.Header().Set("Content-Type", "video/x-matroska")
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Disposition", `inline; filename="`+filepath.Base(path)+`.video.mkv"`)
+	w.Header().Set("Content-Disposition", `inline; filename="`+filepath.Base(path)+`.video`+suffix+`"`)
 	w.Header().Set("X-Tater-Transcode-Profile", videoOnlyProfileID)
 	w.Header().Set("X-Tater-Video-Mode", "transcode")
 	w.Header().Set("X-Tater-Audio-Mode", audioMode)
@@ -914,6 +1018,7 @@ func (h *StreamHandler) serveVideoOnlyTranscoded(
 
 	slog.InfoContext(ctx, "Starting FFmpeg video-only transcode stream",
 		"path", path,
+		"container", outputFormat,
 		"profile", profileID,
 		"profile_name", profile.Name,
 		"video_mode", "transcode",
@@ -1179,12 +1284,7 @@ func (h *StreamHandler) markTranscodedStream(w http.ResponseWriter, file afero.F
 		return ""
 	}
 
-	streamID := ""
-	if tracked, ok := w.(*trackedResponseWriter); ok && tracked.stream != nil {
-		streamID = tracked.stream.ID
-	} else if mvf, ok := file.(*nzbfilesystem.MetadataVirtualFile); ok {
-		streamID = mvf.GetStreamID()
-	}
+	streamID := streamIDForResponse(w, file)
 	if streamID == "" {
 		return ""
 	}
@@ -1202,6 +1302,15 @@ func (h *StreamHandler) markTranscodedStream(w http.ResponseWriter, file afero.F
 		h.streamTracker.SetMediaInfo(streamID, durationSeconds, playbackStartSeconds)
 	}
 	return streamID
+}
+
+func streamIDForResponse(w http.ResponseWriter, file afero.File) string {
+	if tracked, ok := w.(*trackedResponseWriter); ok && tracked.stream != nil {
+		return tracked.stream.ID
+	} else if mvf, ok := file.(*nzbfilesystem.MetadataVirtualFile); ok {
+		return mvf.GetStreamID()
+	}
+	return ""
 }
 
 func buildFFmpegTranscodeArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, inputPath string, startSeconds float64) []string {
@@ -1244,9 +1353,16 @@ func buildFFmpegAudioOnlyVideoArgs(audioBitrate, inputPath string, startSeconds 
 }
 
 func buildFFmpegAudioOnlyVideoArgsWithTrack(audioBitrate, inputPath string, startSeconds float64, audioTrack int) []string {
+	return buildFFmpegAudioOnlyVideoArgsWithTrackAndContainer(
+		audioBitrate, inputPath, startSeconds, audioTrack, "",
+	)
+}
+
+func buildFFmpegAudioOnlyVideoArgsWithTrackAndContainer(audioBitrate, inputPath string, startSeconds float64, audioTrack int, outputContainer string) []string {
 	if strings.TrimSpace(audioBitrate) == "" {
 		audioBitrate = "192k"
 	}
+	outputFormat, _, _ := taterPartialTranscodeOutput(outputContainer)
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
@@ -1277,10 +1393,43 @@ func buildFFmpegAudioOnlyVideoArgsWithTrack(audioBitrate, inputPath string, star
 		"-ac", "2",
 		"-ar", "48000",
 		"-fflags", "+genpts",
-		"-f", "matroska",
+		"-f", outputFormat,
 		"pipe:1",
 	)
 	return args
+}
+
+func buildFFmpegRemuxArgs(inputPath string, startSeconds float64, audioTrack int) []string {
+	args := []string{
+		"-hide_banner",
+		"-loglevel", "warning",
+		"-nostdin",
+	}
+	if strings.TrimSpace(inputPath) != "" {
+		if startSeconds > 0 {
+			args = append(args,
+				"-noaccurate_seek",
+				"-ss", strconv.FormatFloat(startSeconds, 'f', 3, 64),
+			)
+		}
+		args = append(args, "-i", inputPath)
+	} else {
+		args = append(args, "-i", "pipe:0")
+	}
+	return append(args,
+		"-map", "0:v:0",
+		"-map", taterAudioMap(audioTrack, true),
+		"-sn",
+		"-dn",
+		"-c:v", "copy",
+		"-c:a", "copy",
+		"-fflags", "+genpts",
+		"-avoid_negative_ts", "make_zero",
+		"-muxdelay", "0",
+		"-muxpreload", "0",
+		"-f", "mpegts",
+		"pipe:1",
+	)
 }
 
 func buildFFmpegVideoOnlyArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec, inputPath string, startSeconds float64) []string {
@@ -1304,6 +1453,14 @@ func buildFFmpegVideoOnlyArgsWithToneMapFilter(cfg config.TranscodingConfig, pro
 }
 
 func buildFFmpegVideoOnlyArgsWithToneMapFilterAndAudioTrack(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec, inputPath string, startSeconds float64, toneMapSource, toneMapTarget, toneMapFilter string, audioTrack int) []string {
+	return buildFFmpegVideoOnlyArgsWithToneMapFilterAndAudioTrackAndContainer(
+		cfg, profile, accel, preferredCodec, inputPath, startSeconds,
+		toneMapSource, toneMapTarget, toneMapFilter, audioTrack, "",
+	)
+}
+
+func buildFFmpegVideoOnlyArgsWithToneMapFilterAndAudioTrackAndContainer(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec, inputPath string, startSeconds float64, toneMapSource, toneMapTarget, toneMapFilter string, audioTrack int, outputContainer string) []string {
+	outputFormat, _, _ := taterPartialTranscodeOutput(outputContainer)
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
@@ -1343,7 +1500,7 @@ func buildFFmpegVideoOnlyArgsWithToneMapFilterAndAudioTrack(cfg config.Transcodi
 	args = append(args,
 		"-c:a", "copy",
 		"-fflags", "+genpts",
-		"-f", "matroska",
+		"-f", outputFormat,
 		"pipe:1",
 	)
 	return args

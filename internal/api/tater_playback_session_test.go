@@ -30,6 +30,54 @@ func TestBuildTaterPlaybackPlanDirect(t *testing.T) {
 	require.NotContains(t, plan.StreamURL, "transcode=")
 }
 
+func TestBuildTaterPlaybackPlanRemuxesUnsupportedContainerForAppleTV(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			Platform:                 "tvos",
+			Engine:                   "avkit",
+			PreferredStreamContainer: "mpegts",
+			Containers:               []string{"mp4", "mpegts", "hls"},
+			VideoCodecs:              []string{"h264", "hevc"},
+			AudioCodecs:              []string{"aac", "ac3", "eac3"},
+			MaxWidth:                 3840,
+			MaxHeight:                2160,
+			MaxAudioChannels:         8,
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mkv", VideoCodec: "hevc", Width: 3840, Height: 2160,
+		AudioCodec: "eac3", AudioChannels: 6,
+	})
+
+	require.Equal(t, "remux", plan.Mode)
+	require.Equal(t, "direct", plan.VideoMode)
+	require.Equal(t, "direct", plan.AudioMode)
+	require.Equal(t, "mpegts", plan.OutputContainer)
+	require.Contains(t, plan.Reason, "repackaging")
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Equal(t, "remux", query.Get("transcode"))
+	require.Equal(t, "mpegts", query.Get("tater_output_container"))
+}
+
+func TestBuildTaterPlaybackPlanKeepsSupportedAppleTVContainerDirect(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mp4",
+		Capabilities: taterPlaybackCapabilities{
+			PreferredStreamContainer: "mpegts",
+			Containers:               []string{"mp4", "mpegts", "hls"},
+			VideoCodecs:              []string{"h264"},
+			AudioCodecs:              []string{"aac"},
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mp4", VideoCodec: "h264", AudioCodec: "aac",
+	})
+
+	require.Equal(t, "direct", plan.Mode)
+	require.Equal(t, "mp4", plan.OutputContainer)
+	require.NotContains(t, plan.StreamURL, "transcode=")
+}
+
 func TestBuildTaterPlaybackPlanPrefersBestEnglishAudioTrack(t *testing.T) {
 	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
 		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
@@ -117,6 +165,25 @@ func TestBuildTaterPlaybackPlanAudioOnlyTranscode(t *testing.T) {
 	require.Equal(t, "transcode", plan.AudioMode)
 	require.Equal(t, "aac", plan.AudioCodec)
 	require.Equal(t, "audio", playbackPlanQuery(t, plan.StreamURL).Get("transcode"))
+}
+
+func TestBuildTaterPlaybackPlanUsesAppleTVContainerForAudioOnlyTranscode(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Capabilities: taterPlaybackCapabilities{
+			PreferredStreamContainer: "mpegts",
+			Containers:               []string{"mp4", "mpegts", "hls"},
+			VideoCodecs:              []string{"h264"},
+			AudioCodecs:              []string{"aac"},
+			MaxAudioChannels:         2,
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mkv", VideoCodec: "h264", AudioCodec: "truehd", AudioChannels: 8,
+	})
+
+	require.Equal(t, "audio_transcode", plan.Mode)
+	require.Equal(t, "mpegts", plan.OutputContainer)
+	require.Equal(t, "mpegts", playbackPlanQuery(t, plan.StreamURL).Get("tater_output_container"))
 }
 
 func TestBuildTaterPlaybackPlanLetsNativePlayerDownmix(t *testing.T) {

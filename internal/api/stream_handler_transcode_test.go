@@ -159,6 +159,28 @@ func TestBuildFFmpegAudioOnlyVideoArgsSelectsRequestedTrack(t *testing.T) {
 	require.Contains(t, strings.Join(args, " "), "-map 0:a:2?")
 }
 
+func TestBuildFFmpegAudioOnlyVideoArgsUsesAppleTVContainer(t *testing.T) {
+	args := buildFFmpegAudioOnlyVideoArgsWithTrackAndContainer(
+		"192k", "", 0, 1, "mpegts",
+	)
+	joined := strings.Join(args, " ")
+	require.Contains(t, joined, "-map 0:a:1?")
+	require.Contains(t, joined, "-c:v copy")
+	require.Contains(t, joined, "-c:a aac")
+	require.Contains(t, joined, "-f mpegts pipe:1")
+	require.NotContains(t, joined, "-f matroska")
+}
+
+func TestBuildFFmpegRemuxArgsCopiesSelectedTracksToMPEGTS(t *testing.T) {
+	args := buildFFmpegRemuxArgs("/media/movie.mkv", 45.25, 2)
+	joined := strings.Join(args, " ")
+	require.Contains(t, joined, "-noaccurate_seek -ss 45.250 -i /media/movie.mkv")
+	require.Contains(t, joined, "-map 0:v:0 -map 0:a:2?")
+	require.Contains(t, joined, "-c:v copy -c:a copy")
+	require.Contains(t, joined, "-avoid_negative_ts make_zero")
+	require.Contains(t, joined, "-f mpegts pipe:1")
+}
+
 func TestBuildFFmpegVideoOnlyArgsCopiesAudio(t *testing.T) {
 	args := buildFFmpegVideoOnlyArgs(
 		config.TranscodingConfig{}, transcodeProfiles["hdmi_1080p"],
@@ -190,6 +212,18 @@ func TestBuildFFmpegVideoOnlyArgsSelectsRequestedTrack(t *testing.T) {
 		"none", "h264", "", 0, "", "", "", 3,
 	)
 	require.Contains(t, strings.Join(args, " "), "-map 0:a:3?")
+}
+
+func TestBuildFFmpegVideoOnlyArgsUsesAppleTVContainer(t *testing.T) {
+	args := buildFFmpegVideoOnlyArgsWithToneMapFilterAndAudioTrackAndContainer(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_1080p"],
+		"none", "h264", "", 0, "", "", "", 1, "mpegts",
+	)
+	joined := strings.Join(args, " ")
+	require.Contains(t, joined, "-map 0:a:1?")
+	require.Contains(t, joined, "-c:a copy")
+	require.Contains(t, joined, "-f mpegts pipe:1")
+	require.NotContains(t, joined, "-f matroska")
 }
 
 func TestBuildFFmpegVideoOnlyArgsToneMapsHDRAndCopiesAudio(t *testing.T) {
@@ -329,6 +363,23 @@ func TestShouldTranscodeRequestAcceptsVideoOnlyMode(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/files/stream/movie.mkv?transcode=video", nil)
 
 	require.True(t, isVideoOnlyTranscodeRequest(req))
+	require.True(t, handler.shouldTranscode(req, "/media/movie.mkv"))
+}
+
+func TestShouldTranscodeRequestAcceptsRemuxMode(t *testing.T) {
+	handler := &StreamHandler{
+		configGetter: func() *config.Config {
+			return &config.Config{}
+		},
+	}
+	req := httptest.NewRequest(
+		"GET",
+		"/api/files/stream/movie.mkv?transcode=remux&tater_output_container=mpegts",
+		nil,
+	)
+
+	require.True(t, isRemuxRequest(req))
+	require.Equal(t, "mpegts", requestedTaterOutputContainer(req))
 	require.True(t, handler.shouldTranscode(req, "/media/movie.mkv"))
 }
 
