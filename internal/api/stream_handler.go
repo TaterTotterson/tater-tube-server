@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -38,6 +39,8 @@ type StreamHandler struct {
 }
 
 var taterToneMapFilterCache sync.Map
+
+const taterInternalTranscodeInputQuery = "tater_internal_transcode_input"
 
 // MonitoredFile wraps an afero.File to track read progress and support cancellation
 type MonitoredFile struct {
@@ -193,6 +196,12 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 	ctx = context.WithValue(ctx, utils.RangeKey, r.Header.Get("Range"))
 	ctx = context.WithValue(ctx, utils.Origin, r.RequestURI)
 	ctx = context.WithValue(ctx, utils.ShowCorrupted, r.Header.Get("X-Show-Corrupted") == "true")
+	if isTaterInternalTranscodeInputRequest(r) {
+		// A resumed NZB transcode reads its seekable source back through this
+		// endpoint. It belongs to the outer playback session and must not be
+		// presented as a second viewer-facing stream.
+		ctx = context.WithValue(ctx, utils.SuppressStreamTrackingKey, true)
+	}
 
 	// Authenticate again to get user details
 	user, ok := h.authenticate(r)
@@ -338,6 +347,7 @@ func applyTaterRequestedTrackInfo(tracker *StreamTracker, streamID string, r *ht
 	audioMode := requestedTaterTrackMode(r, "tater_audio_mode", "")
 	if videoMode == "" && audioMode == "" {
 		applyTaterRequestedDynamicRangeInfo(tracker, streamID, r)
+		applyTaterRequestedResolutionInfo(tracker, streamID, r)
 		return
 	}
 	if videoMode == "" {
@@ -353,6 +363,7 @@ func applyTaterRequestedTrackInfo(tracker *StreamTracker, streamID string, r *ht
 	}
 	tracker.SetTrackProcessingInfo(streamID, videoMode, audioMode, audioCodec, status)
 	applyTaterRequestedDynamicRangeInfo(tracker, streamID, r)
+	applyTaterRequestedResolutionInfo(tracker, streamID, r)
 }
 
 func applyTaterRequestedDynamicRangeInfo(tracker *StreamTracker, streamID string, r *http.Request) {
@@ -374,6 +385,41 @@ func applyTaterRequestedDynamicRangeInfo(tracker *StreamTracker, streamID string
 		streamID, sourceRange, outputRange,
 		strings.TrimSpace(r.URL.Query().Get("tater_tone_map")) == "1",
 	)
+}
+
+func applyTaterRequestedResolutionInfo(tracker *StreamTracker, streamID string, r *http.Request) {
+	if tracker == nil || strings.TrimSpace(streamID) == "" || r == nil {
+		return
+	}
+	parse := func(key string) int {
+		value, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get(key)))
+		if err != nil || value <= 0 {
+			return 0
+		}
+		return value
+	}
+	sourceWidth := parse("tater_source_width")
+	sourceHeight := parse("tater_source_height")
+	outputWidth := parse("tater_output_width")
+	outputHeight := parse("tater_output_height")
+	if sourceWidth == 0 && sourceHeight == 0 && outputWidth == 0 && outputHeight == 0 {
+		return
+	}
+	tracker.SetVideoResolutionInfo(
+		streamID, sourceWidth, sourceHeight, outputWidth, outputHeight,
+	)
+}
+
+func isTaterInternalTranscodeInputRequest(r *http.Request) bool {
+	if r == nil || r.URL == nil || r.URL.Query().Get(taterInternalTranscodeInputQuery) != "1" {
+		return false
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }
 
 func requestedTaterTrackMode(r *http.Request, key, fallback string) string {
@@ -642,6 +688,7 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	durationSeconds := h.probeMediaDuration(ctx, path)
 	streamID := h.markTranscodedStream(w, file, profileID, profile.Name, effectiveAccel, hardwareDevice, videoCodec, startSeconds, durationSeconds)
 	applyTaterRequestedDynamicRangeInfo(h.streamTracker, streamID, r)
+	applyTaterRequestedResolutionInfo(h.streamTracker, streamID, r)
 
 	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
 	if inputPath == "" {
@@ -721,6 +768,7 @@ func (h *StreamHandler) serveAudioOnlyVideoTranscoded(
 			streamID, "direct", "transcode", "aac", "Transcoding audio",
 		)
 		applyTaterRequestedDynamicRangeInfo(h.streamTracker, streamID, r)
+		applyTaterRequestedResolutionInfo(h.streamTracker, streamID, r)
 	}
 
 	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
@@ -842,6 +890,7 @@ func (h *StreamHandler) serveVideoOnlyTranscoded(
 			streamID, "transcode", audioMode, audioCodec, "Transcoding video",
 		)
 		applyTaterRequestedDynamicRangeInfo(h.streamTracker, streamID, r)
+		applyTaterRequestedResolutionInfo(h.streamTracker, streamID, r)
 	}
 
 	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
@@ -995,6 +1044,7 @@ func taterSeekableVirtualInputURL(r *http.Request, cfg *config.Config) string {
 
 	query := url.Values{}
 	query.Set("path", path)
+	query.Set(taterInternalTranscodeInputQuery, "1")
 	playerToken := strings.TrimSpace(r.URL.Query().Get("player_token"))
 	if playerToken == "" {
 		playerToken = bearerToken(r.Header.Get("Authorization"))

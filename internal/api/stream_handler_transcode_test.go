@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,13 +41,15 @@ func TestTaterSeekableVirtualInputURLUsesLoopbackRangeStream(t *testing.T) {
 		Server: config.ServerConfig{Port: 8080},
 	})
 
-	require.Equal(t,
-		"http://127.0.0.1:8080/api/files/stream?path=queue%2FMovie.mkv&player_token=paired-token",
-		inputURL,
-	)
-	require.NotContains(t, inputURL, "transcode")
-	require.NotContains(t, inputURL, "start")
-	require.NotContains(t, inputURL, "profile")
+	parsed, err := url.Parse(inputURL)
+	require.NoError(t, err)
+	require.Equal(t, "http://127.0.0.1:8080/api/files/stream", parsed.Scheme+"://"+parsed.Host+parsed.Path)
+	require.Equal(t, "queue/Movie.mkv", parsed.Query().Get("path"))
+	require.Equal(t, "paired-token", parsed.Query().Get("player_token"))
+	require.Equal(t, "1", parsed.Query().Get(taterInternalTranscodeInputQuery))
+	require.Empty(t, parsed.Query().Get("transcode"))
+	require.Empty(t, parsed.Query().Get("start"))
+	require.Empty(t, parsed.Query().Get("profile"))
 }
 
 func TestTaterSeekableVirtualInputURLCarriesBearerToken(t *testing.T) {
@@ -55,12 +58,13 @@ func TestTaterSeekableVirtualInputURLCarriesBearerToken(t *testing.T) {
 	)
 	req.Header.Set("Authorization", "Bearer paired-token")
 
-	require.Equal(t,
-		"http://127.0.0.1:8080/api/files/stream?path=queue%2FMovie.mkv&player_token=paired-token",
-		taterSeekableVirtualInputURL(req, &config.Config{
-			Server: config.ServerConfig{Port: 8080},
-		}),
-	)
+	inputURL := taterSeekableVirtualInputURL(req, &config.Config{
+		Server: config.ServerConfig{Port: 8080},
+	})
+	parsed, err := url.Parse(inputURL)
+	require.NoError(t, err)
+	require.Equal(t, "paired-token", parsed.Query().Get("player_token"))
+	require.Equal(t, "1", parsed.Query().Get(taterInternalTranscodeInputQuery))
 }
 
 func TestTaterSeekableTranscodeInputKeepsLocalFilesystemPath(t *testing.T) {
@@ -84,12 +88,28 @@ func TestTaterSeekableTranscodeInputUsesLoopbackForNZB(t *testing.T) {
 		nil,
 	)
 
-	require.Equal(t,
-		"http://127.0.0.1:8080/api/files/stream?path=queue%2FMovie.mkv&player_token=paired-token",
-		taterSeekableTranscodeInput(req, &config.Config{
-			Server: config.ServerConfig{Port: 8080},
-		}, "queue/Movie.mkv"),
-	)
+	inputURL := taterSeekableTranscodeInput(req, &config.Config{
+		Server: config.ServerConfig{Port: 8080},
+	}, "queue/Movie.mkv")
+	parsed, err := url.Parse(inputURL)
+	require.NoError(t, err)
+	require.Equal(t, "queue/Movie.mkv", parsed.Query().Get("path"))
+	require.Equal(t, "paired-token", parsed.Query().Get("player_token"))
+	require.Equal(t, "1", parsed.Query().Get(taterInternalTranscodeInputQuery))
+}
+
+func TestInternalTranscodeInputRequiresLoopbackRequest(t *testing.T) {
+	loopback := httptest.NewRequest("GET", "http://127.0.0.1/api/files/stream?"+taterInternalTranscodeInputQuery+"=1", nil)
+	loopback.RemoteAddr = "127.0.0.1:42000"
+	require.True(t, isTaterInternalTranscodeInputRequest(loopback))
+
+	external := httptest.NewRequest("GET", "http://media.example/api/files/stream?"+taterInternalTranscodeInputQuery+"=1", nil)
+	external.RemoteAddr = "10.4.20.59:42000"
+	require.False(t, isTaterInternalTranscodeInputRequest(external))
+
+	unmarked := httptest.NewRequest("GET", "http://127.0.0.1/api/files/stream", nil)
+	unmarked.RemoteAddr = "127.0.0.1:42000"
+	require.False(t, isTaterInternalTranscodeInputRequest(unmarked))
 }
 
 func TestBuildFFmpegAudioSyncArgs(t *testing.T) {

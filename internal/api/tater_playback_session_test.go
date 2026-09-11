@@ -163,6 +163,33 @@ func TestBuildTaterPlaybackPlanVideoOnlyPreservesBitstreamAudio(t *testing.T) {
 	require.Contains(t, plan.QualityLabel, "Audio Bitstream")
 }
 
+func TestBuildTaterPlaybackPlanReports4KTo1080p(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/files/stream?path=queue%2FMovie.mkv",
+		Profile:   "hdmi_1080p",
+		Capabilities: taterPlaybackCapabilities{
+			VideoCodecs:      []string{"h264"},
+			AudioCodecs:      []string{"eac3"},
+			MaxWidth:         1920,
+			MaxHeight:        1080,
+			MaxAudioChannels: 6,
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "hevc", Width: 3840, Height: 2160,
+		AudioCodec: "eac3", AudioChannels: 6,
+	})
+
+	require.Equal(t, "video_transcode", plan.Mode)
+	require.Equal(t, 1920, plan.OutputWidth)
+	require.Equal(t, 1080, plan.OutputHeight)
+	require.Equal(t, "4K → 1080p", plan.ResolutionLabel)
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Equal(t, "3840", query.Get("tater_source_width"))
+	require.Equal(t, "2160", query.Get("tater_source_height"))
+	require.Equal(t, "1920", query.Get("tater_output_width"))
+	require.Equal(t, "1080", query.Get("tater_output_height"))
+}
+
 func TestBuildTaterPlaybackPlanFullTranscode(t *testing.T) {
 	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
 		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
@@ -303,6 +330,7 @@ func TestTaterPlaybackProbeTargetUsesLoopbackForDiscoveryStream(t *testing.T) {
 	require.Equal(t, "/api/files/stream", parsed.Path)
 	require.Equal(t, "/complete/movie.mkv", parsed.Query().Get("path"))
 	require.Equal(t, "paired-player-token", parsed.Query().Get("player_token"))
+	require.Equal(t, "1", parsed.Query().Get(taterInternalTranscodeInputQuery))
 }
 
 func TestTaterPlaybackProbeTargetIgnoresUnrelatedURLs(t *testing.T) {
@@ -344,6 +372,9 @@ func TestTaterPlaybackReleaseNameFallbackProtectsDeckFromUnknown4KDV(t *testing.
 	require.Equal(t, "direct", plan.AudioMode)
 	require.True(t, plan.ToneMapped)
 	require.Contains(t, plan.QualityLabel, "Dolby Vision → SDR Tone Map")
+	require.Equal(t, 1280, plan.OutputWidth)
+	require.Equal(t, 720, plan.OutputHeight)
+	require.Equal(t, "4K → 720p", plan.ResolutionLabel)
 }
 
 func playbackPlanQuery(t *testing.T, rawURL string) url.Values {

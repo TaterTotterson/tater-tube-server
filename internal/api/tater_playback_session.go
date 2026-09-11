@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/url"
 	"os/exec"
 	"path/filepath"
@@ -99,6 +100,9 @@ type taterPlaybackSessionResponse struct {
 	OutputVideoRange   string                 `json:"output_video_range"`
 	ToneMapped         bool                   `json:"tone_mapped"`
 	SelectedAudioTrack int                    `json:"selected_audio_track"`
+	OutputWidth        int                    `json:"output_width,omitempty"`
+	OutputHeight       int                    `json:"output_height,omitempty"`
+	ResolutionLabel    string                 `json:"resolution_label,omitempty"`
 	Source             taterPlaybackMediaInfo `json:"source"`
 }
 
@@ -271,6 +275,7 @@ func taterPlaybackProbeTarget(cfg *config.Config, rawURL, playerToken string) (s
 	query := probeURL.Query()
 	query.Set("path", virtualPath)
 	query.Set("player_token", playerToken)
+	query.Set(taterInternalTranscodeInputQuery, "1")
 	probeURL.RawQuery = query.Encode()
 	return probeURL.String(), true, nil
 }
@@ -282,6 +287,7 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 	if _, ok := transcodeProfiles[profile]; !ok {
 		profile = "hdmi_1080p"
 	}
+	selectedProfile := transcodeProfiles[profile]
 
 	videoCodec := cleanTaterCodecName(source.VideoCodec)
 	audioCodec := cleanTaterCodecName(source.AudioCodec)
@@ -401,14 +407,28 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 			plan.Reason = "The picture is tone-mapped for the connected display and the audio is converted for the player."
 		}
 	}
+	plan.OutputWidth, plan.OutputHeight = source.Width, source.Height
+	if plan.VideoMode == "transcode" {
+		plan.OutputWidth, plan.OutputHeight = taterPlaybackOutputDimensions(
+			source.Width, source.Height, selectedProfile.MaxWidth, selectedProfile.MaxHeight,
+		)
+	}
+	plan.ResolutionLabel = taterPlaybackResolutionLabel(
+		source.Width, source.Height, plan.OutputWidth, plan.OutputHeight,
+	)
 	plan.StreamURL = annotateTaterPlaybackURL(
 		plan.StreamURL, plan.VideoMode, plan.AudioMode, plan.AudioCodec,
 		sourceRange, outputRange, toneMapped, selectedAudioTrack,
+		source.Width, source.Height, plan.OutputWidth, plan.OutputHeight,
 	)
 	return plan
 }
 
-func annotateTaterPlaybackURL(rawURL, videoMode, audioMode, audioCodec, sourceRange, outputRange string, toneMapped bool, audioTrack int) string {
+func annotateTaterPlaybackURL(
+	rawURL, videoMode, audioMode, audioCodec, sourceRange, outputRange string,
+	toneMapped bool,
+	audioTrack, sourceWidth, sourceHeight, outputWidth, outputHeight int,
+) string {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return rawURL
@@ -433,8 +453,66 @@ func annotateTaterPlaybackURL(rawURL, videoMode, audioMode, audioCodec, sourceRa
 	} else {
 		query.Del("tater_audio_track")
 	}
+	setDimension := func(key string, value int) {
+		if value > 0 {
+			query.Set(key, strconv.Itoa(value))
+		} else {
+			query.Del(key)
+		}
+	}
+	setDimension("tater_source_width", sourceWidth)
+	setDimension("tater_source_height", sourceHeight)
+	setDimension("tater_output_width", outputWidth)
+	setDimension("tater_output_height", outputHeight)
 	u.RawQuery = query.Encode()
 	return u.String()
+}
+
+func taterPlaybackOutputDimensions(sourceWidth, sourceHeight, maximumWidth, maximumHeight int) (int, int) {
+	if sourceWidth <= 0 || sourceHeight <= 0 {
+		return 0, 0
+	}
+	if maximumWidth <= 0 || maximumHeight <= 0 {
+		return sourceWidth, sourceHeight
+	}
+	scale := math.Min(
+		float64(maximumWidth)/float64(sourceWidth),
+		float64(maximumHeight)/float64(sourceHeight),
+	)
+	width := max(2, int(math.Floor(float64(sourceWidth)*scale)))
+	height := max(2, int(math.Floor(float64(sourceHeight)*scale)))
+	width -= width % 2
+	height -= height % 2
+	return width, height
+}
+
+func taterPlaybackResolutionName(width, height int) string {
+	switch {
+	case width >= 3500 || height >= 2000:
+		return "4K"
+	case width >= 2500 || height >= 1400:
+		return "1440p"
+	case width >= 1800 || height >= 1000:
+		return "1080p"
+	case width >= 1100 || height >= 650:
+		return "720p"
+	case width > 0 && height > 0:
+		return fmt.Sprintf("%d×%d", width, height)
+	default:
+		return ""
+	}
+}
+
+func taterPlaybackResolutionLabel(sourceWidth, sourceHeight, outputWidth, outputHeight int) string {
+	source := taterPlaybackResolutionName(sourceWidth, sourceHeight)
+	output := taterPlaybackResolutionName(outputWidth, outputHeight)
+	if source == "" {
+		return output
+	}
+	if output == "" || (sourceWidth == outputWidth && sourceHeight == outputHeight) {
+		return source
+	}
+	return source + " → " + output
 }
 
 func taterPlaybackPlannedURL(rawURL, mode, profile, videoCodec, audioCodec string, audioTrack int) string {
@@ -443,7 +521,7 @@ func taterPlaybackPlannedURL(rawURL, mode, profile, videoCodec, audioCodec strin
 		return rawURL
 	}
 	query := u.Query()
-	for _, key := range []string{"direct", "transcode", "profile", "codec", "audio_codec", "start", "tater_audio_track", "tater_tone_map", "tater_source_video_range", "tater_output_video_range"} {
+	for _, key := range []string{"direct", "transcode", "profile", "codec", "audio_codec", "start", "tater_audio_track", "tater_tone_map", "tater_source_video_range", "tater_output_video_range", "tater_source_width", "tater_source_height", "tater_output_width", "tater_output_height"} {
 		query.Del(key)
 	}
 	switch mode {

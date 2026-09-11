@@ -468,6 +468,17 @@ func (t *StreamTracker) SetDynamicRangeInfo(id, sourceRange, outputRange string,
 	}
 }
 
+func (t *StreamTracker) SetVideoResolutionInfo(id string, sourceWidth, sourceHeight, outputWidth, outputHeight int) {
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*streamInternal)
+		stream.SourceWidth = max(0, sourceWidth)
+		stream.SourceHeight = max(0, sourceHeight)
+		stream.OutputWidth = max(0, outputWidth)
+		stream.OutputHeight = max(0, outputHeight)
+		stream.lastReadAt = time.Now()
+	}
+}
+
 func (t *StreamTracker) SetMediaInfo(id string, durationSeconds, playbackStartSeconds float64) {
 	if val, ok := t.streams.Load(id); ok {
 		stream := val.(*streamInternal)
@@ -891,6 +902,10 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 				existing.AudioMode = s.AudioMode
 				existing.AudioCodec = s.AudioCodec
 				existing.HardwareActive = s.HardwareActive
+				existing.SourceWidth = s.SourceWidth
+				existing.SourceHeight = s.SourceHeight
+				existing.OutputWidth = s.OutputWidth
+				existing.OutputHeight = s.OutputHeight
 				if existing.Status != "Streaming" {
 					existing.Status = s.Status
 				}
