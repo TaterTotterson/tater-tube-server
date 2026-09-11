@@ -187,6 +187,33 @@ function hardwareLabel(stream: ActiveStream) {
 	}
 }
 
+function resolutionName(width?: number, height?: number) {
+	const w = Number(width || 0);
+	const h = Number(height || 0);
+	if (w >= 3500 || h >= 2000) return "4K";
+	if (w >= 2500 || h >= 1400) return "1440p";
+	if (w >= 1800 || h >= 1000) return "1080p";
+	if (w >= 1100 || h >= 650) return "720p";
+	return w > 0 && h > 0 ? `${w}×${h}` : "";
+}
+
+function streamResolution(stream: ActiveStream) {
+	if ((stream.video_mode || (stream.transcoded ? "transcode" : "direct")) !== "transcode") {
+		return "";
+	}
+	const source = resolutionName(stream.source_width, stream.source_height);
+	const output = resolutionName(stream.output_width, stream.output_height);
+	if (!source) return output;
+	if (!output) return source;
+	if (
+		stream.source_width === stream.output_width &&
+		stream.source_height === stream.output_height
+	) {
+		return source;
+	}
+	return `${source} → ${output}`;
+}
+
 function hardwareDetail(stream: ActiveStream) {
 	const videoMode = stream.video_mode || (stream.transcoded ? "transcode" : "direct");
 	const audioMode = stream.audio_mode || (stream.transcoded ? "transcode" : "direct");
@@ -221,7 +248,13 @@ function hardwareDetail(stream: ActiveStream) {
 	const parts = [stream.video_codec, stream.transcode_name || stream.transcode_profile]
 		.filter(Boolean)
 		.map((value) => String(value));
-	return [rangeDetail, `Video: ${videoLabel}`, `Audio: ${audioLabel}`, ...parts]
+	return [
+		streamResolution(stream),
+		rangeDetail,
+		`Video: ${videoLabel}`,
+		`Audio: ${audioLabel}`,
+		...parts,
+	]
 		.filter(Boolean)
 		.join(" / ");
 }
@@ -446,6 +479,7 @@ export function QueuePage() {
 									const live = isLive(stream);
 									const progress = playbackProgress(stream);
 									const hardware = hardwareLabel(stream);
+									const resolution = streamResolution(stream);
 									const detail = hardwareDetail(stream);
 									return (
 										<article
@@ -531,6 +565,13 @@ export function QueuePage() {
 														)}
 														<span className="truncate font-semibold text-sm">{hardware}</span>
 													</div>
+													{resolution && (
+														<div className="mt-2 flex md:justify-end">
+															<span className="badge badge-primary badge-outline font-semibold">
+																{resolution}
+															</span>
+														</div>
+													)}
 													{detail && (
 														<div className="mt-1 truncate font-mono text-[11px] text-base-content/45">
 															{detail}
