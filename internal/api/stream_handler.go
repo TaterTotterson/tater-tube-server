@@ -175,10 +175,18 @@ func (h *StreamHandler) authenticate(r *http.Request) (*database.User, bool) {
 func (h *StreamHandler) GetHTTPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Authenticate using download_key
-		_, ok := h.authenticate(r)
+		user, ok := h.authenticate(r)
 		if !ok {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="Stream API"`)
 			http.Error(w, "Unauthorized: valid player_token required", http.StatusUnauthorized)
+			return
+		}
+		if strings.TrimSpace(r.URL.Query().Get(taterLocalHLSSegmentQuery)) != "" {
+			playerID := ""
+			if user != nil && user.Provider == "tater" {
+				playerID = user.UserID
+			}
+			h.serveStreamHLSSegment(w, r, playerID)
 			return
 		}
 
@@ -235,6 +243,10 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		http.Error(w, "Path parameter required", http.StatusBadRequest)
+		return
+	}
+	if requestedTaterOutputContainer(r) == "hls" && h.shouldTranscode(r, path) {
+		h.serveStreamHLSPlaylist(w, r, ctx, path, userName, playerID)
 		return
 	}
 

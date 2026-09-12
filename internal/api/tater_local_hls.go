@@ -37,6 +37,7 @@ type taterLocalHLSSession struct {
 	id           string
 	playerID     string
 	playerToken  string
+	playlistURL  string
 	root         string
 	playlistPath string
 	cancel       context.CancelFunc
@@ -189,6 +190,7 @@ func (h *LocalStreamHandler) prepareLocalHLSSession(
 		id:           key,
 		playerID:     player.ID,
 		playerToken:  playerToken,
+		playlistURL:  "/api/tater/local/stream",
 		root:         root,
 		playlistPath: playlistPath,
 		cancel:       cancel,
@@ -480,7 +482,11 @@ func (s *taterLocalHLSSession) playlist() ([]byte, error) {
 		query.Set("player_token", s.playerToken)
 		query.Set(taterLocalHLSSessionQuery, s.id)
 		query.Set(taterLocalHLSSegmentQuery, name)
-		lines[index] = "/api/tater/local/stream?" + query.Encode()
+		playlistURL := strings.TrimSpace(s.playlistURL)
+		if playlistURL == "" {
+			playlistURL = "/api/tater/local/stream"
+		}
+		lines[index] = playlistURL + "?" + query.Encode()
 	}
 	return []byte(strings.Join(lines, "\n")), nil
 }
