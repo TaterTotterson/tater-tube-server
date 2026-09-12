@@ -978,8 +978,13 @@ func buildTaterTVChannelHLSArgsWithTimelineAndRange(cfg config.TranscodingConfig
 
 func taterTVHLSNormalizeFilters(filters string, profile transcodeProfile) string {
 	preFilters, postFilters := splitTaterTVOverlayFilters(filters)
+	// Keep the source cadence for every scheduled item. Tube TV marks item
+	// boundaries with EXT-X-DISCONTINUITY and supplies a fresh fMP4 init map, so
+	// Apple clients can follow a frame-rate change between a program, commercial,
+	// and bumper. Forcing the whole channel to 30000/1001 introduced visible 3:2
+	// judder in the common case of 24000/1001 film content.
 	normalize := fmt.Sprintf(
-		"pad=w=%d:h=%d:x=(ow-iw)/2:y=(oh-ih)/2:color=black,setsar=1,fps=30000/1001",
+		"pad=w=%d:h=%d:x=(ow-iw)/2:y=(oh-ih)/2:color=black,setsar=1",
 		profile.MaxWidth,
 		profile.MaxHeight,
 	)
