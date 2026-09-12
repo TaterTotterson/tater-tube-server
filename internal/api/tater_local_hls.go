@@ -258,6 +258,7 @@ func buildTaterLocalHLSCommand(
 	audioTrack := requestedTaterAudioTrack(r)
 	mode := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("transcode")))
 	sourceVideoCodec := cleanTaterCodecName(r.URL.Query().Get("tater_video_codec"))
+	sourceVideoRange := cleanTaterVideoRange(r.URL.Query().Get("tater_source_video_range"))
 	outputVideoRange := cleanTaterVideoRange(r.URL.Query().Get("tater_output_video_range"))
 	stripDolbyVision := strings.TrimSpace(r.URL.Query().Get("tater_strip_dolby_vision")) == "1"
 	command := taterLocalHLSCommand{
@@ -318,6 +319,13 @@ func buildTaterLocalHLSCommand(
 		if selectedDevice != "" {
 			transcodeCfg.HardwareDevice = selectedDevice
 		}
+		if requestedCodec == transcodeCodecHEVC && preferredCodec != transcodeCodecHEVC &&
+			taterVideoRangeIsHDR(outputVideoRange) {
+			// Never emit HDR metadata on an H.264 fallback. If this server cannot
+			// provide the requested HEVC encoder, retain playable video by using the
+			// same guarded HDR-to-SDR path as an SDR display.
+			outputVideoRange = "sdr"
+		}
 		videoCodec, _ := transcodeVideoSettingsForCodec(accel, transcodeCfg.HardwareDevice, profile, preferredCodec)
 		command.profileID = profileID
 		command.profileName = profile.Name
@@ -326,6 +334,9 @@ func buildTaterLocalHLSCommand(
 		command.hardwareDevice = effectiveTranscodeHardwareDevice(command.effectiveAccel, transcodeCfg.HardwareDevice)
 		videoEncoded = true
 		toneMapSource, toneMapTarget := requestedTaterToneMap(r)
+		if sourceVideoRange != "" && sourceVideoRange != "sdr" && outputVideoRange == "sdr" {
+			toneMapSource, toneMapTarget = sourceVideoRange, "sdr"
+		}
 		toneMapFilter := taterToneMapFilterForFFmpeg(r.Context(), effectiveFFmpegPath(cfg.Transcoding.FFmpegPath), toneMapSource)
 		if toneMapSource != "" && toneMapFilter == "" {
 			return taterLocalHLSCommand{}, fmt.Errorf("tone mapping is unavailable in the configured ffmpeg build")
@@ -335,9 +346,9 @@ func buildTaterLocalHLSCommand(
 			if command.audioCodec == "" {
 				command.audioCodec = "copy"
 			}
-			args = buildFFmpegVideoOnlyArgsWithToneMapFilterAndAudioTrackAndContainer(
+			args = buildFFmpegVideoOnlyArgsWithToneMapFilterAudioTrackContainerAndRange(
 				transcodeCfg, profile, accel, preferredCodec, inputPath, startSeconds,
-				toneMapSource, toneMapTarget, toneMapFilter, audioTrack, "mpegts",
+				toneMapSource, toneMapTarget, toneMapFilter, audioTrack, "mpegts", outputVideoRange,
 			)
 		} else {
 			command.videoMode = "transcode"
@@ -348,6 +359,7 @@ func buildTaterLocalHLSCommand(
 					InputPath: inputPath, StartSeconds: startSeconds, AudioTrack: audioTrack,
 					AudioChannels: command.audioChannels,
 					ToneMapSource: toneMapSource, ToneMapTarget: toneMapTarget, ToneMapFilter: toneMapFilter,
+					SourceVideoRange: sourceVideoRange, OutputVideoRange: outputVideoRange,
 				},
 			)
 		}

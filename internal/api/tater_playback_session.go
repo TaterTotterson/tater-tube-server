@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
@@ -17,6 +19,14 @@ import (
 )
 
 const taterPlaybackProbeTimeout = 12 * time.Second
+
+type taterPlaybackProbeCacheEntry struct {
+	Size    int64
+	ModTime int64
+	Info    taterPlaybackMediaInfo
+}
+
+var taterPlaybackProbeCache sync.Map
 
 type taterPlaybackCapabilities struct {
 	CapabilityVersion        int      `json:"capability_version"`
@@ -170,16 +180,56 @@ func (s *Server) handleTaterPlayerPlaybackSession(c *fiber.Ctx) error {
 	}
 
 	source := taterPlaybackMediaInfoFromReleaseName(req.StreamURL)
-	if probeTarget, found, err := taterPlaybackProbeTarget(cfg, req.StreamURL, playerToken); err != nil {
+	isTubeTV := taterPlaybackTubeTVChannelNumber(req.StreamURL) != ""
+	if probeTarget, found, err := taterPlaybackTubeTVProbeTarget(cfg, req.StreamURL, resolveBaseURL(c, "")); err == nil && found {
+		if probed, probeErr := probeTaterPlaybackMediaCached(c.Context(), cfg, probeTarget); probeErr == nil {
+			source = probed
+		}
+	} else if probeTarget, found, err := taterPlaybackProbeTarget(cfg, req.StreamURL, playerToken); err != nil {
 		return RespondValidationError(c, "Playback source is invalid", err.Error())
 	} else if found {
-		if probed, probeErr := probeTaterPlaybackMedia(c.Context(), cfg, probeTarget); probeErr == nil {
+		if probed, probeErr := probeTaterPlaybackMediaCached(c.Context(), cfg, probeTarget); probeErr == nil {
 			source = probed
 		}
 	}
 
 	plan := buildTaterPlaybackPlan(req, source)
+	if isTubeTV {
+		plan = buildTaterTVPlaybackPlan(req, source)
+	}
 	return RespondSuccess(c, plan)
+}
+
+func taterPlaybackTubeTVChannelNumber(rawURL string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || !strings.HasSuffix(strings.TrimRight(u.Path, "/"), "/playlist.m3u8") {
+		return ""
+	}
+	return taterTVChannelNumberFromPath(u.Path)
+}
+
+func taterPlaybackTubeTVProbeTarget(cfg *config.Config, rawURL, baseURL string) (string, bool, error) {
+	number := taterPlaybackTubeTVChannelNumber(rawURL)
+	if number == "" {
+		return "", false, nil
+	}
+	if cfg == nil {
+		return "", true, fmt.Errorf("Tube TV configuration is unavailable")
+	}
+	now := time.Now()
+	guide, err := taterTVEnsureGuide(cfg, baseURL, now)
+	if err != nil {
+		return "", true, err
+	}
+	channel, found := taterTVFindChannel(guide.Channels, number)
+	if !found {
+		return "", true, fmt.Errorf("Tube TV channel %s is unavailable", number)
+	}
+	items, err := taterTVResolveStreamItems(cfg, channel, guide.StartedAt, now, 1)
+	if err != nil || len(items) == 0 {
+		return "", true, fmt.Errorf("Tube TV channel %s has no playable item", number)
+	}
+	return items[0].Path, true, nil
 }
 
 func taterPlaybackMediaInfoFromReleaseName(rawURL string) taterPlaybackMediaInfo {
@@ -283,6 +333,247 @@ func taterPlaybackProbeTarget(cfg *config.Config, rawURL, playerToken string) (s
 	return probeURL.String(), true, nil
 }
 
+func probeTaterPlaybackMediaCached(parent context.Context, cfg *config.Config, path string) (taterPlaybackMediaInfo, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return taterPlaybackMediaInfo{}, fmt.Errorf("playback source is empty")
+	}
+	stat, statErr := os.Stat(path)
+	if statErr != nil || stat.IsDir() {
+		return probeTaterPlaybackMedia(parent, cfg, path)
+	}
+	cacheKey := filepath.Clean(path)
+	if cached, ok := taterPlaybackProbeCache.Load(cacheKey); ok {
+		entry := cached.(taterPlaybackProbeCacheEntry)
+		if entry.Size == stat.Size() && entry.ModTime == stat.ModTime().UnixNano() {
+			return entry.Info, nil
+		}
+	}
+	info, err := probeTaterPlaybackMedia(parent, cfg, path)
+	if err != nil {
+		return taterPlaybackMediaInfo{}, err
+	}
+	taterPlaybackProbeCache.Store(cacheKey, taterPlaybackProbeCacheEntry{
+		Size: stat.Size(), ModTime: stat.ModTime().UnixNano(), Info: info,
+	})
+	return info, nil
+}
+
+func buildTaterTVPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybackMediaInfo) taterPlaybackSessionResponse {
+	caps := req.Capabilities
+	profile := strings.TrimSpace(req.Profile)
+	if _, ok := transcodeProfiles[profile]; !ok {
+		profile = "hdmi_1080p"
+	}
+	selectedProfile := transcodeProfiles[profile]
+	selectedAudioTrack := selectTaterPlaybackAudioTrack(&source, req.AudioTrack, &caps)
+	sourceRange := cleanTaterVideoRange(source.VideoRange)
+	if sourceRange == "" {
+		sourceRange = "sdr"
+	}
+
+	hdrFormats := taterPlaybackSupportedHDRFormats(caps)
+	videoCodec := "h264"
+	if taterPlaybackCanUseHDRHEVC(caps) && len(hdrFormats) > 0 {
+		// A Tube TV session can cross from SDR into HDR after it starts. Keep the
+		// codec stable for the whole session so tvOS never has to switch from AVC
+		// to HEVC at a program or break boundary.
+		videoCodec = "hevc"
+	}
+	outputRange, toneMapped := taterTVPlaybackOutputRange(source, hdrFormats)
+	if videoCodec != "hevc" && sourceRange != "sdr" {
+		outputRange = "sdr"
+		toneMapped = true
+	}
+
+	// Tube TV normalizes every program, commercial and bumper to one stable
+	// audio layout. Keep its established stereo contract independent from the
+	// multichannel policy used for individual local and Discovery titles.
+	outputAudioChannels := 2
+	plan := taterPlaybackSessionResponse{
+		StreamURL:           req.StreamURL,
+		Mode:                "full_transcode",
+		VideoMode:           "transcode",
+		AudioMode:           "transcode",
+		VideoCodec:          videoCodec,
+		AudioCodec:          "aac",
+		QualityLabel:        "Video " + taterPlaybackVideoCodecLabel(videoCodec) + " • Audio AAC" + taterPlaybackAudioChannelsSuffix(outputAudioChannels),
+		Reason:              "Tube TV is normalized into a continuous stream for this player.",
+		OutputName:          strings.TrimSpace(caps.OutputName),
+		OutputConnection:    strings.TrimSpace(caps.OutputConnection),
+		OutputContainer:     "hls",
+		SourceVideoRange:    sourceRange,
+		OutputVideoRange:    outputRange,
+		ToneMapped:          toneMapped,
+		SelectedAudioTrack:  selectedAudioTrack,
+		OutputAudioChannels: outputAudioChannels,
+		Source:              source,
+	}
+	if sourceRange != "sdr" {
+		plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, toneMapped) + plan.QualityLabel
+	}
+	if toneMapped {
+		plan.Reason = "The current Tube TV picture is converted to SDR for this display while the channel remains continuous."
+	} else if outputRange != "sdr" {
+		plan.Reason = "The current Tube TV picture is preserved as Apple-compatible HEVC HDR."
+	}
+	plan.OutputWidth, plan.OutputHeight = taterPlaybackOutputDimensions(
+		source.Width, source.Height, selectedProfile.MaxWidth, selectedProfile.MaxHeight,
+	)
+	plan.ResolutionLabel = taterPlaybackResolutionLabel(
+		source.Width, source.Height, plan.OutputWidth, plan.OutputHeight,
+	)
+	plan.StreamURL = taterPlaybackPlannedURL(
+		req.StreamURL, "full", profile, videoCodec, "", selectedAudioTrack, "hls",
+	)
+	plan.StreamURL = annotateTaterPlaybackURL(
+		plan.StreamURL, plan.VideoMode, plan.VideoCodec, plan.AudioMode, plan.AudioCodec,
+		sourceRange, outputRange, toneMapped, selectedAudioTrack,
+		source.Width, source.Height, plan.OutputWidth, plan.OutputHeight,
+		outputAudioChannels, "hls",
+	)
+	plan.StreamURL = annotateTaterTVHDRFormats(plan.StreamURL, hdrFormats)
+	return plan
+}
+
+func taterPlaybackVideoCodecLabel(codec string) string {
+	if cleanTaterCodecName(codec) == "hevc" {
+		return "HEVC"
+	}
+	return "H.264"
+}
+
+func taterPlaybackCanUseHDRHEVC(caps taterPlaybackCapabilities) bool {
+	return strings.EqualFold(strings.TrimSpace(caps.Platform), "tvos") &&
+		cleanTaterPreferredStreamContainer(caps.PreferredStreamContainer) == "hls" &&
+		taterCodecListContains(caps.VideoCodecs, "hevc") &&
+		caps.DisplayHDREnabled && caps.MaxVideoBitDepth >= 10
+}
+
+func taterPlaybackSupportedHDRFormats(caps taterPlaybackCapabilities) []string {
+	if !caps.DisplayHDREnabled {
+		return nil
+	}
+	seen := map[string]bool{}
+	formats := []string{}
+	for _, candidate := range caps.VideoHDRFormats {
+		format := cleanTaterVideoRange(candidate)
+		if format == "" || format == "sdr" || seen[format] ||
+			!taterPlaybackRangeSupported(caps.DisplayHDRFormats, format) {
+			continue
+		}
+		seen[format] = true
+		formats = append(formats, format)
+	}
+	return formats
+}
+
+func taterTVPlaybackOutputRange(source taterPlaybackMediaInfo, hdrFormats []string) (string, bool) {
+	sourceRange := cleanTaterVideoRange(source.VideoRange)
+	if sourceRange == "" || sourceRange == "sdr" {
+		return "sdr", false
+	}
+	supports := func(wanted string) bool {
+		for _, format := range hdrFormats {
+			if cleanTaterVideoRange(format) == wanted {
+				return true
+			}
+		}
+		return false
+	}
+	switch sourceRange {
+	case "hdr10":
+		if supports("hdr10") {
+			return "hdr10", false
+		}
+	case "hdr10plus":
+		// The per-item Tube TV encoder does not carry HDR10+ dynamic metadata
+		// through a scale/overlay pass. Preserve the compatible HDR10 picture
+		// instead of labeling the new stream as HDR10+.
+		if supports("hdr10") {
+			return "hdr10", false
+		}
+	case "hlg":
+		if supports("hlg") {
+			return "hlg", false
+		}
+	case "dolby_vision":
+		// Tube TV is re-encoded to keep every program and break on one timeline.
+		// Profile 7 has an HDR10-compatible base layer. Re-encoding that layer as
+		// ordinary HEVC Main 10 discards the enhancement layer and Dolby Vision
+		// metadata while retaining an honest HDR10 picture.
+		if source.DolbyVisionProfile == 7 && supports("hdr10") {
+			return "hdr10", false
+		}
+		// Profile 8 is single-layer and may carry an HDR10- or HLG-compatible base.
+		if source.DolbyVisionProfile == 8 {
+			switch source.DolbyVisionCompatibilityID {
+			case 1:
+				if supports("hdr10") {
+					return "hdr10", false
+				}
+			case 4:
+				if supports("hlg") {
+					return "hlg", false
+				}
+			}
+		}
+	}
+	return "sdr", true
+}
+
+func taterPlaybackReencodedHDRRange(caps taterPlaybackCapabilities, source taterPlaybackMediaInfo, plannedRange string) string {
+	supports := func(videoRange string) bool {
+		return taterPlaybackRangeSupported(caps.VideoHDRFormats, videoRange) &&
+			taterPlaybackRangeSupported(caps.DisplayHDRFormats, videoRange)
+	}
+	switch cleanTaterVideoRange(plannedRange) {
+	case "hdr10":
+		if supports("hdr10") {
+			return "hdr10"
+		}
+	case "hlg":
+		if supports("hlg") {
+			return "hlg"
+		}
+	case "hdr10plus":
+		// Re-encoding cannot promise preservation of HDR10+ dynamic metadata.
+		if supports("hdr10") {
+			return "hdr10"
+		}
+	case "dolby_vision":
+		// The ordinary HEVC encoders do not author Dolby Vision metadata. A
+		// Profile 8 compatible base can still become honest HDR10 or HLG.
+		if source.DolbyVisionProfile == 8 {
+			switch source.DolbyVisionCompatibilityID {
+			case 1:
+				if supports("hdr10") {
+					return "hdr10"
+				}
+			case 4:
+				if supports("hlg") {
+					return "hlg"
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func annotateTaterTVHDRFormats(rawURL string, formats []string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return rawURL
+	}
+	query := u.Query()
+	query.Del("tater_hdr_formats")
+	if len(formats) > 0 {
+		query.Set("tater_hdr_formats", strings.Join(formats, ","))
+	}
+	u.RawQuery = query.Encode()
+	return u.String()
+}
+
 func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybackMediaInfo) taterPlaybackSessionResponse {
 	caps := req.Capabilities
 	selectedAudioTrack := selectTaterPlaybackAudioTrack(&source, req.AudioTrack, &caps)
@@ -317,11 +608,17 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 	outputRange := sourceRange
 	toneMapped := false
 	rangeFallback := false
+	hdrHEVCTranscode := false
 	if sourceRange != "sdr" {
 		if !taterPlaybackCanOutputRange(caps, source) {
 			if fallbackRange := taterPlaybackHDRFallbackRange(caps, source); fallbackRange != "" {
 				outputRange = fallbackRange
 				rangeFallback = true
+				if sourceRange == "dolby_vision" && source.DolbyVisionProfile == 7 {
+					// Unlike Profile 8, Profile 7 is dual-layer. Do not remux it as
+					// HDR10; decode its HDR10 base layer and create a clean HEVC stream.
+					videoCompatible = false
+				}
 			} else {
 				videoCompatible = false
 				outputRange = "sdr"
@@ -335,16 +632,29 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 			toneMapped = true
 			rangeFallback = false
 		}
-		// Apple requires HDR HLS video to remain HEVC. If the picture needs
-		// encoding for any reason, the current broadly compatible output is
-		// H.264, so explicitly tone-map it to SDR instead of producing an H.264
-		// stream that is mislabeled as HDR and displays with incorrect colors.
+		// HDR that must be resized or converted for tvOS stays HEVC Main 10 in
+		// fragmented-MP4 HLS. Unsupported Dolby Vision profiles still take the
+		// safe SDR tone-map path selected above.
 		if strings.EqualFold(strings.TrimSpace(caps.Platform), "tvos") &&
 			(!videoCompatible || videoCodec != "hevc") {
-			videoCompatible = false
-			outputRange = "sdr"
-			toneMapped = true
-			rangeFallback = false
+			if !toneMapped && taterPlaybackCanUseHDRHEVC(caps) {
+				if encodedRange := taterPlaybackReencodedHDRRange(caps, source, outputRange); encodedRange != "" {
+					videoCompatible = false
+					outputRange = encodedRange
+					rangeFallback = outputRange != sourceRange
+					hdrHEVCTranscode = true
+				} else {
+					videoCompatible = false
+					outputRange = "sdr"
+					toneMapped = true
+					rangeFallback = false
+				}
+			} else {
+				videoCompatible = false
+				outputRange = "sdr"
+				toneMapped = true
+				rangeFallback = false
+			}
 		}
 	}
 
@@ -378,6 +688,10 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 	}
 	if passthrough {
 		plan.AudioMode = "bitstream"
+	}
+	transcodeVideoCodec := "h264"
+	if hdrHEVCTranscode {
+		transcodeVideoCodec = "hevc"
 	}
 
 	switch {
@@ -414,29 +728,29 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 	case audioCompatible:
 		plan.Mode = "video_transcode"
 		plan.VideoMode = "transcode"
-		plan.VideoCodec = "h264"
+		plan.VideoCodec = transcodeVideoCodec
 		plan.OutputContainer = preferredContainer
-		plan.StreamURL = taterPlaybackPlannedURL(req.StreamURL, "video", profile, "h264", audioCodec, selectedAudioTrack, preferredContainer)
+		plan.StreamURL = taterPlaybackPlannedURL(req.StreamURL, "video", profile, transcodeVideoCodec, audioCodec, selectedAudioTrack, preferredContainer)
 		if passthrough {
-			plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, toneMapped) + "Video H.264 • Audio Bitstream" + taterPlaybackCodecSuffix(audioCodec)
+			plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, toneMapped) + "Video " + taterPlaybackVideoCodecLabel(transcodeVideoCodec) + " • Audio Bitstream" + taterPlaybackCodecSuffix(audioCodec)
 			plan.Reason = "The source audio is preserved while the video is converted."
 		} else {
-			plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, toneMapped) + "Video H.264 • Audio Direct" + taterPlaybackCodecSuffix(audioCodec)
+			plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, toneMapped) + "Video " + taterPlaybackVideoCodecLabel(transcodeVideoCodec) + " • Audio Direct" + taterPlaybackCodecSuffix(audioCodec)
 			plan.Reason = "The source audio is compatible, so only the video is converted."
 		}
 	default:
 		plan.Mode = "full_transcode"
 		plan.VideoMode = "transcode"
 		plan.AudioMode = "transcode"
-		plan.VideoCodec = "h264"
+		plan.VideoCodec = transcodeVideoCodec
 		plan.AudioCodec = "aac"
 		plan.OutputAudioChannels = transcodeAudioChannels
 		plan.OutputContainer = preferredContainer
 		if plan.OutputContainer == "" {
 			plan.OutputContainer = "mpegts"
 		}
-		plan.StreamURL = taterPlaybackPlannedURL(req.StreamURL, "full", profile, "h264", "", selectedAudioTrack, preferredContainer)
-		plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, toneMapped) + "Video H.264 • Audio AAC" + taterPlaybackAudioChannelsSuffix(transcodeAudioChannels)
+		plan.StreamURL = taterPlaybackPlannedURL(req.StreamURL, "full", profile, transcodeVideoCodec, "", selectedAudioTrack, preferredContainer)
+		plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, toneMapped) + "Video " + taterPlaybackVideoCodecLabel(transcodeVideoCodec) + " • Audio AAC" + taterPlaybackAudioChannelsSuffix(transcodeAudioChannels)
 		plan.Reason = "Both source tracks need conversion for this player."
 	}
 	if toneMapped {
@@ -611,7 +925,7 @@ func taterPlaybackPlannedURL(rawURL, mode, profile, videoCodec, audioCodec strin
 		return rawURL
 	}
 	query := u.Query()
-	for _, key := range []string{"direct", "transcode", "profile", "codec", "audio_codec", "start", "tater_audio_track", "tater_audio_channels", "tater_tone_map", "tater_strip_dolby_vision", "tater_video_codec", "tater_source_video_range", "tater_output_video_range", "tater_output_container", "tater_source_width", "tater_source_height", "tater_output_width", "tater_output_height"} {
+	for _, key := range []string{"direct", "transcode", "profile", "codec", "audio_codec", "start", "tater_audio_track", "tater_audio_channels", "tater_tone_map", "tater_strip_dolby_vision", "tater_video_codec", "tater_source_video_range", "tater_output_video_range", "tater_output_container", "tater_source_width", "tater_source_height", "tater_output_width", "tater_output_height", "tater_hdr_formats"} {
 		query.Del(key)
 	}
 	switch mode {
@@ -987,11 +1301,14 @@ func taterPlaybackHDRFallbackRange(caps taterPlaybackCapabilities, source taterP
 			return "hdr10"
 		}
 	case "dolby_vision":
+		// Profile 7's base layer is HDR10-compatible, but it must be decoded and
+		// re-encoded rather than treated as a simple remux fallback.
+		if source.DolbyVisionProfile == 7 && taterPlaybackCanUseHDRHEVC(caps) && supports("hdr10") {
+			return "hdr10"
+		}
 		// Profile 8 is single-layer and can carry a standards-compatible HDR10
-		// or HLG base picture. Strip only its Dolby Vision RPU when the display
-		// cannot use Dolby Vision. Profile 7 is dual-layer and needs a separate
-		// base-layer extraction path, so it intentionally falls through to the
-		// safe SDR tone-map path for now.
+		// or HLG base picture. Its Dolby Vision RPU can be stripped when the
+		// display cannot use Dolby Vision.
 		if source.DolbyVisionProfile == 8 {
 			switch source.DolbyVisionCompatibilityID {
 			case 1:

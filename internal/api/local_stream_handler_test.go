@@ -59,6 +59,29 @@ func TestConvertTaterFFmpegArgsToHLSUsesFragmentedMP4ForCopiedHEVC(t *testing.T)
 	}
 }
 
+func TestConvertTaterFFmpegArgsToHLSPreservesTranscodedHDRAsMain10(t *testing.T) {
+	args := buildFFmpegTranscodeArgsWithOptions(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_1080p"], "none", transcodeCodecHEVC,
+		transcodeOutputOptions{
+			InputPath: "/media/movie.mkv", SourceVideoRange: "hdr10", OutputVideoRange: "hdr10",
+		},
+	)
+	args = convertTaterFFmpegArgsToHLS(
+		args, "/tmp/local/index.m3u8", "/tmp/local/segment-%06d.ts", true, "libx265", "hevc", "hdr10",
+	)
+	joined := strings.Join(args, " ")
+	for _, expected := range []string{
+		"-c:v libx265", "format=yuv420p10le", "-profile:v main10", "-pix_fmt yuv420p10le",
+		"-x265-params colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:range=limited",
+		"-color_primaries bt2020", "-color_trc smpte2084", "-colorspace bt2020nc",
+		"-hls_segment_type fmp4", "-hls_segment_filename /tmp/local/segment-%06d.m4s",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("expected %q in transcoded HDR HLS args: %s", expected, joined)
+		}
+	}
+}
+
 func TestBuildTaterLocalHLSCommandStripsDolbyVisionForHDRBaseFallback(t *testing.T) {
 	request := httptest.NewRequest(
 		http.MethodGet,

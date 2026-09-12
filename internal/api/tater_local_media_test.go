@@ -2490,8 +2490,8 @@ func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
 }
 
 func TestTaterTVClientLogoOverlayUsesSeparateHLSSession(t *testing.T) {
-	serverKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecH264, false)
-	clientKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecH264, true)
+	serverKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecH264, false, nil)
+	clientKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecH264, true, nil)
 	if serverKey == clientKey {
 		t.Fatal("client-composited channel logos must not reuse a server-logo HLS session")
 	}
@@ -2516,6 +2516,18 @@ func TestTaterTVClientLogoOverlayUsesSeparateHLSSession(t *testing.T) {
 	}
 }
 
+func TestTaterTVHDRCapabilitiesUseSeparateHLSSessions(t *testing.T) {
+	sdrKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecH264, true, nil)
+	hdrKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecHEVC, true, []string{"hlg", "hdr10"})
+	reorderedHDRKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecHEVC, true, []string{"hdr10", "hlg"})
+	if sdrKey == hdrKey {
+		t.Fatal("HDR-capable Apple sessions must not reuse an SDR HLS session")
+	}
+	if hdrKey != reorderedHDRKey {
+		t.Fatal("equivalent HDR capabilities should reuse the same HLS session")
+	}
+}
+
 func TestTaterTVHLSArgsUseIndependentQSVSegments(t *testing.T) {
 	args := buildTaterTVChannelHLSArgsWithCodec(
 		config.TranscodingConfig{},
@@ -2535,9 +2547,36 @@ func TestTaterTVHLSArgsUseIndependentQSVSegments(t *testing.T) {
 		"-c:v hevc_qsv",
 		"-forced_idr 1",
 		"pad=w=1920:h=1080",
+		"format=p010le",
+		"-profile:v main10",
+		"-tag:v hvc1",
+		"-hls_segment_type fmp4",
+		"-hls_fmp4_init_filename init.mp4",
+		"-hls_segment_filename /tmp/hls/seg-%05d.m4s",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("expected %q in HLS args: %s", expected, joined)
+		}
+	}
+	if strings.Contains(joined, "-hls_segment_type mpegts") {
+		t.Fatalf("HEVC Tube TV must use Apple-compatible fragmented MP4: %s", joined)
+	}
+}
+
+func TestTaterTVHLSArgsPreserveHDR10AsMain10(t *testing.T) {
+	args := buildTaterTVChannelHLSArgsWithTimelineAndRange(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_4k"], "qsv", transcodeCodecHEVC,
+		"/media/movie.mkv", 0, 30, 0, "", "", "/tmp/hls/index.m3u8",
+		"/tmp/hls/seg-%05d.m4s", "hdr10", "hdr10", "",
+	)
+	joined := strings.Join(args, " ")
+	for _, expected := range []string{
+		"-c:v hevc_qsv", "format=p010le", "-profile:v main10", "-pix_fmt p010le",
+		"-color_primaries bt2020", "-color_trc smpte2084", "-colorspace bt2020nc",
+		"-hls_segment_type fmp4",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("expected %q in HDR HLS args: %s", expected, joined)
 		}
 	}
 }
@@ -2643,6 +2682,53 @@ func TestTaterTVHLSPlaylistIncludesTokenAndDiscontinuity(t *testing.T) {
 	}
 	if !strings.Contains(playlist, "/api/tater/tv/channel/02/hls/live/item-001/seg-00000.ts") {
 		t.Fatalf("expected HLS segment URL in playlist: %s", playlist)
+	}
+}
+
+func TestTaterTVHLSPlaylistIncludesAuthenticatedFMP4Maps(t *testing.T) {
+	session := &taterTVHLSSession{
+		publicID:       "live",
+		number:         "08",
+		profileID:      "hdmi_4k",
+		requestedAccel: "qsv",
+		preferredCodec: transcodeCodecHEVC,
+		hdrFormats:     []string{"hdr10", "hlg"},
+		accessed:       time.Now(),
+		segments: []taterTVHLSSegment{
+			{Sequence: 0, Duration: 2, Path: "item-00000/seg-00000.m4s", InitPath: "item-00000/init.mp4"},
+			{Sequence: 1, Duration: 2, Path: "item-00001/seg-00000.m4s", InitPath: "item-00001/init.mp4", Discontinuity: true},
+		},
+	}
+	playlist := session.playlist("player token")
+
+	if !strings.Contains(playlist, "#EXT-X-VERSION:7") {
+		t.Fatalf("expected fragmented-MP4 playlist version: %s", playlist)
+	}
+	for _, expected := range []string{
+		"#EXT-X-MAP:URI=\"/api/tater/tv/channel/08/hls/live/item-00000/init.mp4?",
+		"#EXT-X-MAP:URI=\"/api/tater/tv/channel/08/hls/live/item-00001/init.mp4?",
+		"item-00000/seg-00000.m4s?",
+		"tater_hdr_formats=hdr10%2Chlg",
+		"player_token=player+token",
+	} {
+		if !strings.Contains(playlist, expected) {
+			t.Fatalf("expected %q in fragmented-MP4 playlist: %s", expected, playlist)
+		}
+	}
+}
+
+func TestParseTaterTVHLSPlaylistCarriesInitializationMap(t *testing.T) {
+	playlistPath := filepath.Join(t.TempDir(), "index.m3u8")
+	playlist := "#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:2.002,\nseg-00000.m4s\n"
+	if err := os.WriteFile(playlistPath, []byte(playlist), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	segments, err := parseTaterTVHLSPlaylist(playlistPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segments) != 1 || segments[0].File != "seg-00000.m4s" || segments[0].InitFile != "init.mp4" {
+		t.Fatalf("unexpected fragmented-MP4 parse result: %#v", segments)
 	}
 }
 
