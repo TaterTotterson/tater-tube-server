@@ -319,8 +319,8 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 	rangeFallback := false
 	if sourceRange != "sdr" {
 		if !taterPlaybackCanOutputRange(caps, source) {
-			if taterPlaybackCanUseHDRFallback(caps, source) {
-				outputRange = "hdr10"
+			if fallbackRange := taterPlaybackHDRFallbackRange(caps, source); fallbackRange != "" {
+				outputRange = fallbackRange
 				rangeFallback = true
 			} else {
 				videoCompatible = false
@@ -330,6 +330,17 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		}
 		if source.VideoBitDepth > 0 && caps.MaxVideoBitDepth > 0 &&
 			source.VideoBitDepth > caps.MaxVideoBitDepth {
+			videoCompatible = false
+			outputRange = "sdr"
+			toneMapped = true
+			rangeFallback = false
+		}
+		// Apple requires HDR HLS video to remain HEVC. If the picture needs
+		// encoding for any reason, the current broadly compatible output is
+		// H.264, so explicitly tone-map it to SDR instead of producing an H.264
+		// stream that is mislabeled as HDR and displays with incorrect colors.
+		if strings.EqualFold(strings.TrimSpace(caps.Platform), "tvos") &&
+			(!videoCompatible || videoCodec != "hevc") {
 			videoCompatible = false
 			outputRange = "sdr"
 			toneMapped = true
@@ -370,7 +381,7 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 	}
 
 	switch {
-	case videoCompatible && audioCompatible && requiresContainerChange:
+	case videoCompatible && audioCompatible && (requiresContainerChange || rangeFallback):
 		plan.Mode = "remux"
 		plan.OutputContainer = preferredContainer
 		plan.StreamURL = taterPlaybackPlannedURL(req.StreamURL, "remux", profile, videoCodec, audioCodec, selectedAudioTrack, preferredContainer)
@@ -449,7 +460,7 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		annotatedOutputContainer = plan.OutputContainer
 	}
 	plan.StreamURL = annotateTaterPlaybackURL(
-		plan.StreamURL, plan.VideoMode, plan.AudioMode, plan.AudioCodec,
+		plan.StreamURL, plan.VideoMode, plan.VideoCodec, plan.AudioMode, plan.AudioCodec,
 		sourceRange, outputRange, toneMapped, selectedAudioTrack,
 		source.Width, source.Height, plan.OutputWidth, plan.OutputHeight,
 		plan.OutputAudioChannels, annotatedOutputContainer,
@@ -458,7 +469,7 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 }
 
 func annotateTaterPlaybackURL(
-	rawURL, videoMode, audioMode, audioCodec, sourceRange, outputRange string,
+	rawURL, videoMode, videoCodec, audioMode, audioCodec, sourceRange, outputRange string,
 	toneMapped bool,
 	audioTrack, sourceWidth, sourceHeight, outputWidth, outputHeight int,
 	outputAudioChannels int, outputContainer string,
@@ -469,6 +480,11 @@ func annotateTaterPlaybackURL(
 	}
 	query := u.Query()
 	query.Set("tater_video_mode", cleanTaterCodecName(videoMode))
+	if codec := cleanTaterCodecName(videoCodec); codec != "" {
+		query.Set("tater_video_codec", codec)
+	} else {
+		query.Del("tater_video_codec")
+	}
 	query.Set("tater_audio_mode", cleanTaterCodecName(audioMode))
 	if codec := cleanTaterCodecName(audioCodec); codec != "" {
 		query.Set("tater_audio_codec", codec)
@@ -486,6 +502,12 @@ func annotateTaterPlaybackURL(
 		query.Set("tater_tone_map", "1")
 	} else {
 		query.Del("tater_tone_map")
+	}
+	if cleanTaterVideoRange(sourceRange) == "dolby_vision" &&
+		cleanTaterVideoRange(outputRange) != "dolby_vision" && !toneMapped {
+		query.Set("tater_strip_dolby_vision", "1")
+	} else {
+		query.Del("tater_strip_dolby_vision")
 	}
 	if audioTrack >= 0 {
 		query.Set("tater_audio_track", strconv.Itoa(audioTrack))
@@ -589,7 +611,7 @@ func taterPlaybackPlannedURL(rawURL, mode, profile, videoCodec, audioCodec strin
 		return rawURL
 	}
 	query := u.Query()
-	for _, key := range []string{"direct", "transcode", "profile", "codec", "audio_codec", "start", "tater_audio_track", "tater_audio_channels", "tater_tone_map", "tater_source_video_range", "tater_output_video_range", "tater_output_container", "tater_source_width", "tater_source_height", "tater_output_width", "tater_output_height"} {
+	for _, key := range []string{"direct", "transcode", "profile", "codec", "audio_codec", "start", "tater_audio_track", "tater_audio_channels", "tater_tone_map", "tater_strip_dolby_vision", "tater_video_codec", "tater_source_video_range", "tater_output_video_range", "tater_output_container", "tater_source_width", "tater_source_height", "tater_output_width", "tater_output_height"} {
 		query.Del(key)
 	}
 	switch mode {
@@ -930,8 +952,17 @@ func taterPlaybackCanOutputRange(caps taterPlaybackCapabilities, source taterPla
 		!taterPlaybackRangeSupported(caps.DisplayHDRFormats, videoRange) {
 		return false
 	}
-	if videoRange == "dolby_vision" && source.DolbyVisionProfile > 0 &&
-		len(caps.DolbyVisionProfiles) > 0 {
+	if videoRange == "dolby_vision" {
+		// Capability contract v5 makes Dolby Vision profile support explicit on
+		// tvOS. An empty list must not mean "every profile" because AVPlayer's
+		// HLS support is profile- and packaging-specific.
+		if strings.EqualFold(strings.TrimSpace(caps.Platform), "tvos") &&
+			caps.CapabilityVersion >= 5 && source.DolbyVisionProfile <= 0 {
+			return false
+		}
+		if source.DolbyVisionProfile <= 0 || len(caps.DolbyVisionProfiles) == 0 {
+			return true
+		}
 		for _, profile := range caps.DolbyVisionProfiles {
 			if profile == source.DolbyVisionProfile {
 				return true
@@ -942,20 +973,39 @@ func taterPlaybackCanOutputRange(caps taterPlaybackCapabilities, source taterPla
 	return true
 }
 
-func taterPlaybackCanUseHDRFallback(caps taterPlaybackCapabilities, source taterPlaybackMediaInfo) bool {
-	if !caps.DisplayHDREnabled ||
-		!taterPlaybackRangeSupported(caps.VideoHDRFormats, "hdr10") ||
-		!taterPlaybackRangeSupported(caps.DisplayHDRFormats, "hdr10") {
-		return false
+func taterPlaybackHDRFallbackRange(caps taterPlaybackCapabilities, source taterPlaybackMediaInfo) string {
+	if !caps.DisplayHDREnabled {
+		return ""
+	}
+	supports := func(videoRange string) bool {
+		return taterPlaybackRangeSupported(caps.VideoHDRFormats, videoRange) &&
+			taterPlaybackRangeSupported(caps.DisplayHDRFormats, videoRange)
 	}
 	switch cleanTaterVideoRange(source.VideoRange) {
 	case "hdr10plus":
-		return true
+		if supports("hdr10") {
+			return "hdr10"
+		}
 	case "dolby_vision":
-		return source.DolbyVisionProfile == 7 || source.DolbyVisionCompatibilityID == 1
-	default:
-		return false
+		// Profile 8 is single-layer and can carry a standards-compatible HDR10
+		// or HLG base picture. Strip only its Dolby Vision RPU when the display
+		// cannot use Dolby Vision. Profile 7 is dual-layer and needs a separate
+		// base-layer extraction path, so it intentionally falls through to the
+		// safe SDR tone-map path for now.
+		if source.DolbyVisionProfile == 8 {
+			switch source.DolbyVisionCompatibilityID {
+			case 1:
+				if supports("hdr10") {
+					return "hdr10"
+				}
+			case 4:
+				if supports("hlg") {
+					return "hlg"
+				}
+			}
+		}
 	}
+	return ""
 }
 
 func taterPlaybackRangePrefix(sourceRange, outputRange string, toneMapped bool) string {

@@ -174,6 +174,7 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 	require.True(t, envelope.Data.Capabilities.LocalMedia)
 	require.False(t, envelope.Data.Capabilities.TubeTV)
 	require.True(t, envelope.Data.Capabilities.TaterLink)
+	require.True(t, envelope.Data.Capabilities.HDRHLS)
 	require.NotNil(t, envelope.Data.Hero)
 	require.True(t, envelope.Data.Hero.Personalized)
 	require.Equal(t, "Totty", envelope.Data.Hero.Assistant)
