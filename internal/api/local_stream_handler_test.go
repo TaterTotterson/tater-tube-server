@@ -16,7 +16,9 @@ import (
 
 func TestConvertTaterFFmpegArgsToHLSUsesSegmentedOutput(t *testing.T) {
 	args := buildFFmpegAudioOnlyVideoArgsWithTrackAndContainer("192k", "/media/movie.mkv", 0, 0, "mpegts")
-	args = convertTaterFFmpegArgsToHLS(args, "/tmp/local/index.m3u8", "/tmp/local/segment-%06d.ts", false, "copy")
+	args = convertTaterFFmpegArgsToHLS(
+		args, "/tmp/local/index.m3u8", "/tmp/local/segment-%06d.ts", false, "copy", "h264", "sdr",
+	)
 	joined := strings.Join(args, " ")
 
 	if strings.Contains(joined, "-f mpegts pipe:1") {
@@ -33,6 +35,49 @@ func TestConvertTaterFFmpegArgsToHLSUsesSegmentedOutput(t *testing.T) {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("expected %q in HLS args: %s", expected, joined)
 		}
+	}
+}
+
+func TestConvertTaterFFmpegArgsToHLSUsesFragmentedMP4ForCopiedHEVC(t *testing.T) {
+	args := buildFFmpegRemuxArgs("/media/movie.mkv", 0, 0)
+	args = convertTaterFFmpegArgsToHLS(
+		args, "/tmp/local/index.m3u8", "/tmp/local/segment-%06d.ts", false, "copy", "hevc", "hdr10",
+	)
+	joined := strings.Join(args, " ")
+	for _, expected := range []string{
+		"-tag:v hvc1",
+		"-hls_segment_type fmp4",
+		"-hls_fmp4_init_filename init.mp4",
+		"-hls_segment_filename /tmp/local/segment-%06d.m4s",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("expected %q in fragmented-MP4 HLS args: %s", expected, joined)
+		}
+	}
+	if strings.Contains(joined, "-hls_segment_type mpegts") {
+		t.Fatalf("did not expect MPEG-TS for copied HEVC: %s", joined)
+	}
+}
+
+func TestBuildTaterLocalHLSCommandStripsDolbyVisionForHDRBaseFallback(t *testing.T) {
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"http://tube.local/api/tater/local/stream?transcode=remux&tater_video_codec=hevc&tater_output_video_range=hdr10&tater_strip_dolby_vision=1",
+		nil,
+	)
+	command, err := buildTaterLocalHLSCommand(
+		request,
+		&config.Config{Transcoding: config.TranscodingConfig{}},
+		"/media/movie.mkv",
+		"/tmp/local/index.m3u8",
+		"/tmp/local/segment-%06d.ts",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(command.args, " ")
+	if !strings.Contains(joined, "-bsf:v dovi_rpu=strip=1") {
+		t.Fatalf("expected Dolby Vision metadata stripping in args: %s", joined)
 	}
 }
 
@@ -55,6 +100,28 @@ func TestTaterLocalHLSPlaylistUsesAuthenticatedSegmentURLs(t *testing.T) {
 		!strings.Contains(text, "tater_hls_session=session-one") ||
 		!strings.Contains(text, "tater_hls_segment=segment-000001.ts") {
 		t.Fatalf("expected authenticated local HLS segment URL, got %s", text)
+	}
+}
+
+func TestTaterLocalFMP4PlaylistAuthenticatesInitAndMediaSegments(t *testing.T) {
+	root := t.TempDir()
+	playlistPath := filepath.Join(root, "index.m3u8")
+	playlistText := "#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:4.0,\nsegment-000001.m4s\n"
+	if err := os.WriteFile(playlistPath, []byte(playlistText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	session := &taterLocalHLSSession{
+		id: "session-fmp4", playerToken: "paired token", root: root, playlistPath: playlistPath,
+	}
+	playlist, err := session.playlist()
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(playlist)
+	for _, resource := range []string{"tater_hls_segment=init.mp4", "tater_hls_segment=segment-000001.m4s"} {
+		if !strings.Contains(text, resource) {
+			t.Fatalf("expected authenticated resource %q, got %s", resource, text)
+		}
 	}
 }
 

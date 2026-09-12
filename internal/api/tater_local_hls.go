@@ -108,7 +108,8 @@ func (h *LocalStreamHandler) serveLocalHLSPlaylist(
 func (h *LocalStreamHandler) serveLocalHLSSegment(w http.ResponseWriter, r *http.Request, player *config.PlayerConfig) {
 	sessionID := strings.TrimSpace(r.URL.Query().Get(taterLocalHLSSessionQuery))
 	segmentName := filepath.Base(strings.TrimSpace(r.URL.Query().Get(taterLocalHLSSegmentQuery)))
-	if sessionID == "" || segmentName == "." || segmentName == "" || !strings.HasSuffix(strings.ToLower(segmentName), ".ts") {
+	contentType, supported := taterHLSSegmentContentType(segmentName)
+	if sessionID == "" || segmentName == "." || segmentName == "" || !supported {
 		http.Error(w, "HLS segment not found", http.StatusNotFound)
 		return
 	}
@@ -135,7 +136,7 @@ func (h *LocalStreamHandler) serveLocalHLSSegment(w http.ResponseWriter, r *http
 	}
 
 	session.touch()
-	w.Header().Set("Content-Type", "video/mp2t")
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "private, max-age=300")
 	w.Header().Set("Accept-Ranges", "bytes")
 	var writer http.ResponseWriter = w
@@ -256,6 +257,9 @@ func buildTaterLocalHLSCommand(
 	startSeconds := parseTranscodeStartSeconds(r.URL.Query().Get("start"))
 	audioTrack := requestedTaterAudioTrack(r)
 	mode := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("transcode")))
+	sourceVideoCodec := cleanTaterCodecName(r.URL.Query().Get("tater_video_codec"))
+	outputVideoRange := cleanTaterVideoRange(r.URL.Query().Get("tater_output_video_range"))
+	stripDolbyVision := strings.TrimSpace(r.URL.Query().Get("tater_strip_dolby_vision")) == "1"
 	command := taterLocalHLSCommand{
 		profileID:     profileID,
 		profileName:   profile.Name,
@@ -348,15 +352,29 @@ func buildTaterLocalHLSCommand(
 			)
 		}
 	}
+	if stripDolbyVision && (mode == "remux" || mode == "audio" || mode == "audio-only" || mode == "audio_only") {
+		args = insertTaterFFmpegOutputArgs(args, "-bsf:v", "dovi_rpu=strip=1")
+	}
 
 	if command.audioMode == "transcode" {
 		_, command.audioChannels = taterAACTranscodeSettings(profile.AudioBitrate, command.audioChannels)
 	}
-	command.args = convertTaterFFmpegArgsToHLS(args, playlistPath, segmentPattern, videoEncoded, command.videoCodec)
+	command.args = convertTaterFFmpegArgsToHLS(
+		args, playlistPath, segmentPattern, videoEncoded, command.videoCodec,
+		sourceVideoCodec, outputVideoRange,
+	)
 	return command, nil
 }
 
-func convertTaterFFmpegArgsToHLS(args []string, playlistPath, segmentPattern string, videoEncoded bool, videoCodec string) []string {
+func convertTaterFFmpegArgsToHLS(
+	args []string,
+	playlistPath string,
+	segmentPattern string,
+	videoEncoded bool,
+	videoCodec string,
+	sourceVideoCodec string,
+	outputVideoRange string,
+) []string {
 	if len(args) >= 3 && args[len(args)-3] == "-f" && args[len(args)-1] == "pipe:1" {
 		args = append([]string(nil), args[:len(args)-3]...)
 	} else {
@@ -384,6 +402,30 @@ func convertTaterFFmpegArgsToHLS(args []string, playlistPath, segmentPattern str
 			args = append(args, "-forced_idr", "1")
 		}
 	}
+	effectiveVideoCodec := cleanTaterCodecName(videoCodec)
+	if effectiveVideoCodec == "copy" || effectiveVideoCodec == "" {
+		effectiveVideoCodec = cleanTaterCodecName(sourceVideoCodec)
+	}
+	if effectiveVideoCodec == "hevc" || strings.Contains(effectiveVideoCodec, "hevc") ||
+		strings.Contains(effectiveVideoCodec, "x265") {
+		segmentPattern = strings.TrimSuffix(segmentPattern, filepath.Ext(segmentPattern)) + ".m4s"
+		videoTag := "hvc1"
+		if cleanTaterVideoRange(outputVideoRange) == "dolby_vision" {
+			videoTag = "dvh1"
+		}
+		args = append(args, "-tag:v", videoTag)
+		return append(args,
+			"-f", "hls",
+			"-hls_time", strconv.Itoa(taterLocalHLSSegmentTime),
+			"-hls_segment_type", "fmp4",
+			"-hls_fmp4_init_filename", "init.mp4",
+			"-hls_flags", "independent_segments+temp_file",
+			"-hls_list_size", "0",
+			"-hls_playlist_type", "event",
+			"-hls_segment_filename", segmentPattern,
+			playlistPath,
+		)
+	}
 	return append(args,
 		"-f", "hls",
 		"-hls_time", strconv.Itoa(taterLocalHLSSegmentTime),
@@ -395,6 +437,28 @@ func convertTaterFFmpegArgsToHLS(args []string, playlistPath, segmentPattern str
 		"-hls_segment_filename", segmentPattern,
 		playlistPath,
 	)
+}
+
+func insertTaterFFmpegOutputArgs(args []string, values ...string) []string {
+	if len(args) >= 3 && args[len(args)-3] == "-f" && args[len(args)-1] == "pipe:1" {
+		inserted := make([]string, 0, len(args)+len(values))
+		inserted = append(inserted, args[:len(args)-3]...)
+		inserted = append(inserted, values...)
+		inserted = append(inserted, args[len(args)-3:]...)
+		return inserted
+	}
+	return append(args, values...)
+}
+
+func taterHLSSegmentContentType(name string) (string, bool) {
+	switch strings.ToLower(filepath.Ext(strings.TrimSpace(name))) {
+	case ".ts":
+		return "video/mp2t", true
+	case ".m4s", ".mp4":
+		return "video/mp4", true
+	default:
+		return "", false
+	}
 }
 
 func taterLocalHLSKey(r *http.Request, playerID, path string) string {
@@ -470,7 +534,12 @@ func (s *taterLocalHLSSession) expireWhenIdle(ctx context.Context) {
 
 func (s *taterLocalHLSSession) playlistReady() bool {
 	data, err := os.ReadFile(s.playlistPath)
-	return err == nil && strings.Contains(string(data), ".ts")
+	if err != nil {
+		return false
+	}
+	playlist := string(data)
+	return strings.Contains(playlist, "#EXTINF:") &&
+		(strings.Contains(playlist, ".ts") || strings.Contains(playlist, ".m4s"))
 }
 
 func (s *taterLocalHLSSession) playlist() ([]byte, error) {
@@ -481,21 +550,54 @@ func (s *taterLocalHLSSession) playlist() ([]byte, error) {
 	lines := strings.Split(string(raw), "\n")
 	for index, line := range lines {
 		name := strings.TrimSpace(line)
-		if name == "" || strings.HasPrefix(name, "#") {
+		if name == "" {
 			continue
 		}
-		name = filepath.Base(name)
-		query := url.Values{}
-		query.Set("player_token", s.playerToken)
-		query.Set(taterLocalHLSSessionQuery, s.id)
-		query.Set(taterLocalHLSSegmentQuery, name)
-		playlistURL := strings.TrimSpace(s.playlistURL)
-		if playlistURL == "" {
-			playlistURL = "/api/tater/local/stream"
+		if strings.HasPrefix(name, "#EXT-X-MAP:") {
+			lines[index] = rewriteTaterHLSMapURI(line, s.authenticatedSegmentURL)
+			continue
 		}
-		lines[index] = playlistURL + "?" + query.Encode()
+		if strings.HasPrefix(name, "#") {
+			continue
+		}
+		lines[index] = s.authenticatedSegmentURL(name)
 	}
 	return []byte(strings.Join(lines, "\n")), nil
+}
+
+func (s *taterLocalHLSSession) authenticatedSegmentURL(name string) string {
+	name = filepath.Base(strings.TrimSpace(name))
+	if name == "." || name == "" {
+		return ""
+	}
+	query := url.Values{}
+	query.Set("player_token", s.playerToken)
+	query.Set(taterLocalHLSSessionQuery, s.id)
+	query.Set(taterLocalHLSSegmentQuery, name)
+	playlistURL := strings.TrimSpace(s.playlistURL)
+	if playlistURL == "" {
+		playlistURL = "/api/tater/local/stream"
+	}
+	return playlistURL + "?" + query.Encode()
+}
+
+func rewriteTaterHLSMapURI(line string, rewrite func(string) string) string {
+	const marker = `URI="`
+	start := strings.Index(line, marker)
+	if start < 0 {
+		return line
+	}
+	start += len(marker)
+	end := strings.Index(line[start:], `"`)
+	if end < 0 {
+		return line
+	}
+	end += start
+	replacement := rewrite(line[start:end])
+	if replacement == "" {
+		return line
+	}
+	return line[:start] + replacement + line[end:]
 }
 
 func (s *taterLocalHLSSession) touch() {

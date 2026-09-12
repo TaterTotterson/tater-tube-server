@@ -31,6 +31,7 @@ type taterPlayerHomeCapabilities struct {
 	Commercials        bool `json:"commercials"`
 	MidrollCommercials bool `json:"midrollCommercials"`
 	TaterLink          bool `json:"taterLink"`
+	HDRHLS             bool `json:"hdrHLS"`
 }
 
 type taterPlayerHomeHero struct {
@@ -276,6 +277,7 @@ func taterPlayerCapabilities(cfg *config.Config) taterPlayerHomeCapabilities {
 		LocalMedia: taterLocalMediaEnabled(cfg),
 		Newznab:    taterNewznabEnabled(cfg),
 		TubeTV:     taterTubeTVEnabled(cfg),
+		HDRHLS:     true,
 	}
 	if cfg != nil {
 		capabilities.Commercials = capabilities.TubeTV &&

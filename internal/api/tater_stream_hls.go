@@ -173,7 +173,8 @@ func (h *StreamHandler) prepareStreamHLSSession(
 func (h *StreamHandler) serveStreamHLSSegment(w http.ResponseWriter, r *http.Request, playerID string) {
 	sessionID := strings.TrimSpace(r.URL.Query().Get(taterLocalHLSSessionQuery))
 	segmentName := filepath.Base(strings.TrimSpace(r.URL.Query().Get(taterLocalHLSSegmentQuery)))
-	if sessionID == "" || segmentName == "." || segmentName == "" || !strings.HasSuffix(strings.ToLower(segmentName), ".ts") {
+	contentType, supported := taterHLSSegmentContentType(segmentName)
+	if sessionID == "" || segmentName == "." || segmentName == "" || !supported {
 		http.Error(w, "HLS segment not found", http.StatusNotFound)
 		return
 	}
@@ -200,7 +201,7 @@ func (h *StreamHandler) serveStreamHLSSegment(w http.ResponseWriter, r *http.Req
 	}
 
 	session.touch()
-	w.Header().Set("Content-Type", "video/mp2t")
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "private, max-age=300")
 	w.Header().Set("Accept-Ranges", "bytes")
 	var writer http.ResponseWriter = w
