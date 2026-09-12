@@ -415,7 +415,10 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		plan.AudioMode = "transcode"
 		plan.VideoCodec = "h264"
 		plan.AudioCodec = "aac"
-		plan.OutputContainer = "mpegts"
+		plan.OutputContainer = preferredContainer
+		if plan.OutputContainer == "" {
+			plan.OutputContainer = "mpegts"
+		}
 		plan.StreamURL = taterPlaybackPlannedURL(req.StreamURL, "full", profile, "h264", "", selectedAudioTrack, preferredContainer)
 		plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, toneMapped) + "Video H.264 • Audio AAC"
 		plan.Reason = "Both source tracks need conversion for this player."
@@ -980,6 +983,8 @@ func cleanTaterContainerName(value string) string {
 		return "mp4"
 	case "mpegts", "m2ts", "ts":
 		return "mpegts"
+	case "hls", "m3u8":
+		return "hls"
 	default:
 		return cleanTaterCodecName(value)
 	}
@@ -989,6 +994,8 @@ func cleanTaterPreferredStreamContainer(value string) string {
 	switch cleanTaterContainerName(value) {
 	case "mpegts":
 		return "mpegts"
+	case "hls":
+		return "hls"
 	default:
 		return ""
 	}
