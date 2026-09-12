@@ -195,6 +195,46 @@ func TestBuildTaterPlaybackPlanAudioOnlyTranscode(t *testing.T) {
 	require.Equal(t, "audio", playbackPlanQuery(t, plan.StreamURL).Get("transcode"))
 }
 
+func TestBuildTaterPlaybackPlanPreservesAppleTVSurroundWhenTranscodingAudio(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			Platform:         "tvos",
+			VideoCodecs:      []string{"h264"},
+			AudioCodecs:      []string{"aac", "ac3", "eac3"},
+			MaxAudioChannels: 8,
+			AudioDownmix:     true,
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "h264", AudioCodec: "dts_hd", AudioChannels: 8,
+	})
+
+	require.Equal(t, "audio_transcode", plan.Mode)
+	require.Equal(t, "aac", plan.AudioCodec)
+	require.Equal(t, 6, plan.OutputAudioChannels)
+	require.Equal(t, "6", playbackPlanQuery(t, plan.StreamURL).Get("tater_audio_channels"))
+	require.Contains(t, plan.QualityLabel, "AAC 5.1")
+}
+
+func TestBuildTaterPlaybackPlanDoesNotChangeOtherPlayersAudioContract(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Capabilities: taterPlaybackCapabilities{
+			Platform:         "linux",
+			VideoCodecs:      []string{"h264"},
+			AudioCodecs:      []string{"aac"},
+			MaxAudioChannels: 8,
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "h264", AudioCodec: "dts_hd", AudioChannels: 8,
+	})
+
+	require.Equal(t, "audio_transcode", plan.Mode)
+	require.Zero(t, plan.OutputAudioChannels)
+	require.Empty(t, playbackPlanQuery(t, plan.StreamURL).Get("tater_audio_channels"))
+}
+
 func TestBuildTaterPlaybackPlanUsesAppleTVContainerForAudioOnlyTranscode(t *testing.T) {
 	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
 		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",

@@ -43,25 +43,26 @@ type taterTVHLSManager struct {
 }
 
 type taterTVHLSSession struct {
-	key              string
-	publicID         string
-	number           string
-	profileID        string
-	requestedAccel   string
-	ffmpegPath       string
-	cfg              *config.Config
-	transcodeCfg     config.TranscodingConfig
-	profile          transcodeProfile
-	accel            string
-	preferredCodec   string
-	effectiveAccel   string
-	hardwareDevice   string
-	videoCodec       string
-	channel          taterTVChannel
-	guideStartedAt   time.Time
-	sessionStartedAt time.Time
-	root             string
-	cancel           context.CancelFunc
+	key               string
+	publicID          string
+	number            string
+	profileID         string
+	requestedAccel    string
+	ffmpegPath        string
+	cfg               *config.Config
+	transcodeCfg      config.TranscodingConfig
+	profile           transcodeProfile
+	accel             string
+	preferredCodec    string
+	effectiveAccel    string
+	hardwareDevice    string
+	videoCodec        string
+	clientLogoOverlay bool
+	channel           taterTVChannel
+	guideStartedAt    time.Time
+	sessionStartedAt  time.Time
+	root              string
+	cancel            context.CancelFunc
 
 	mu       sync.Mutex
 	segments []taterTVHLSSegment
@@ -129,7 +130,8 @@ func (h *TaterTVStreamHandler) serveHLSSegment(w http.ResponseWriter, r *http.Re
 	}
 	profileID, _ := taterTVRequestedTranscodeProfile(cfg, r)
 	requestedAccel := h.requestedHLSAccel(cfg, r)
-	key := taterTVHLSKey(number, sessionID, profileID, requestedAccel, requestedTranscodeCodec(r))
+	clientLogoOverlay := taterTVClientLogoOverlayRequested(r)
+	key := taterTVHLSKey(number, sessionID, profileID, requestedAccel, requestedTranscodeCodec(r), clientLogoOverlay)
 	session := globalTaterTVHLS.get(key)
 	if session == nil {
 		http.Error(w, "HLS session not found", http.StatusNotFound)
@@ -188,6 +190,7 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 	profileID, profile := taterTVRequestedTranscodeProfile(cfg, r)
 	requestedCodec := requestedTranscodeCodec(r)
 	requestedAccel := h.requestedHLSAccel(cfg, r)
+	clientLogoOverlay := taterTVClientLogoOverlayRequested(r)
 	transcoder := &StreamHandler{configGetter: h.configGetter, streamTracker: h.streamTracker}
 	accel, selectedHardwareDevice, videoCodecPreference := transcoder.selectTranscodeAccelerationAndCodec(r.Context(), ffmpegPath, cfg.Transcoding, profile, requestedAccel, requestedCodec)
 	if requestedCodec == transcodeCodecHEVC && videoCodecPreference != transcodeCodecHEVC {
@@ -203,7 +206,7 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 	}
 
 	publicID := taterTVHLSPublicID(r, guide.StartedAt)
-	key := taterTVHLSKey(channel.Number, publicID, profileID, requestedAccel, videoCodecPreference)
+	key := taterTVHLSKey(channel.Number, publicID, profileID, requestedAccel, videoCodecPreference, clientLogoOverlay)
 	session := globalTaterTVHLS.get(key)
 	if session != nil {
 		if session.finished() {
@@ -228,27 +231,28 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 	effectiveAccel := effectiveTranscodeHardwareAccel(videoCodec)
 	hardwareDevice := effectiveTranscodeHardwareDevice(effectiveAccel, transcodeCfg.HardwareDevice)
 	session = &taterTVHLSSession{
-		key:              key,
-		publicID:         publicID,
-		number:           channel.Number,
-		profileID:        profileID,
-		requestedAccel:   requestedAccel,
-		ffmpegPath:       ffmpegPath,
-		cfg:              cfg,
-		transcodeCfg:     transcodeCfg,
-		profile:          profile,
-		accel:            accel,
-		preferredCodec:   videoCodecPreference,
-		effectiveAccel:   effectiveAccel,
-		hardwareDevice:   hardwareDevice,
-		videoCodec:       videoCodec,
-		channel:          channel,
-		guideStartedAt:   guide.StartedAt,
-		sessionStartedAt: time.Now(),
-		root:             sessionRoot,
-		cancel:           cancel,
-		seen:             map[string]bool{},
-		accessed:         time.Now(),
+		key:               key,
+		publicID:          publicID,
+		number:            channel.Number,
+		profileID:         profileID,
+		requestedAccel:    requestedAccel,
+		ffmpegPath:        ffmpegPath,
+		cfg:               cfg,
+		transcodeCfg:      transcodeCfg,
+		profile:           profile,
+		accel:             accel,
+		preferredCodec:    videoCodecPreference,
+		effectiveAccel:    effectiveAccel,
+		hardwareDevice:    hardwareDevice,
+		videoCodec:        videoCodec,
+		clientLogoOverlay: clientLogoOverlay,
+		channel:           channel,
+		guideStartedAt:    guide.StartedAt,
+		sessionStartedAt:  time.Now(),
+		root:              sessionRoot,
+		cancel:            cancel,
+		seen:              map[string]bool{},
+		accessed:          time.Now(),
 	}
 	session, created := globalTaterTVHLS.addOrGet(key, session)
 	if created {
@@ -397,7 +401,7 @@ func (s *taterTVHLSSession) run(ctx context.Context) {
 		return
 	}
 	logoFile := ""
-	if taterTVChannelLogoEnabled(s.cfg, s.channel) && s.channel.LogoPath != "" {
+	if !s.clientLogoOverlay && taterTVChannelLogoEnabled(s.cfg, s.channel) && s.channel.LogoPath != "" {
 		if resolvedLogo, err := taterTVResolveLogoFile(ctx, s.cfg, s.channel.LogoPath); err == nil {
 			logoFile = resolvedLogo
 		} else {
@@ -587,6 +591,9 @@ func (s *taterTVHLSSession) segmentURI(relPath, playerToken string) string {
 	q.Set("profile", s.profileID)
 	q.Set("hwaccel", s.requestedAccel)
 	q.Set("codec", normalizeTranscodeCodec(s.preferredCodec))
+	if s.clientLogoOverlay {
+		q.Set("tater_client_logo_overlay", "1")
+	}
 	return u + "?" + q.Encode()
 }
 
@@ -884,10 +891,18 @@ func taterTVHLSPublicID(r *http.Request, guideStartedAt time.Time) string {
 	return taterTVSafeName(session, "live")
 }
 
-func taterTVHLSKey(number, sessionID, profileID, requestedAccel, preferredCodec string) string {
-	raw := strings.Join([]string{number, sessionID, profileID, requestedAccel, normalizeTranscodeCodec(preferredCodec)}, "|")
+func taterTVHLSKey(number, sessionID, profileID, requestedAccel, preferredCodec string, clientLogoOverlay bool) string {
+	logoMode := "server-logo"
+	if clientLogoOverlay {
+		logoMode = "client-logo"
+	}
+	raw := strings.Join([]string{number, sessionID, profileID, requestedAccel, normalizeTranscodeCodec(preferredCodec), logoMode}, "|")
 	sum := sha1.Sum([]byte(raw))
 	return number + "-" + hex.EncodeToString(sum[:])[:16]
+}
+
+func taterTVClientLogoOverlayRequested(r *http.Request) bool {
+	return r != nil && strings.TrimSpace(r.URL.Query().Get("tater_client_logo_overlay")) == "1"
 }
 
 func taterTVHLSSegmentPath(requestPath string) (sessionID, relPath string, ok bool) {

@@ -458,6 +458,32 @@ func requestedTaterAudioTrack(r *http.Request) int {
 	return track
 }
 
+func requestedTaterAudioChannels(r *http.Request) int {
+	if r == nil {
+		return 0
+	}
+	channels, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("tater_audio_channels")))
+	if err != nil {
+		return 0
+	}
+	switch channels {
+	case 2, 6:
+		return channels
+	default:
+		return 0
+	}
+}
+
+func taterAACTranscodeSettings(audioBitrate string, requestedChannels int) (string, int) {
+	if requestedChannels == 6 {
+		return "320k", 6
+	}
+	if strings.TrimSpace(audioBitrate) == "" {
+		audioBitrate = "192k"
+	}
+	return audioBitrate, 2
+}
+
 func taterAudioMap(track int, optional bool) string {
 	if track < 0 {
 		track = 0
@@ -716,6 +742,7 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 		transcodeCfg, profile, accel, videoCodecPreference, transcodeOutputOptions{
 			InputPath: inputPath, StartSeconds: startSeconds,
 			AudioTrack:    requestedTaterAudioTrack(r),
+			AudioChannels: requestedTaterAudioChannels(r),
 			ToneMapSource: toneMapSource, ToneMapTarget: toneMapTarget,
 			ToneMapFilter: toneMapFilter,
 		},
@@ -725,6 +752,10 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	hardwareDevice := effectiveTranscodeHardwareDevice(effectiveAccel, transcodeCfg.HardwareDevice)
 	durationSeconds := h.probeMediaDuration(ctx, path)
 	streamID := h.markTranscodedStream(w, file, profileID, profile.Name, effectiveAccel, hardwareDevice, videoCodec, startSeconds, durationSeconds)
+	_, outputAudioChannels := taterAACTranscodeSettings(profile.AudioBitrate, requestedTaterAudioChannels(r))
+	if h.streamTracker != nil {
+		h.streamTracker.SetAudioChannelInfo(streamID, outputAudioChannels)
+	}
 	applyTaterRequestedDynamicRangeInfo(h.streamTracker, streamID, r)
 	applyTaterRequestedResolutionInfo(h.streamTracker, streamID, r)
 
@@ -744,6 +775,9 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set("X-Tater-Video-Mode", "transcode")
 	w.Header().Set("X-Tater-Audio-Mode", "transcode")
 	w.Header().Set("X-Tater-Audio-Codec", "aac")
+	if channels := requestedTaterAudioChannels(r); channels > 0 {
+		w.Header().Set("X-Tater-Audio-Channels", strconv.Itoa(channels))
+	}
 	w.Header().Del("Accept-Ranges")
 	w.WriteHeader(http.StatusOK)
 
@@ -871,6 +905,11 @@ func (h *StreamHandler) serveAudioOnlyVideoTranscoded(
 	args := buildFFmpegAudioOnlyVideoArgsWithTrackAndContainer(
 		profile.AudioBitrate, inputPath, startSeconds, requestedTaterAudioTrack(r), outputContainer,
 	)
+	if channels := requestedTaterAudioChannels(r); channels > 0 {
+		args = buildFFmpegAudioOnlyVideoArgsWithTrackContainerAndChannels(
+			profile.AudioBitrate, inputPath, startSeconds, requestedTaterAudioTrack(r), outputContainer, channels,
+		)
+	}
 	durationSeconds := h.probeMediaDuration(ctx, path)
 	streamID := h.markTranscodedStream(
 		w, file, audioOnlyProfileID, audioOnlyProfileName,
@@ -880,6 +919,8 @@ func (h *StreamHandler) serveAudioOnlyVideoTranscoded(
 		h.streamTracker.SetTrackProcessingInfo(
 			streamID, "direct", "transcode", "aac", "Transcoding audio",
 		)
+		_, outputAudioChannels := taterAACTranscodeSettings(profile.AudioBitrate, requestedTaterAudioChannels(r))
+		h.streamTracker.SetAudioChannelInfo(streamID, outputAudioChannels)
 		applyTaterRequestedDynamicRangeInfo(h.streamTracker, streamID, r)
 		applyTaterRequestedResolutionInfo(h.streamTracker, streamID, r)
 	}
@@ -900,6 +941,9 @@ func (h *StreamHandler) serveAudioOnlyVideoTranscoded(
 	w.Header().Set("X-Tater-Video-Mode", "direct")
 	w.Header().Set("X-Tater-Audio-Mode", "transcode")
 	w.Header().Set("X-Tater-Audio-Codec", "aac")
+	if channels := requestedTaterAudioChannels(r); channels > 0 {
+		w.Header().Set("X-Tater-Audio-Channels", strconv.Itoa(channels))
+	}
 	w.Header().Del("Accept-Ranges")
 	w.WriteHeader(http.StatusOK)
 
@@ -1371,9 +1415,13 @@ func buildFFmpegAudioOnlyVideoArgsWithTrack(audioBitrate, inputPath string, star
 }
 
 func buildFFmpegAudioOnlyVideoArgsWithTrackAndContainer(audioBitrate, inputPath string, startSeconds float64, audioTrack int, outputContainer string) []string {
-	if strings.TrimSpace(audioBitrate) == "" {
-		audioBitrate = "192k"
-	}
+	return buildFFmpegAudioOnlyVideoArgsWithTrackContainerAndChannels(
+		audioBitrate, inputPath, startSeconds, audioTrack, outputContainer, 0,
+	)
+}
+
+func buildFFmpegAudioOnlyVideoArgsWithTrackContainerAndChannels(audioBitrate, inputPath string, startSeconds float64, audioTrack int, outputContainer string, requestedChannels int) []string {
+	audioBitrate, audioChannels := taterAACTranscodeSettings(audioBitrate, requestedChannels)
 	outputFormat, _, _ := taterPartialTranscodeOutput(outputContainer)
 	args := []string{
 		"-hide_banner",
@@ -1402,7 +1450,7 @@ func buildFFmpegAudioOnlyVideoArgsWithTrackAndContainer(audioBitrate, inputPath 
 		"-c:v", "copy",
 		"-c:a", "aac",
 		"-b:a", audioBitrate,
-		"-ac", "2",
+		"-ac", strconv.Itoa(audioChannels),
 		"-ar", "48000",
 		"-fflags", "+genpts",
 		"-f", outputFormat,
@@ -1530,6 +1578,7 @@ type transcodeOutputOptions struct {
 	StartSeconds    float64
 	DurationSeconds float64
 	AudioTrack      int
+	AudioChannels   int
 	LogoFile        string
 	LogoPosition    string
 	ToneMapSource   string
@@ -1594,10 +1643,11 @@ func buildFFmpegTranscodeArgsWithOptions(cfg config.TranscodingConfig, profile t
 	args = appendVideoEncoderOptions(args, videoCodec, profile)
 	args = appendTaterToneMapOutputMetadata(args, options.ToneMapSource, options.ToneMapTarget)
 
+	audioBitrate, audioChannels := taterAACTranscodeSettings(profile.AudioBitrate, options.AudioChannels)
 	args = append(args,
 		"-c:a", "aac",
-		"-b:a", profile.AudioBitrate,
-		"-ac", "2",
+		"-b:a", audioBitrate,
+		"-ac", strconv.Itoa(audioChannels),
 		"-ar", "48000",
 		"-fflags", "+genpts",
 		"-muxdelay", "0",

@@ -87,25 +87,26 @@ type taterPlaybackMediaInfo struct {
 }
 
 type taterPlaybackSessionResponse struct {
-	StreamURL          string                 `json:"stream_url"`
-	Mode               string                 `json:"mode"`
-	VideoMode          string                 `json:"video_mode"`
-	AudioMode          string                 `json:"audio_mode"`
-	VideoCodec         string                 `json:"video_codec,omitempty"`
-	AudioCodec         string                 `json:"audio_codec,omitempty"`
-	QualityLabel       string                 `json:"quality_label"`
-	Reason             string                 `json:"reason,omitempty"`
-	OutputName         string                 `json:"output_name,omitempty"`
-	OutputConnection   string                 `json:"output_connection,omitempty"`
-	OutputContainer    string                 `json:"output_container,omitempty"`
-	SourceVideoRange   string                 `json:"source_video_range"`
-	OutputVideoRange   string                 `json:"output_video_range"`
-	ToneMapped         bool                   `json:"tone_mapped"`
-	SelectedAudioTrack int                    `json:"selected_audio_track"`
-	OutputWidth        int                    `json:"output_width,omitempty"`
-	OutputHeight       int                    `json:"output_height,omitempty"`
-	ResolutionLabel    string                 `json:"resolution_label,omitempty"`
-	Source             taterPlaybackMediaInfo `json:"source"`
+	StreamURL           string                 `json:"stream_url"`
+	Mode                string                 `json:"mode"`
+	VideoMode           string                 `json:"video_mode"`
+	AudioMode           string                 `json:"audio_mode"`
+	VideoCodec          string                 `json:"video_codec,omitempty"`
+	AudioCodec          string                 `json:"audio_codec,omitempty"`
+	QualityLabel        string                 `json:"quality_label"`
+	Reason              string                 `json:"reason,omitempty"`
+	OutputName          string                 `json:"output_name,omitempty"`
+	OutputConnection    string                 `json:"output_connection,omitempty"`
+	OutputContainer     string                 `json:"output_container,omitempty"`
+	SourceVideoRange    string                 `json:"source_video_range"`
+	OutputVideoRange    string                 `json:"output_video_range"`
+	ToneMapped          bool                   `json:"tone_mapped"`
+	SelectedAudioTrack  int                    `json:"selected_audio_track"`
+	OutputWidth         int                    `json:"output_width,omitempty"`
+	OutputHeight        int                    `json:"output_height,omitempty"`
+	OutputAudioChannels int                    `json:"output_audio_channels,omitempty"`
+	ResolutionLabel     string                 `json:"resolution_label,omitempty"`
+	Source              taterPlaybackMediaInfo `json:"source"`
 }
 
 type taterFFprobePlaybackSideData struct {
@@ -291,6 +292,7 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 	}
 	selectedProfile := transcodeProfiles[profile]
 	preferredContainer := cleanTaterPreferredStreamContainer(caps.PreferredStreamContainer)
+	transcodeAudioChannels := taterPlaybackTranscodeAudioChannels(caps, source.AudioChannels)
 
 	videoCodec := cleanTaterCodecName(source.VideoCodec)
 	audioCodec := cleanTaterCodecName(source.AudioCodec)
@@ -347,20 +349,21 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 	}
 
 	plan := taterPlaybackSessionResponse{
-		StreamURL:          req.StreamURL,
-		Mode:               "direct",
-		VideoMode:          "direct",
-		AudioMode:          "direct",
-		VideoCodec:         videoCodec,
-		AudioCodec:         audioCodec,
-		OutputName:         strings.TrimSpace(caps.OutputName),
-		OutputConnection:   strings.TrimSpace(caps.OutputConnection),
-		OutputContainer:    source.Container,
-		SourceVideoRange:   sourceRange,
-		OutputVideoRange:   outputRange,
-		ToneMapped:         toneMapped,
-		SelectedAudioTrack: selectedAudioTrack,
-		Source:             source,
+		StreamURL:           req.StreamURL,
+		Mode:                "direct",
+		VideoMode:           "direct",
+		AudioMode:           "direct",
+		VideoCodec:          videoCodec,
+		AudioCodec:          audioCodec,
+		OutputName:          strings.TrimSpace(caps.OutputName),
+		OutputConnection:    strings.TrimSpace(caps.OutputConnection),
+		OutputContainer:     source.Container,
+		SourceVideoRange:    sourceRange,
+		OutputVideoRange:    outputRange,
+		ToneMapped:          toneMapped,
+		SelectedAudioTrack:  selectedAudioTrack,
+		OutputAudioChannels: source.AudioChannels,
+		Source:              source,
 	}
 	if passthrough {
 		plan.AudioMode = "bitstream"
@@ -392,9 +395,10 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		plan.Mode = "audio_transcode"
 		plan.AudioMode = "transcode"
 		plan.AudioCodec = "aac"
+		plan.OutputAudioChannels = transcodeAudioChannels
 		plan.OutputContainer = preferredContainer
 		plan.StreamURL = taterPlaybackPlannedURL(req.StreamURL, "audio", profile, "h264", "", selectedAudioTrack, preferredContainer)
-		plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, false) + "Video Direct • Audio AAC"
+		plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, false) + "Video Direct • Audio AAC" + taterPlaybackAudioChannelsSuffix(transcodeAudioChannels)
 		plan.Reason = "The source video is compatible, but its audio needs conversion."
 	case audioCompatible:
 		plan.Mode = "video_transcode"
@@ -415,12 +419,13 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		plan.AudioMode = "transcode"
 		plan.VideoCodec = "h264"
 		plan.AudioCodec = "aac"
+		plan.OutputAudioChannels = transcodeAudioChannels
 		plan.OutputContainer = preferredContainer
 		if plan.OutputContainer == "" {
 			plan.OutputContainer = "mpegts"
 		}
 		plan.StreamURL = taterPlaybackPlannedURL(req.StreamURL, "full", profile, "h264", "", selectedAudioTrack, preferredContainer)
-		plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, toneMapped) + "Video H.264 • Audio AAC"
+		plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, toneMapped) + "Video H.264 • Audio AAC" + taterPlaybackAudioChannelsSuffix(transcodeAudioChannels)
 		plan.Reason = "Both source tracks need conversion for this player."
 	}
 	if toneMapped {
@@ -447,7 +452,7 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		plan.StreamURL, plan.VideoMode, plan.AudioMode, plan.AudioCodec,
 		sourceRange, outputRange, toneMapped, selectedAudioTrack,
 		source.Width, source.Height, plan.OutputWidth, plan.OutputHeight,
-		annotatedOutputContainer,
+		plan.OutputAudioChannels, annotatedOutputContainer,
 	)
 	return plan
 }
@@ -456,7 +461,7 @@ func annotateTaterPlaybackURL(
 	rawURL, videoMode, audioMode, audioCodec, sourceRange, outputRange string,
 	toneMapped bool,
 	audioTrack, sourceWidth, sourceHeight, outputWidth, outputHeight int,
-	outputContainer string,
+	outputAudioChannels int, outputContainer string,
 ) string {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
@@ -498,8 +503,37 @@ func annotateTaterPlaybackURL(
 	setDimension("tater_source_height", sourceHeight)
 	setDimension("tater_output_width", outputWidth)
 	setDimension("tater_output_height", outputHeight)
+	if audioMode == "transcode" && outputAudioChannels > 0 {
+		query.Set("tater_audio_channels", strconv.Itoa(outputAudioChannels))
+	} else {
+		query.Del("tater_audio_channels")
+	}
 	u.RawQuery = query.Encode()
 	return u.String()
+}
+
+func taterPlaybackTranscodeAudioChannels(caps taterPlaybackCapabilities, sourceChannels int) int {
+	// Multichannel AAC is currently an explicit tvOS playback contract. Older
+	// players never send this query value and retain the established stereo
+	// transcode path.
+	if !strings.EqualFold(strings.TrimSpace(caps.Platform), "tvos") {
+		return 0
+	}
+	if sourceChannels >= 6 && caps.MaxAudioChannels >= 6 {
+		return 6
+	}
+	return 2
+}
+
+func taterPlaybackAudioChannelsSuffix(channels int) string {
+	switch channels {
+	case 6:
+		return " 5.1"
+	case 2:
+		return " Stereo"
+	default:
+		return ""
+	}
 }
 
 func taterPlaybackOutputDimensions(sourceWidth, sourceHeight, maximumWidth, maximumHeight int) (int, int) {
@@ -555,7 +589,7 @@ func taterPlaybackPlannedURL(rawURL, mode, profile, videoCodec, audioCodec strin
 		return rawURL
 	}
 	query := u.Query()
-	for _, key := range []string{"direct", "transcode", "profile", "codec", "audio_codec", "start", "tater_audio_track", "tater_tone_map", "tater_source_video_range", "tater_output_video_range", "tater_output_container", "tater_source_width", "tater_source_height", "tater_output_width", "tater_output_height"} {
+	for _, key := range []string{"direct", "transcode", "profile", "codec", "audio_codec", "start", "tater_audio_track", "tater_audio_channels", "tater_tone_map", "tater_source_video_range", "tater_output_video_range", "tater_output_container", "tater_source_width", "tater_source_height", "tater_output_width", "tater_output_height"} {
 		query.Del(key)
 	}
 	switch mode {

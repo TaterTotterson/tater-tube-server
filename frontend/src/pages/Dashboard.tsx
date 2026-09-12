@@ -159,6 +159,14 @@ function playbackMode(stream?: ActiveStream) {
 	const videoMode = stream.video_mode || (stream.transcoded ? "transcode" : "direct");
 	const audioMode = stream.audio_mode || (stream.transcoded ? "transcode" : "direct");
 	const audioCodec = String(stream.audio_codec || "aac").toUpperCase();
+	const audioChannels =
+		stream.audio_channels === 6
+			? " 5.1"
+			: stream.audio_channels === 8
+				? " 7.1"
+				: stream.audio_channels === 2
+					? " Stereo"
+					: "";
 	const rangeNames: Record<string, string> = {
 		dolby_vision: "Dolby Vision",
 		hdr10plus: "HDR10+",
@@ -181,7 +189,7 @@ function playbackMode(stream?: ActiveStream) {
 		return {
 			label: "Audio Transcode",
 			className: "badge-warning",
-			detail: withRange(`Video: Direct • Audio: Transcoding (${audioCodec})`),
+			detail: withRange(`Video: Direct • Audio: Transcoding (${audioCodec}${audioChannels})`),
 		};
 	}
 	if (!stream.transcoded) {
@@ -195,7 +203,7 @@ function playbackMode(stream?: ActiveStream) {
 	}
 	const audioDetail =
 		audioMode === "transcode"
-			? `Transcoding (${audioCodec})`
+			? `Transcoding (${audioCodec}${audioChannels})`
 			: audioMode === "bitstream"
 				? `Bitstream (${audioCodec})`
 				: `Direct (${audioCodec})`;

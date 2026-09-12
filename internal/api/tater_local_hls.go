@@ -61,6 +61,7 @@ type taterLocalHLSCommand struct {
 	videoMode      string
 	audioMode      string
 	audioCodec     string
+	audioChannels  int
 }
 
 var globalTaterLocalHLS = &taterLocalHLSManager{sessions: map[string]*taterLocalHLSSession{}}
@@ -223,6 +224,7 @@ func (h *LocalStreamHandler) prepareLocalHLSSession(
 		h.streamTracker.SetTrackProcessingInfo(
 			session.stream.ID, command.videoMode, command.audioMode, command.audioCodec, "Streaming HLS",
 		)
+		h.streamTracker.SetAudioChannelInfo(session.stream.ID, command.audioChannels)
 		applyTaterRequestedDynamicRangeInfo(h.streamTracker, session.stream.ID, r)
 		applyTaterRequestedResolutionInfo(h.streamTracker, session.stream.ID, r)
 		transcoder := &StreamHandler{configGetter: h.configGetter, streamTracker: h.streamTracker}
@@ -255,11 +257,12 @@ func buildTaterLocalHLSCommand(
 	audioTrack := requestedTaterAudioTrack(r)
 	mode := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("transcode")))
 	command := taterLocalHLSCommand{
-		profileID:   profileID,
-		profileName: profile.Name,
-		videoMode:   "direct",
-		audioMode:   "direct",
-		audioCodec:  cleanTaterCodecName(r.URL.Query().Get("tater_audio_codec")),
+		profileID:     profileID,
+		profileName:   profile.Name,
+		videoMode:     "direct",
+		audioMode:     "direct",
+		audioCodec:    cleanTaterCodecName(r.URL.Query().Get("tater_audio_codec")),
+		audioChannels: requestedTaterAudioChannels(r),
 	}
 
 	var args []string
@@ -276,8 +279,8 @@ func buildTaterLocalHLSCommand(
 		command.videoCodec = "copy"
 		command.audioMode = "transcode"
 		command.audioCodec = "aac"
-		args = buildFFmpegAudioOnlyVideoArgsWithTrackAndContainer(
-			profile.AudioBitrate, inputPath, startSeconds, audioTrack, "mpegts",
+		args = buildFFmpegAudioOnlyVideoArgsWithTrackContainerAndChannels(
+			profile.AudioBitrate, inputPath, startSeconds, audioTrack, "mpegts", command.audioChannels,
 		)
 	case "video", "video-only", "video_only":
 		command.videoMode = "transcode"
@@ -339,12 +342,16 @@ func buildTaterLocalHLSCommand(
 			args = buildFFmpegTranscodeArgsWithOptions(
 				transcodeCfg, profile, accel, preferredCodec, transcodeOutputOptions{
 					InputPath: inputPath, StartSeconds: startSeconds, AudioTrack: audioTrack,
+					AudioChannels: command.audioChannels,
 					ToneMapSource: toneMapSource, ToneMapTarget: toneMapTarget, ToneMapFilter: toneMapFilter,
 				},
 			)
 		}
 	}
 
+	if command.audioMode == "transcode" {
+		_, command.audioChannels = taterAACTranscodeSettings(profile.AudioBitrate, command.audioChannels)
+	}
 	command.args = convertTaterFFmpegArgsToHLS(args, playlistPath, segmentPattern, videoEncoded, command.videoCodec)
 	return command, nil
 }

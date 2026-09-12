@@ -2489,6 +2489,33 @@ func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
 	}
 }
 
+func TestTaterTVClientLogoOverlayUsesSeparateHLSSession(t *testing.T) {
+	serverKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecH264, false)
+	clientKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecH264, true)
+	if serverKey == clientKey {
+		t.Fatal("client-composited channel logos must not reuse a server-logo HLS session")
+	}
+
+	request := httptest.NewRequest(http.MethodGet,
+		"http://server/api/tater/tv/channel/7/playlist.m3u8?tater_client_logo_overlay=1", nil)
+	if !taterTVClientLogoOverlayRequested(request) {
+		t.Fatal("expected client channel-logo overlay request to be detected")
+	}
+
+	session := taterTVHLSSession{
+		number:            "7",
+		publicID:          "guide",
+		profileID:         "hdmi_4k",
+		requestedAccel:    "qsv",
+		preferredCodec:    transcodeCodecH264,
+		clientLogoOverlay: true,
+	}
+	segmentURL := session.segmentURI("item-00000/seg-00000.ts", "player-token")
+	if !strings.Contains(segmentURL, "tater_client_logo_overlay=1") {
+		t.Fatalf("client logo mode was not propagated to HLS segments: %s", segmentURL)
+	}
+}
+
 func TestTaterTVHLSArgsUseIndependentQSVSegments(t *testing.T) {
 	args := buildTaterTVChannelHLSArgsWithCodec(
 		config.TranscodingConfig{},
