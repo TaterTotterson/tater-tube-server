@@ -1520,6 +1520,14 @@ func buildFFmpegVideoOnlyArgsWithToneMapFilterAndAudioTrack(cfg config.Transcodi
 }
 
 func buildFFmpegVideoOnlyArgsWithToneMapFilterAndAudioTrackAndContainer(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec, inputPath string, startSeconds float64, toneMapSource, toneMapTarget, toneMapFilter string, audioTrack int, outputContainer string) []string {
+	return buildFFmpegVideoOnlyArgsWithToneMapFilterAudioTrackContainerAndRange(
+		cfg, profile, accel, preferredCodec, inputPath, startSeconds,
+		toneMapSource, toneMapTarget, toneMapFilter, audioTrack, outputContainer,
+		toneMapTarget,
+	)
+}
+
+func buildFFmpegVideoOnlyArgsWithToneMapFilterAudioTrackContainerAndRange(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec, inputPath string, startSeconds float64, toneMapSource, toneMapTarget, toneMapFilter string, audioTrack int, outputContainer, outputVideoRange string) []string {
 	outputFormat, _, _ := taterPartialTranscodeOutput(outputContainer)
 	args := []string{
 		"-hide_banner",
@@ -1540,6 +1548,7 @@ func buildFFmpegVideoOnlyArgsWithToneMapFilterAndAudioTrackAndContainer(cfg conf
 		accel, cfg.HardwareDevice, profile, preferredCodec,
 	)
 	filters = appendTaterToneMapFilter(filters, toneMapSource, toneMapTarget, toneMapFilter)
+	filters = taterVideoFiltersForOutputRange(filters, videoCodec, outputVideoRange)
 	args = append(args,
 		"-map", "0:v:0",
 		"-map", taterAudioMap(audioTrack, true),
@@ -1555,8 +1564,8 @@ func buildFFmpegVideoOnlyArgsWithToneMapFilterAndAudioTrackAndContainer(cfg conf
 		"-maxrate", profile.MaxRate,
 		"-bufsize", profile.BufferSize,
 	)
-	args = appendVideoEncoderOptions(args, videoCodec, profile)
-	args = appendTaterToneMapOutputMetadata(args, toneMapSource, toneMapTarget)
+	args = appendVideoEncoderOptionsForRange(args, videoCodec, profile, outputVideoRange)
+	args = appendTaterVideoRangeOutputMetadata(args, outputVideoRange)
 	args = append(args,
 		"-c:a", "copy",
 		"-fflags", "+genpts",
@@ -1574,16 +1583,18 @@ func buildFFmpegTranscodeArgsWithCodec(cfg config.TranscodingConfig, profile tra
 }
 
 type transcodeOutputOptions struct {
-	InputPath       string
-	StartSeconds    float64
-	DurationSeconds float64
-	AudioTrack      int
-	AudioChannels   int
-	LogoFile        string
-	LogoPosition    string
-	ToneMapSource   string
-	ToneMapTarget   string
-	ToneMapFilter   string
+	InputPath        string
+	StartSeconds     float64
+	DurationSeconds  float64
+	AudioTrack       int
+	AudioChannels    int
+	LogoFile         string
+	LogoPosition     string
+	ToneMapSource    string
+	ToneMapTarget    string
+	ToneMapFilter    string
+	SourceVideoRange string
+	OutputVideoRange string
 }
 
 func buildFFmpegTranscodeArgsWithOptions(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, options transcodeOutputOptions) []string {
@@ -1615,6 +1626,13 @@ func buildFFmpegTranscodeArgsWithOptions(cfg config.TranscodingConfig, profile t
 	filters = appendTaterToneMapFilter(
 		filters, options.ToneMapSource, options.ToneMapTarget, options.ToneMapFilter,
 	)
+	outputVideoRange := options.OutputVideoRange
+	if cleanTaterVideoRange(outputVideoRange) == "" {
+		// Preserve the established metadata behavior for older callers which
+		// express only an HDR-to-SDR tone-map target.
+		outputVideoRange = options.ToneMapTarget
+	}
+	filters = taterVideoFiltersForOutputRange(filters, videoCodec, outputVideoRange)
 	if logoFile != "" {
 		args = append(args,
 			"-filter_complex", taterTVChannelLogoFilter(filters, profile, options.LogoPosition),
@@ -1640,8 +1658,8 @@ func buildFFmpegTranscodeArgsWithOptions(cfg config.TranscodingConfig, profile t
 		"-bufsize", profile.BufferSize,
 	)
 
-	args = appendVideoEncoderOptions(args, videoCodec, profile)
-	args = appendTaterToneMapOutputMetadata(args, options.ToneMapSource, options.ToneMapTarget)
+	args = appendVideoEncoderOptionsForRange(args, videoCodec, profile, outputVideoRange)
+	args = appendTaterVideoRangeOutputMetadata(args, outputVideoRange)
 
 	audioBitrate, audioChannels := taterAACTranscodeSettings(profile.AudioBitrate, options.AudioChannels)
 	args = append(args,
@@ -1897,6 +1915,109 @@ func appendVideoEncoderOptions(args []string, videoCodec string, profile transco
 	default:
 		return args
 	}
+}
+
+func appendVideoEncoderOptionsForRange(args []string, videoCodec string, profile transcodeProfile, outputVideoRange string) []string {
+	args = appendVideoEncoderOptions(args, videoCodec, profile)
+	if !taterVideoRangeIsHDR(outputVideoRange) || !taterVideoCodecIsHEVC(videoCodec) {
+		return args
+	}
+	return appendHEVCMain10EncoderOptions(args, videoCodec, outputVideoRange)
+}
+
+func appendHEVCMain10EncoderOptions(args []string, videoCodec, outputVideoRange string) []string {
+	// Put the 10-bit requirements last so they override the broadly compatible
+	// 8-bit defaults used by the ordinary SDR transcode profiles.
+	pixelFormat := "p010le"
+	if videoCodec == "libx265" {
+		pixelFormat = "yuv420p10le"
+	}
+	args = append(args,
+		"-profile:v", "main10",
+		"-pix_fmt", pixelFormat,
+	)
+	if videoCodec == "libx265" {
+		params := "colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited"
+		switch cleanTaterVideoRange(outputVideoRange) {
+		case "hdr10", "hdr10plus":
+			params = "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:range=limited"
+		case "hlg":
+			params = "colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:range=limited"
+		}
+		args = append(args, "-x265-params", params)
+	}
+	return args
+}
+
+func taterVideoFiltersForOutputRange(filters, videoCodec, outputVideoRange string) string {
+	if !taterVideoRangeIsHDR(outputVideoRange) || !taterVideoCodecIsHEVC(videoCodec) {
+		return filters
+	}
+	return taterVideoFiltersForHEVCMain10(filters, videoCodec)
+}
+
+func taterVideoFiltersForHEVCMain10(filters, videoCodec string) string {
+	switch videoCodec {
+	case "hevc_vaapi":
+		filters = strings.Replace(filters, "format=nv12,hwupload", "format=p010le,hwupload", 1)
+	case "hevc_qsv":
+		filters = strings.Replace(filters, "format=nv12", "format=p010le", 1)
+	case "hevc_nvenc", "hevc_videotoolbox", "hevc_v4l2m2m":
+		if !strings.Contains(filters, "format=p010le") {
+			if strings.TrimSpace(filters) == "" {
+				filters = "format=p010le"
+			} else {
+				filters += ",format=p010le"
+			}
+		}
+	default:
+		if !strings.Contains(filters, "format=p010le") && !strings.Contains(filters, "format=yuv420p10le") {
+			if strings.TrimSpace(filters) == "" {
+				filters = "format=yuv420p10le"
+			} else {
+				filters += ",format=yuv420p10le"
+			}
+		}
+	}
+	return filters
+}
+
+func appendTaterVideoRangeOutputMetadata(args []string, outputVideoRange string) []string {
+	switch cleanTaterVideoRange(outputVideoRange) {
+	case "hdr10", "hdr10plus":
+		return append(args,
+			"-color_primaries", "bt2020",
+			"-color_trc", "smpte2084",
+			"-colorspace", "bt2020nc",
+			"-color_range", "tv",
+		)
+	case "hlg":
+		return append(args,
+			"-color_primaries", "bt2020",
+			"-color_trc", "arib-std-b67",
+			"-colorspace", "bt2020nc",
+			"-color_range", "tv",
+		)
+	case "sdr":
+		return append(args,
+			"-color_primaries", "bt709",
+			"-color_trc", "bt709",
+			"-colorspace", "bt709",
+			"-color_range", "tv",
+		)
+	default:
+		return args
+	}
+}
+
+func taterVideoRangeIsHDR(value string) bool {
+	rangeName := cleanTaterVideoRange(value)
+	return rangeName != "" && rangeName != "sdr"
+}
+
+func taterVideoCodecIsHEVC(codec string) bool {
+	codec = strings.ToLower(strings.TrimSpace(codec))
+	return codec == "hevc" || strings.Contains(codec, "hevc") || strings.Contains(codec, "x265")
 }
 
 func transcodeVideoSettings(accel, device string, profile transcodeProfile) (codec string, filters string) {

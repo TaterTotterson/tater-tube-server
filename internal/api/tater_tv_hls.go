@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,6 +59,7 @@ type taterTVHLSSession struct {
 	hardwareDevice    string
 	videoCodec        string
 	clientLogoOverlay bool
+	hdrFormats        []string
 	channel           taterTVChannel
 	guideStartedAt    time.Time
 	sessionStartedAt  time.Time
@@ -76,6 +78,7 @@ type taterTVHLSSegment struct {
 	Sequence      int64
 	Duration      float64
 	Path          string
+	InitPath      string
 	Discontinuity bool
 	Title         string
 	Kind          string
@@ -84,6 +87,7 @@ type taterTVHLSSegment struct {
 type taterTVParsedHLSSegment struct {
 	Duration float64
 	File     string
+	InitFile string
 }
 
 var globalTaterTVHLS = &taterTVHLSManager{sessions: map[string]*taterTVHLSSession{}}
@@ -131,7 +135,7 @@ func (h *TaterTVStreamHandler) serveHLSSegment(w http.ResponseWriter, r *http.Re
 	profileID, _ := taterTVRequestedTranscodeProfile(cfg, r)
 	requestedAccel := h.requestedHLSAccel(cfg, r)
 	clientLogoOverlay := taterTVClientLogoOverlayRequested(r)
-	key := taterTVHLSKey(number, sessionID, profileID, requestedAccel, requestedTranscodeCodec(r), clientLogoOverlay)
+	key := taterTVHLSKey(number, sessionID, profileID, requestedAccel, requestedTranscodeCodec(r), clientLogoOverlay, taterTVRequestedHDRFormats(r))
 	session := globalTaterTVHLS.get(key)
 	if session == nil {
 		http.Error(w, "HLS session not found", http.StatusNotFound)
@@ -149,7 +153,12 @@ func (h *TaterTVStreamHandler) serveHLSSegment(w http.ResponseWriter, r *http.Re
 	}
 	session.touch()
 	h.recordHLSPlayback(r, session, player, stat.Size())
-	w.Header().Set("Content-Type", "video/mp2t")
+	contentType, supported := taterHLSSegmentContentType(filepath.Base(path))
+	if !supported {
+		http.Error(w, "Segment type is unavailable", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "no-store")
 	http.ServeFile(w, r, path)
 }
@@ -191,6 +200,7 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 	requestedCodec := requestedTranscodeCodec(r)
 	requestedAccel := h.requestedHLSAccel(cfg, r)
 	clientLogoOverlay := taterTVClientLogoOverlayRequested(r)
+	hdrFormats := taterTVRequestedHDRFormats(r)
 	transcoder := &StreamHandler{configGetter: h.configGetter, streamTracker: h.streamTracker}
 	accel, selectedHardwareDevice, videoCodecPreference := transcoder.selectTranscodeAccelerationAndCodec(r.Context(), ffmpegPath, cfg.Transcoding, profile, requestedAccel, requestedCodec)
 	if requestedCodec == transcodeCodecHEVC && videoCodecPreference != transcodeCodecHEVC {
@@ -206,7 +216,7 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 	}
 
 	publicID := taterTVHLSPublicID(r, guide.StartedAt)
-	key := taterTVHLSKey(channel.Number, publicID, profileID, requestedAccel, videoCodecPreference, clientLogoOverlay)
+	key := taterTVHLSKey(channel.Number, publicID, profileID, requestedAccel, videoCodecPreference, clientLogoOverlay, hdrFormats)
 	session := globalTaterTVHLS.get(key)
 	if session != nil {
 		if session.finished() {
@@ -246,6 +256,7 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 		hardwareDevice:    hardwareDevice,
 		videoCodec:        videoCodec,
 		clientLogoOverlay: clientLogoOverlay,
+		hdrFormats:        hdrFormats,
 		channel:           channel,
 		guideStartedAt:    guide.StartedAt,
 		sessionStartedAt:  time.Now(),
@@ -431,17 +442,33 @@ func (s *taterTVHLSSession) transcodeProgramSegments(ctx context.Context, items 
 			return err
 		}
 		playlistPath := filepath.Join(itemDir, "index.m3u8")
-		segmentPattern := filepath.Join(itemDir, "seg-%05d.ts")
+		segmentExtension := ".ts"
+		if normalizeTranscodeCodec(s.preferredCodec) == transcodeCodecHEVC {
+			segmentExtension = ".m4s"
+		}
+		segmentPattern := filepath.Join(itemDir, "seg-%05d"+segmentExtension)
+		sourceRange, outputRange, toneMapFilter, rangeErr := s.itemVideoRangePlan(ctx, item)
+		if rangeErr != nil {
+			failed++
+			slog.WarnContext(ctx, "Tube TV HLS item range conversion unavailable; skipping",
+				"channel", s.number,
+				"index", index,
+				"title", item.Title,
+				"kind", item.Kind,
+				"error", rangeErr)
+			continue
+		}
 		// Every schedule item is encoded by a separate FFmpeg process. Keep the
 		// MPEG-TS clock continuous across those processes; resetting it to zero at
 		// an ad or bumper boundary can leave stricter TV players waiting forever
 		// for timestamps that have already passed.
 		timelineOffset := s.nextTimestampOffsetSeconds()
-		args := buildTaterTVChannelHLSArgsWithTimeline(
+		args := buildTaterTVChannelHLSArgsWithTimelineAndRange(
 			s.transcodeCfg, s.profile, s.accel, s.preferredCodec,
 			item.Path, item.StartSeconds, item.DurationSeconds,
 			timelineOffset, taterTVLogoForItem(item, logoFile),
 			s.channel.LogoPosition, playlistPath, segmentPattern,
+			sourceRange, outputRange, toneMapFilter,
 		)
 		var stderr limitedBuffer
 		cmd := exec.CommandContext(ctx, s.ffmpegPath, args...)
@@ -460,7 +487,9 @@ func (s *taterTVHLSSession) transcodeProgramSegments(ctx context.Context, items 
 			"timeline_offset", timelineOffset,
 			"profile", s.profileID,
 			"hardware_acceleration", s.accel,
-			"video_codec", s.videoCodec)
+			"video_codec", s.videoCodec,
+			"source_video_range", sourceRange,
+			"output_video_range", outputRange)
 
 		if err := cmd.Start(); err != nil {
 			failed++
@@ -518,6 +547,30 @@ func (s *taterTVHLSSession) transcodeProgramSegments(ctx context.Context, items 
 	return nil
 }
 
+func (s *taterTVHLSSession) itemVideoRangePlan(ctx context.Context, item taterTVStreamItem) (string, string, string, error) {
+	info, err := probeTaterPlaybackMediaCached(ctx, s.cfg, item.Path)
+	if err != nil {
+		info = taterPlaybackMediaInfoFromReleaseName(item.Path)
+	}
+	sourceRange := cleanTaterVideoRange(info.VideoRange)
+	if sourceRange == "" {
+		sourceRange = "sdr"
+	}
+	outputRange := "sdr"
+	toneMapped := sourceRange != "sdr"
+	if normalizeTranscodeCodec(s.preferredCodec) == transcodeCodecHEVC {
+		outputRange, toneMapped = taterTVPlaybackOutputRange(info, s.hdrFormats)
+	}
+	if !toneMapped {
+		return sourceRange, outputRange, "", nil
+	}
+	implementation := taterToneMapFilterForFFmpeg(ctx, s.ffmpegPath, sourceRange)
+	if implementation == "" {
+		return sourceRange, "sdr", "", fmt.Errorf("tone mapping is unavailable for %s", sourceRange)
+	}
+	return sourceRange, "sdr", implementation, nil
+}
+
 func (s *taterTVHLSSession) monitorHLSItem(ctx context.Context, cmd *exec.Cmd, done <-chan error, itemDirRel, playlistPath string, item taterTVStreamItem) error {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -561,6 +614,14 @@ func (s *taterTVHLSSession) appendItemSegments(itemDirRel, playlistPath string, 
 		if stat, err := os.Stat(absPath); err != nil || stat.IsDir() || stat.Size() == 0 {
 			continue
 		}
+		initPath := ""
+		if segment.InitFile != "" {
+			initPath = filepath.ToSlash(filepath.Join(itemDirRel, segment.InitFile))
+			absInitPath := filepath.Join(s.root, filepath.FromSlash(initPath))
+			if stat, err := os.Stat(absInitPath); err != nil || stat.IsDir() || stat.Size() == 0 {
+				continue
+			}
+		}
 		s.mu.Lock()
 		if s.seen[relPath] {
 			s.mu.Unlock()
@@ -572,6 +633,7 @@ func (s *taterTVHLSSession) appendItemSegments(itemDirRel, playlistPath string, 
 			Sequence:      sequence,
 			Duration:      segment.Duration,
 			Path:          relPath,
+			InitPath:      initPath,
 			Discontinuity: !itemAlreadyAppended && sequence > 0,
 			Title:         item.Title,
 			Kind:          item.Kind,
@@ -593,6 +655,9 @@ func (s *taterTVHLSSession) segmentURI(relPath, playerToken string) string {
 	q.Set("codec", normalizeTranscodeCodec(s.preferredCodec))
 	if s.clientLogoOverlay {
 		q.Set("tater_client_logo_overlay", "1")
+	}
+	if len(s.hdrFormats) > 0 {
+		q.Set("tater_hdr_formats", strings.Join(s.hdrFormats, ","))
 	}
 	return u + "?" + q.Encode()
 }
@@ -625,7 +690,14 @@ func (s *taterTVHLSSession) playlist(playerToken string) string {
 	}
 	var builder strings.Builder
 	builder.WriteString("#EXTM3U\n")
-	builder.WriteString("#EXT-X-VERSION:3\n")
+	version := 3
+	for _, segment := range segments {
+		if segment.InitPath != "" {
+			version = 7
+			break
+		}
+	}
+	builder.WriteString("#EXT-X-VERSION:" + strconv.Itoa(version) + "\n")
 	builder.WriteString("#EXT-X-INDEPENDENT-SEGMENTS\n")
 	builder.WriteString("#EXT-X-TARGETDURATION:" + strconv.Itoa(target) + "\n")
 	builder.WriteString("#EXT-X-MEDIA-SEQUENCE:" + strconv.FormatInt(sequence, 10) + "\n")
@@ -636,9 +708,16 @@ func (s *taterTVHLSSession) playlist(playerToken string) string {
 		startOffset := -float64(taterTVHLSSegmentSeconds * taterTVHLSLiveStartSegments)
 		builder.WriteString("#EXT-X-START:TIME-OFFSET=" + strconv.FormatFloat(startOffset, 'f', 3, 64) + ",PRECISE=YES\n")
 	}
+	currentInitPath := ""
 	for _, segment := range segments {
 		if segment.Discontinuity {
 			builder.WriteString("#EXT-X-DISCONTINUITY\n")
+		}
+		if segment.InitPath != "" && segment.InitPath != currentInitPath {
+			builder.WriteString("#EXT-X-MAP:URI=\"")
+			builder.WriteString(s.segmentURI(segment.InitPath, playerToken))
+			builder.WriteString("\"\n")
+			currentInitPath = segment.InitPath
 		}
 		builder.WriteString("#EXTINF:" + strconv.FormatFloat(segment.Duration, 'f', 3, 64) + ",\n")
 		builder.WriteString(s.segmentURI(segment.Path, playerToken) + "\n")
@@ -725,6 +804,7 @@ func parseTaterTVHLSPlaylist(path string) ([]taterTVParsedHLSSegment, error) {
 
 	out := []taterTVParsedHLSSegment{}
 	duration := 0.0
+	initFile := ""
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -734,16 +814,36 @@ func parseTaterTVHLSPlaylist(path string) ([]taterTVParsedHLSSegment, error) {
 			duration, _ = strconv.ParseFloat(raw, 64)
 			continue
 		}
+		if strings.HasPrefix(line, "#EXT-X-MAP:") {
+			if parsed := taterHLSMapURI(line); parsed != "" {
+				initFile = filepath.Base(parsed)
+			}
+			continue
+		}
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 		if strings.HasSuffix(line, ".tmp") {
 			continue
 		}
-		out = append(out, taterTVParsedHLSSegment{Duration: duration, File: filepath.Base(line)})
+		out = append(out, taterTVParsedHLSSegment{Duration: duration, File: filepath.Base(line), InitFile: initFile})
 		duration = 0
 	}
 	return out, scanner.Err()
+}
+
+func taterHLSMapURI(line string) string {
+	const marker = `URI="`
+	start := strings.Index(line, marker)
+	if start < 0 {
+		return ""
+	}
+	start += len(marker)
+	end := strings.Index(line[start:], `"`)
+	if end < 0 {
+		return ""
+	}
+	return line[start : start+end]
 }
 
 func buildTaterTVChannelHLSArgs(cfg config.TranscodingConfig, profile transcodeProfile, accel string, inputPath string, startSeconds, durationSeconds float64, logoFile, logoPosition, outputPlaylist, segmentPattern string) []string {
@@ -758,6 +858,14 @@ func buildTaterTVChannelHLSArgsWithCodec(cfg config.TranscodingConfig, profile t
 }
 
 func buildTaterTVChannelHLSArgsWithTimeline(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, inputPath string, startSeconds, durationSeconds, timelineOffset float64, logoFile, logoPosition, outputPlaylist, segmentPattern string) []string {
+	return buildTaterTVChannelHLSArgsWithTimelineAndRange(
+		cfg, profile, accel, preferredCodec, inputPath, startSeconds,
+		durationSeconds, timelineOffset, logoFile, logoPosition,
+		outputPlaylist, segmentPattern, "sdr", "sdr", "",
+	)
+}
+
+func buildTaterTVChannelHLSArgsWithTimelineAndRange(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, inputPath string, startSeconds, durationSeconds, timelineOffset float64, logoFile, logoPosition, outputPlaylist, segmentPattern, sourceVideoRange, outputVideoRange, toneMapFilter string) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
@@ -780,6 +888,12 @@ func buildTaterTVChannelHLSArgsWithTimeline(cfg config.TranscodingConfig, profil
 		args = append(args, "-t", strconv.FormatFloat(durationSeconds, 'f', 3, 64))
 	}
 	videoCodec, filters := transcodeVideoSettingsForCodec(accel, cfg.HardwareDevice, profile, preferredCodec)
+	if cleanTaterVideoRange(sourceVideoRange) != "sdr" && cleanTaterVideoRange(outputVideoRange) == "sdr" {
+		filters = appendTaterToneMapFilter(filters, sourceVideoRange, "sdr", toneMapFilter)
+	}
+	if normalizeTranscodeCodec(preferredCodec) == transcodeCodecHEVC {
+		filters = taterVideoFiltersForHEVCMain10(filters, videoCodec)
+	}
 	filters = taterTVHLSNormalizeFilters(filters, profile)
 	if logoFile != "" {
 		args = append(args,
@@ -806,6 +920,9 @@ func buildTaterTVChannelHLSArgsWithTimeline(cfg config.TranscodingConfig, profil
 		"-bufsize", profile.BufferSize,
 	)
 	args = appendVideoEncoderOptions(args, videoCodec, profile)
+	if normalizeTranscodeCodec(preferredCodec) == transcodeCodecHEVC {
+		args = appendHEVCMain10EncoderOptions(args, videoCodec, outputVideoRange)
+	}
 	args = append(args,
 		"-flags:v", "+cgop",
 		"-g", "60",
@@ -819,12 +936,6 @@ func buildTaterTVChannelHLSArgsWithTimeline(cfg config.TranscodingConfig, profil
 		"-b:a", profile.AudioBitrate,
 		"-ac", "2",
 		"-ar", "48000",
-		// Keep decoder-visible video parameters stable when a channel moves
-		// between HDR/SDR programs, older commercials, and generated bumpers.
-		"-color_primaries", "bt709",
-		"-color_trc", "bt709",
-		"-colorspace", "bt709",
-		"-color_range", "tv",
 		"-fflags", "+genpts",
 		// Each schedule item is encoded independently, then placed on one
 		// continuous MPEG-TS timeline with -output_ts_offset below. make_zero
@@ -836,16 +947,27 @@ func buildTaterTVChannelHLSArgsWithTimeline(cfg config.TranscodingConfig, profil
 		"-muxdelay", "0",
 		"-muxpreload", "0",
 	)
+	args = appendTaterVideoRangeOutputMetadata(args, outputVideoRange)
 	if timelineOffset > 0 && !math.IsNaN(timelineOffset) && !math.IsInf(timelineOffset, 0) {
 		args = append(args,
 			"-output_ts_offset", strconv.FormatFloat(timelineOffset, 'f', 6, 64),
 		)
 	}
+	args = append(args, "-f", "hls", "-hls_time", strconv.Itoa(taterTVHLSSegmentSeconds))
+	if normalizeTranscodeCodec(preferredCodec) == transcodeCodecHEVC {
+		segmentPattern = strings.TrimSuffix(segmentPattern, filepath.Ext(segmentPattern)) + ".m4s"
+		args = append(args,
+			"-tag:v", "hvc1",
+			"-hls_segment_type", "fmp4",
+			"-hls_fmp4_init_filename", "init.mp4",
+		)
+	} else {
+		args = append(args,
+			"-hls_segment_type", "mpegts",
+			"-hls_segment_options", "mpegts_flags=+resend_headers+initial_discontinuity:mpegts_copyts=1",
+		)
+	}
 	args = append(args,
-		"-f", "hls",
-		"-hls_time", strconv.Itoa(taterTVHLSSegmentSeconds),
-		"-hls_segment_type", "mpegts",
-		"-hls_segment_options", "mpegts_flags=+resend_headers+initial_discontinuity:mpegts_copyts=1",
 		"-hls_flags", "independent_segments+temp_file",
 		"-hls_list_size", "0",
 		"-hls_segment_filename", segmentPattern,
@@ -891,14 +1013,40 @@ func taterTVHLSPublicID(r *http.Request, guideStartedAt time.Time) string {
 	return taterTVSafeName(session, "live")
 }
 
-func taterTVHLSKey(number, sessionID, profileID, requestedAccel, preferredCodec string, clientLogoOverlay bool) string {
+func taterTVHLSKey(number, sessionID, profileID, requestedAccel, preferredCodec string, clientLogoOverlay bool, hdrFormats []string) string {
 	logoMode := "server-logo"
 	if clientLogoOverlay {
 		logoMode = "client-logo"
 	}
-	raw := strings.Join([]string{number, sessionID, profileID, requestedAccel, normalizeTranscodeCodec(preferredCodec), logoMode}, "|")
+	raw := strings.Join([]string{
+		number, sessionID, profileID, requestedAccel,
+		normalizeTranscodeCodec(preferredCodec), logoMode,
+		strings.Join(normalizeTaterTVHDRFormats(hdrFormats), ","),
+	}, "|")
 	sum := sha1.Sum([]byte(raw))
 	return number + "-" + hex.EncodeToString(sum[:])[:16]
+}
+
+func taterTVRequestedHDRFormats(r *http.Request) []string {
+	if r == nil || r.URL == nil {
+		return nil
+	}
+	return normalizeTaterTVHDRFormats(strings.Split(r.URL.Query().Get("tater_hdr_formats"), ","))
+}
+
+func normalizeTaterTVHDRFormats(values []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, value := range values {
+		format := cleanTaterVideoRange(value)
+		if format == "" || format == "sdr" || seen[format] {
+			continue
+		}
+		seen[format] = true
+		out = append(out, format)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func taterTVClientLogoOverlayRequested(r *http.Request) bool {

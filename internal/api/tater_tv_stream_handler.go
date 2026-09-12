@@ -800,7 +800,10 @@ func taterTVChannelLogoFilter(baseFilters string, profile transcodeProfile, logo
 
 func splitTaterTVOverlayFilters(filters string) (preFilters, postFilters string) {
 	filters = strings.TrimSpace(filters)
-	for _, suffix := range []string{",format=nv12,hwupload", ",format=nv12"} {
+	for _, suffix := range []string{
+		",format=p010le,hwupload", ",format=yuv420p10le,hwupload",
+		",format=nv12,hwupload", ",format=p010le", ",format=yuv420p10le", ",format=nv12",
+	} {
 		if strings.HasSuffix(filters, suffix) {
 			return strings.TrimSuffix(filters, suffix), suffix
 		}

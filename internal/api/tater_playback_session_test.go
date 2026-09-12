@@ -402,29 +402,38 @@ func TestBuildTaterPlaybackPlanHDR10ToneMapsVideoAndPreservesAudio(t *testing.T)
 	require.Equal(t, "eac3", query.Get("audio_codec"))
 }
 
-func TestBuildTaterPlaybackPlanProfile7DolbyVisionUsesSafeSDRToneMap(t *testing.T) {
+func TestBuildTaterPlaybackPlanProfile7DolbyVisionUsesHDR10BaseLayer(t *testing.T) {
 	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
 		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Profile:   "hdmi_1080p",
 		Capabilities: taterPlaybackCapabilities{
-			CapabilityVersion:   5,
-			Platform:            "tvos",
-			VideoCodecs:         []string{"hevc"},
-			AudioCodecs:         []string{"aac"},
-			VideoHDRFormats:     []string{"hdr10", "dolby_vision"},
-			DisplayHDRFormats:   []string{"hdr10", "dolby_vision"},
-			DisplayHDREnabled:   true,
-			MaxVideoBitDepth:    10,
-			DolbyVisionProfiles: []int{5},
+			CapabilityVersion:        5,
+			Platform:                 "tvos",
+			PreferredStreamContainer: "hls",
+			VideoCodecs:              []string{"hevc"},
+			AudioCodecs:              []string{"aac"},
+			VideoHDRFormats:          []string{"hdr10", "dolby_vision"},
+			DisplayHDRFormats:        []string{"hdr10", "dolby_vision"},
+			DisplayHDREnabled:        true,
+			MaxVideoBitDepth:         10,
+			MaxWidth:                 1920,
+			MaxHeight:                1080,
+			DolbyVisionProfiles:      []int{5},
 		},
 	}, taterPlaybackMediaInfo{
 		VideoCodec: "hevc", VideoRange: "dolby_vision", VideoBitDepth: 10,
-		DolbyVisionProfile: 7, AudioCodec: "aac", AudioChannels: 2,
+		DolbyVisionProfile: 7, Width: 3840, Height: 2160, AudioCodec: "aac", AudioChannels: 2,
 	})
 
 	require.Equal(t, "video_transcode", plan.Mode)
-	require.Equal(t, "sdr", plan.OutputVideoRange)
-	require.True(t, plan.ToneMapped)
-	require.Contains(t, plan.QualityLabel, "Dolby Vision → SDR Tone Map")
+	require.Equal(t, "hevc", plan.VideoCodec)
+	require.Equal(t, "hdr10", plan.OutputVideoRange)
+	require.False(t, plan.ToneMapped)
+	require.Contains(t, plan.QualityLabel, "Dolby Vision → HDR10")
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Equal(t, "hevc", query.Get("codec"))
+	require.Equal(t, "hdr10", query.Get("tater_output_video_range"))
+	require.Empty(t, query.Get("tater_tone_map"))
 }
 
 func TestBuildTaterPlaybackPlanProfile8DolbyVisionUsesHDR10BaseLayer(t *testing.T) {
@@ -513,7 +522,7 @@ func TestBuildTaterPlaybackPlanRemuxesHDRHEVCContainerAsHLS(t *testing.T) {
 	require.Equal(t, "hls", query.Get("tater_output_container"))
 }
 
-func TestBuildTaterPlaybackPlanToneMapsHDRWhenTVOSMustEncodeVideo(t *testing.T) {
+func TestBuildTaterPlaybackPlanPreservesHDRAsHEVCWhenTVOSMustEncodeVideo(t *testing.T) {
 	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
 		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
 		Profile:   "hdmi_1080p",
@@ -537,9 +546,156 @@ func TestBuildTaterPlaybackPlanToneMapsHDRWhenTVOSMustEncodeVideo(t *testing.T) 
 	})
 
 	require.Equal(t, "video_transcode", plan.Mode)
+	require.Equal(t, "hevc", plan.VideoCodec)
+	require.Equal(t, "hdr10", plan.OutputVideoRange)
+	require.False(t, plan.ToneMapped)
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Equal(t, "hevc", query.Get("codec"))
+	require.Equal(t, "hdr10", query.Get("tater_output_video_range"))
+	require.Empty(t, query.Get("tater_tone_map"))
+}
+
+func TestBuildTaterPlaybackPlanReencodesHDR10PlusAsHDR10(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Profile:   "hdmi_1080p",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion:        5,
+			Platform:                 "tvos",
+			PreferredStreamContainer: "hls",
+			VideoCodecs:              []string{"hevc"},
+			AudioCodecs:              []string{"aac"},
+			VideoHDRFormats:          []string{"hdr10", "hdr10plus"},
+			DisplayHDRFormats:        []string{"hdr10", "hdr10plus"},
+			DisplayHDREnabled:        true,
+			MaxVideoBitDepth:         10,
+			MaxWidth:                 1920,
+			MaxHeight:                1080,
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "hevc", VideoRange: "hdr10plus", VideoBitDepth: 10,
+		Width: 3840, Height: 2160, AudioCodec: "aac", AudioChannels: 2,
+	})
+
+	require.Equal(t, "video_transcode", plan.Mode)
+	require.Equal(t, "hevc", plan.VideoCodec)
+	require.Equal(t, "hdr10", plan.OutputVideoRange)
+	require.False(t, plan.ToneMapped)
+}
+
+func TestBuildTaterPlaybackPlanToneMapsDolbyVisionWhenItMustBeReencoded(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mp4",
+		Profile:   "hdmi_1080p",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion:        5,
+			Platform:                 "tvos",
+			PreferredStreamContainer: "hls",
+			VideoCodecs:              []string{"hevc"},
+			AudioCodecs:              []string{"aac"},
+			VideoHDRFormats:          []string{"hdr10", "dolby_vision"},
+			DisplayHDRFormats:        []string{"hdr10", "dolby_vision"},
+			DisplayHDREnabled:        true,
+			DolbyVisionProfiles:      []int{5},
+			MaxVideoBitDepth:         10,
+			MaxWidth:                 1920,
+			MaxHeight:                1080,
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mp4", VideoCodec: "hevc", VideoRange: "dolby_vision", VideoBitDepth: 10,
+		DolbyVisionProfile: 5, Width: 3840, Height: 2160, AudioCodec: "aac", AudioChannels: 2,
+	})
+
+	require.Equal(t, "video_transcode", plan.Mode)
+	require.Equal(t, "h264", plan.VideoCodec)
 	require.Equal(t, "sdr", plan.OutputVideoRange)
 	require.True(t, plan.ToneMapped)
-	require.Equal(t, "1", playbackPlanQuery(t, plan.StreamURL).Get("tater_tone_map"))
+}
+
+func TestBuildTaterTVPlaybackPlanUsesHEVCFMP4ForHDRCapableTVOS(t *testing.T) {
+	plan := buildTaterTVPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/tv/channel/08/playlist.m3u8?player_token=secret",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion:        5,
+			Platform:                 "tvos",
+			PreferredStreamContainer: "hls",
+			VideoCodecs:              []string{"h264", "hevc"},
+			AudioCodecs:              []string{"aac", "ac3", "eac3"},
+			VideoHDRFormats:          []string{"hdr10", "hlg", "dolby_vision"},
+			DisplayHDRFormats:        []string{"hdr10", "hlg", "dolby_vision"},
+			DisplayHDREnabled:        true,
+			MaxVideoBitDepth:         10,
+			MaxWidth:                 3840,
+			MaxHeight:                2160,
+			MaxAudioChannels:         8,
+			AudioDownmix:             true,
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mkv", VideoCodec: "hevc", VideoRange: "hdr10", VideoBitDepth: 10,
+		Width: 3840, Height: 2160, AudioCodec: "truehd", AudioChannels: 8,
+	})
+
+	require.Equal(t, "full_transcode", plan.Mode)
+	require.Equal(t, "hevc", plan.VideoCodec)
+	require.Equal(t, "hls", plan.OutputContainer)
+	require.Equal(t, "hdr10", plan.OutputVideoRange)
+	require.False(t, plan.ToneMapped)
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Equal(t, "hevc", query.Get("codec"))
+	require.Equal(t, "hdr10,hlg,dolby_vision", query.Get("tater_hdr_formats"))
+	require.Equal(t, "hls", query.Get("tater_output_container"))
+}
+
+func TestTaterPlaybackTubeTVChannelNumberOnlyMatchesChannelPlaylist(t *testing.T) {
+	require.Equal(t, "08", taterPlaybackTubeTVChannelNumber(
+		"http://tube.local/api/tater/tv/channel/08/playlist.m3u8?player_token=secret",
+	))
+	require.Empty(t, taterPlaybackTubeTVChannelNumber(
+		"http://tube.local/api/tater/local/stream?path=playlist.m3u8",
+	))
+	require.Empty(t, taterPlaybackTubeTVChannelNumber(
+		"http://tube.local/api/tater/tv/channel/08/stream.ts",
+	))
+}
+
+func TestTaterTVPlaybackOutputRangeUsesProfile7HDR10BaseButNotProfile5(t *testing.T) {
+	profile7Range, profile7ToneMapped := taterTVPlaybackOutputRange(taterPlaybackMediaInfo{
+		VideoRange: "dolby_vision", DolbyVisionProfile: 7,
+	}, []string{"hdr10", "dolby_vision"})
+	require.Equal(t, "hdr10", profile7Range)
+	require.False(t, profile7ToneMapped)
+
+	profile5Range, profile5ToneMapped := taterTVPlaybackOutputRange(taterPlaybackMediaInfo{
+		VideoRange: "dolby_vision", DolbyVisionProfile: 5,
+	}, []string{"hdr10", "dolby_vision"})
+	require.Equal(t, "sdr", profile5Range)
+	require.True(t, profile5ToneMapped)
+}
+
+func TestBuildTaterTVPlaybackPlanKeepsRetroPlayerOnH264(t *testing.T) {
+	plan := buildTaterTVPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/tv/channel/08/playlist.m3u8?player_token=secret",
+		Profile:   "crt_480p",
+		Capabilities: taterPlaybackCapabilities{
+			Platform:     "linux",
+			VideoCodecs:  []string{"h264"},
+			AudioCodecs:  []string{"aac"},
+			MaxWidth:     640,
+			MaxHeight:    480,
+			AudioDownmix: true,
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "hevc", VideoRange: "hdr10", VideoBitDepth: 10,
+		Width: 3840, Height: 2160, AudioCodec: "truehd", AudioChannels: 8,
+	})
+
+	require.Equal(t, "h264", plan.VideoCodec)
+	require.Equal(t, "sdr", plan.OutputVideoRange)
+	require.True(t, plan.ToneMapped)
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Equal(t, "h264", query.Get("codec"))
+	require.Empty(t, query.Get("tater_hdr_formats"))
 }
 
 func TestTaterPlaybackVideoRangeDetectsHDRAndDolbyVision(t *testing.T) {
