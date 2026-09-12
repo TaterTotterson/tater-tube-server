@@ -2461,7 +2461,7 @@ func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
 		"-filter_complex",
 		"overlay=x=W-w-",
 		"-af aresample=async=1:first_pts=0",
-		"pad=w=640:h=480:x=(ow-iw)/2:y=(oh-ih)/2:color=black,setsar=1,fps=30000/1001",
+		"pad=w=640:h=480:x=(ow-iw)/2:y=(oh-ih)/2:color=black,setsar=1",
 		"-flags:v +cgop",
 		"-g 60",
 		"-bf 0",
@@ -2486,6 +2486,9 @@ func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
 	}
 	if strings.Contains(joined, "-avoid_negative_ts make_zero") {
 		t.Fatalf("HLS args must preserve the cross-item timestamp offset: %s", joined)
+	}
+	if strings.Contains(joined, "fps=") || strings.Contains(joined, " -r ") {
+		t.Fatalf("HLS args must preserve each item's native frame cadence: %s", joined)
 	}
 }
 
