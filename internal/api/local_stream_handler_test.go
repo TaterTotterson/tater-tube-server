@@ -58,6 +58,56 @@ func TestTaterLocalHLSPlaylistUsesAuthenticatedSegmentURLs(t *testing.T) {
 	}
 }
 
+func TestTaterStreamHLSPlaylistUsesAuthenticatedGenericSegmentURLs(t *testing.T) {
+	root := t.TempDir()
+	playlistPath := filepath.Join(root, "index.m3u8")
+	if err := os.WriteFile(playlistPath, []byte("#EXTM3U\n#EXTINF:4.0,\nsegment-000001.ts\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	session := &taterLocalHLSSession{
+		id: "stream-session", playerToken: "paired token", playlistURL: "/api/files/stream",
+		root: root, playlistPath: playlistPath,
+	}
+	playlist, err := session.playlist()
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(playlist)
+	if !strings.Contains(text, "/api/files/stream?") ||
+		!strings.Contains(text, "player_token=paired+token") ||
+		!strings.Contains(text, "tater_hls_session=stream-session") ||
+		!strings.Contains(text, "tater_hls_segment=segment-000001.ts") {
+		t.Fatalf("expected authenticated discovery HLS segment URL, got %s", text)
+	}
+}
+
+func TestTaterStreamHLSInputURLUsesSuppressedLoopbackSource(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "http://tube.local/api/files/stream?path=ignored", nil)
+	inputURL, err := taterStreamHLSInputURL(
+		request,
+		&config.Config{Server: config.ServerConfig{Port: 4229}},
+		"/complete/movie/movie.mkv",
+		"paired token",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(inputURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Host != "127.0.0.1:4229" || parsed.Path != "/api/files/stream" {
+		t.Fatalf("unexpected HLS input URL: %s", inputURL)
+	}
+	query := parsed.Query()
+	if query.Get("path") != "/complete/movie/movie.mkv" ||
+		query.Get("player_token") != "paired token" ||
+		query.Get("direct") != "1" ||
+		query.Get(taterInternalTranscodeInputQuery) != "1" {
+		t.Fatalf("unexpected HLS input query: %s", parsed.RawQuery)
+	}
+}
+
 func TestLocalStreamHandlerServesAppleTVHLSPlaylistAndSegments(t *testing.T) {
 	root := t.TempDir()
 	mediaPath := filepath.Join(root, "movie.mkv")
