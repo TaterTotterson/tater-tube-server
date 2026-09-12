@@ -54,6 +54,10 @@ func (h *LocalStreamHandler) GetHTTPHandler() http.Handler {
 			http.Error(w, "Local media is not configured", http.StatusServiceUnavailable)
 			return
 		}
+		if strings.TrimSpace(r.URL.Query().Get(taterLocalHLSSegmentQuery)) != "" {
+			h.serveLocalHLSSegment(w, r, player)
+			return
+		}
 
 		categoryID := strings.TrimSpace(r.URL.Query().Get("category_id"))
 		sourceIndex := parseTaterInt(r.URL.Query().Get("source"), 0)
@@ -101,6 +105,10 @@ func (h *LocalStreamHandler) GetHTTPHandler() http.Handler {
 		}
 		if info.IsDir() {
 			http.Error(w, "Cannot stream directory", http.StatusBadRequest)
+			return
+		}
+		if requestedTaterOutputContainer(r) == "hls" {
+			h.serveLocalHLSPlaylist(w, r, cfg, player, token, path, info)
 			return
 		}
 
