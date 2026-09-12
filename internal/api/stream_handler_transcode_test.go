@@ -159,6 +159,13 @@ func TestBuildFFmpegAudioOnlyVideoArgsSelectsRequestedTrack(t *testing.T) {
 	require.Contains(t, strings.Join(args, " "), "-map 0:a:2?")
 }
 
+func TestBuildFFmpegAudioOnlyVideoArgsPreservesRequestedFivePointOne(t *testing.T) {
+	args := buildFFmpegAudioOnlyVideoArgsWithTrackContainerAndChannels(
+		"192k", "/media/movie.mkv", 0, 0, "mpegts", 6,
+	)
+	require.Contains(t, strings.Join(args, " "), "-c:a aac -b:a 320k -ac 6 -ar 48000")
+}
+
 func TestBuildFFmpegAudioOnlyVideoArgsUsesAppleTVContainer(t *testing.T) {
 	args := buildFFmpegAudioOnlyVideoArgsWithTrackAndContainer(
 		"192k", "", 0, 1, "mpegts",

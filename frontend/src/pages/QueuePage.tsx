@@ -221,9 +221,17 @@ function hardwareDetail(stream: ActiveStream) {
 	const videoLabel =
 		videoMode === "transcode" ? "Transcoding" : videoMode === "none" ? "None" : "Direct";
 	const audioCodec = stream.audio_codec ? ` (${String(stream.audio_codec).toUpperCase()})` : "";
+	const audioChannels =
+		stream.audio_channels === 6
+			? " 5.1"
+			: stream.audio_channels === 8
+				? " 7.1"
+				: stream.audio_channels === 2
+					? " Stereo"
+					: "";
 	const audioLabel =
 		audioMode === "transcode"
-			? `Transcoding${audioCodec}`
+			? `Transcoding${audioCodec}${audioChannels}`
 			: audioMode === "none"
 				? "None"
 				: audioMode === "bitstream"

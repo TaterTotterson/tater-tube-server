@@ -160,6 +160,7 @@ func (h *StreamHandler) prepareStreamHLSSession(
 		h.streamTracker.SetTrackProcessingInfo(
 			session.stream.ID, command.videoMode, command.audioMode, command.audioCodec, "Streaming HLS",
 		)
+		h.streamTracker.SetAudioChannelInfo(session.stream.ID, command.audioChannels)
 		applyTaterRequestedDynamicRangeInfo(h.streamTracker, session.stream.ID, r)
 		applyTaterRequestedResolutionInfo(h.streamTracker, session.stream.ID, r)
 	}

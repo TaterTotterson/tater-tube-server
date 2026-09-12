@@ -508,6 +508,17 @@ func (t *StreamTracker) SetTrackProcessingInfo(id, videoMode, audioMode, audioCo
 	}
 }
 
+func (t *StreamTracker) SetAudioChannelInfo(id string, channels int) {
+	if channels <= 0 {
+		return
+	}
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*streamInternal)
+		stream.AudioChannels = channels
+		stream.lastReadAt = time.Now()
+	}
+}
+
 func (t *StreamTracker) SetDynamicRangeInfo(id, sourceRange, outputRange string, toneMapped bool) {
 	if val, ok := t.streams.Load(id); ok {
 		stream := val.(*streamInternal)
@@ -761,6 +772,7 @@ func mergePlaybackRecord(existing *nzbfilesystem.ActiveStream, next nzbfilesyste
 		existing.VideoMode = next.VideoMode
 		existing.AudioMode = next.AudioMode
 		existing.AudioCodec = next.AudioCodec
+		existing.AudioChannels = next.AudioChannels
 		existing.HardwareActive = next.HardwareActive
 	}
 	if next.SourceVideoRange != "" {
@@ -918,6 +930,7 @@ func copyStreamPresentation(dst *nzbfilesystem.ActiveStream, src nzbfilesystem.A
 	dst.VideoMode = src.VideoMode
 	dst.AudioMode = src.AudioMode
 	dst.AudioCodec = src.AudioCodec
+	dst.AudioChannels = src.AudioChannels
 	dst.SourceWidth = src.SourceWidth
 	dst.SourceHeight = src.SourceHeight
 	dst.OutputWidth = src.OutputWidth
@@ -1029,6 +1042,7 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 				existing.VideoMode = s.VideoMode
 				existing.AudioMode = s.AudioMode
 				existing.AudioCodec = s.AudioCodec
+				existing.AudioChannels = s.AudioChannels
 				existing.HardwareActive = s.HardwareActive
 				existing.SourceWidth = s.SourceWidth
 				existing.SourceHeight = s.SourceHeight

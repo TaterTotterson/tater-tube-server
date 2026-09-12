@@ -42,6 +42,7 @@ type ActiveStream struct {
 	VideoMode          string    `json:"video_mode,omitempty"`
 	AudioMode          string    `json:"audio_mode,omitempty"`
 	AudioCodec         string    `json:"audio_codec,omitempty"`
+	AudioChannels      int       `json:"audio_channels,omitempty"`
 	SourceWidth        int       `json:"source_width,omitempty"`
 	SourceHeight       int       `json:"source_height,omitempty"`
 	OutputWidth        int       `json:"output_width,omitempty"`
