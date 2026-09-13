@@ -128,6 +128,7 @@ func (h *StreamHandler) prepareStreamHLSSession(
 	sessionCtx, cancel := context.WithCancel(context.Background())
 	session := &taterLocalHLSSession{
 		id:           key,
+		slot:         taterLocalHLSSlot(playerID),
 		playerID:     playerID,
 		playerToken:  playerToken,
 		playlistURL:  r.URL.Path,
@@ -137,7 +138,7 @@ func (h *StreamHandler) prepareStreamHLSSession(
 		tracker:      h.streamTracker,
 		accessed:     time.Now(),
 	}
-	session, created := globalTaterLocalHLS.addOrGet(key, session)
+	session, created := globalTaterLocalHLS.addOrReplace(key, session)
 	if !created {
 		cancel()
 		_ = os.RemoveAll(root)
