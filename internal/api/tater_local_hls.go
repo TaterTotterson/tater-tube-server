@@ -376,6 +376,12 @@ func buildTaterLocalHLSCommand(
 					SourceVideoRange: sourceVideoRange, OutputVideoRange: outputVideoRange,
 				},
 			)
+			// A full tvOS HLS conversion owns both clocks. Correct small source
+			// timestamp discontinuities while resampling so long-running playback
+			// remains synchronized instead of copying drift into each segment.
+			args = insertTaterFFmpegOutputArgs(
+				args, "-af", "aresample=48000:async=1:first_pts=0",
+			)
 		}
 	}
 	if stripDolbyVision && (mode == "remux" || mode == "audio" || mode == "audio-only" || mode == "audio_only") {

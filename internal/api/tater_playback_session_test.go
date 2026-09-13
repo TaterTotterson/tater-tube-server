@@ -298,6 +298,41 @@ func TestBuildTaterPlaybackPlanVideoOnlyPreservesBitstreamAudio(t *testing.T) {
 	require.Contains(t, plan.QualityLabel, "Audio Bitstream")
 }
 
+func TestBuildTaterPlaybackPlanTVOSTranscodesAudioWithVideoToKeepClocksSynchronized(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion:        5,
+			Platform:                 "tvos",
+			PreferredStreamContainer: "hls",
+			VideoCodecs:              []string{"hevc"},
+			AudioCodecs:              []string{"aac", "ac3", "eac3"},
+			VideoHDRFormats:          []string{"hdr10"},
+			DisplayHDRFormats:        []string{"hdr10"},
+			DisplayHDREnabled:        true,
+			MaxVideoBitDepth:         10,
+			MaxWidth:                 3840,
+			MaxHeight:                2160,
+			MaxAudioChannels:         6,
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mkv", VideoCodec: "h264", Width: 3840, Height: 2160,
+		VideoRange: "hdr10", VideoBitDepth: 10, AudioCodec: "ac3", AudioChannels: 6,
+	})
+
+	require.Equal(t, "full_transcode", plan.Mode)
+	require.Equal(t, "transcode", plan.VideoMode)
+	require.Equal(t, "transcode", plan.AudioMode)
+	require.Equal(t, "hevc", plan.VideoCodec)
+	require.Equal(t, "aac", plan.AudioCodec)
+	require.Equal(t, 6, plan.OutputAudioChannels)
+	require.Contains(t, plan.Reason, "keep Apple TV playback synchronized")
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Equal(t, "1", query.Get("transcode"))
+	require.Equal(t, "6", query.Get("tater_audio_channels"))
+}
+
 func TestBuildTaterPlaybackPlanReports4KTo1080p(t *testing.T) {
 	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
 		StreamURL: "http://tube.local/api/files/stream?path=queue%2FMovie.mkv",
@@ -425,7 +460,9 @@ func TestBuildTaterPlaybackPlanProfile7DolbyVisionUsesHDR10BaseLayer(t *testing.
 		DolbyVisionProfile: 7, Width: 3840, Height: 2160, AudioCodec: "aac", AudioChannels: 2,
 	})
 
-	require.Equal(t, "video_transcode", plan.Mode)
+	require.Equal(t, "full_transcode", plan.Mode)
+	require.Equal(t, "transcode", plan.AudioMode)
+	require.Equal(t, "aac", plan.AudioCodec)
 	require.Equal(t, "hevc", plan.VideoCodec)
 	require.Equal(t, "hdr10", plan.OutputVideoRange)
 	require.False(t, plan.ToneMapped)
@@ -639,7 +676,9 @@ func TestBuildTaterPlaybackPlanPreservesHDRAsHEVCWhenTVOSMustEncodeVideo(t *test
 		VideoRange: "hdr10", VideoBitDepth: 10, AudioCodec: "aac", AudioChannels: 2,
 	})
 
-	require.Equal(t, "video_transcode", plan.Mode)
+	require.Equal(t, "full_transcode", plan.Mode)
+	require.Equal(t, "transcode", plan.AudioMode)
+	require.Equal(t, "aac", plan.AudioCodec)
 	require.Equal(t, "hevc", plan.VideoCodec)
 	require.Equal(t, "hdr10", plan.OutputVideoRange)
 	require.False(t, plan.ToneMapped)
@@ -671,7 +710,9 @@ func TestBuildTaterPlaybackPlanReencodesHDR10PlusAsHDR10(t *testing.T) {
 		Width: 3840, Height: 2160, AudioCodec: "aac", AudioChannels: 2,
 	})
 
-	require.Equal(t, "video_transcode", plan.Mode)
+	require.Equal(t, "full_transcode", plan.Mode)
+	require.Equal(t, "transcode", plan.AudioMode)
+	require.Equal(t, "aac", plan.AudioCodec)
 	require.Equal(t, "hevc", plan.VideoCodec)
 	require.Equal(t, "hdr10", plan.OutputVideoRange)
 	require.False(t, plan.ToneMapped)
@@ -700,7 +741,9 @@ func TestBuildTaterPlaybackPlanToneMapsDolbyVisionWhenItMustBeReencoded(t *testi
 		DolbyVisionProfile: 5, Width: 3840, Height: 2160, AudioCodec: "aac", AudioChannels: 2,
 	})
 
-	require.Equal(t, "video_transcode", plan.Mode)
+	require.Equal(t, "full_transcode", plan.Mode)
+	require.Equal(t, "transcode", plan.AudioMode)
+	require.Equal(t, "aac", plan.AudioCodec)
 	require.Equal(t, "h264", plan.VideoCodec)
 	require.Equal(t, "sdr", plan.OutputVideoRange)
 	require.True(t, plan.ToneMapped)

@@ -868,6 +868,16 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		videoCodec == "hevc" && audioCodec == "eac3" && audioCompatible {
 		audioCompatible = false
 	}
+	// When tvOS needs a newly encoded video track, rebuild the audio alongside
+	// it instead of copying source timestamps into the new HLS timeline. AVPlayer
+	// can otherwise accumulate audible drift during longer playback even when
+	// the copied codec itself is supported. Direct/remux video paths keep their
+	// normal compatible-audio behavior, and other player platforms are unchanged.
+	synchronizeTVOSAudio := strings.EqualFold(strings.TrimSpace(caps.Platform), "tvos") &&
+		preferredContainer == "hls" && !videoCompatible && audioCompatible
+	if synchronizeTVOSAudio {
+		audioCompatible = false
+	}
 
 	plan := taterPlaybackSessionResponse{
 		StreamURL:           req.StreamURL,
@@ -952,6 +962,9 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		plan.StreamURL = taterPlaybackPlannedURL(req.StreamURL, "full", profile, transcodeVideoCodec, "", selectedAudioTrack, preferredContainer)
 		plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, toneMapped) + "Video " + taterPlaybackVideoCodecLabel(transcodeVideoCodec) + " • Audio AAC" + taterPlaybackAudioChannelsSuffix(transcodeAudioChannels)
 		plan.Reason = "Both source tracks need conversion for this player."
+	}
+	if synchronizeTVOSAudio && !toneMapped {
+		plan.Reason = "Video and audio are converted together to keep Apple TV playback synchronized."
 	}
 	if toneMapped {
 		if audioCompatible {
