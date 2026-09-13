@@ -62,6 +62,18 @@ func TestTaterLocalHLSPlaylistRequiresRequestedBuffer(t *testing.T) {
 	}
 }
 
+func TestTaterLocalHLSStartupSegmentsUsesShorterSeekRunway(t *testing.T) {
+	initial := httptest.NewRequest(http.MethodGet, "/api/tater/local/stream", nil)
+	if got := taterLocalHLSStartupSegments(initial); got != taterLocalHLSInitialSegments {
+		t.Fatalf("initial playback segments = %d, want %d", got, taterLocalHLSInitialSegments)
+	}
+
+	seek := httptest.NewRequest(http.MethodGet, "/api/tater/local/stream?start=1800.250", nil)
+	if got := taterLocalHLSStartupSegments(seek); got != taterLocalHLSSeekSegments {
+		t.Fatalf("seek playback segments = %d, want %d", got, taterLocalHLSSeekSegments)
+	}
+}
+
 func TestConvertTaterFFmpegArgsToHLSUsesFragmentedMP4ForCopiedHEVC(t *testing.T) {
 	args := buildFFmpegRemuxArgs("/media/movie.mkv", 0, 0)
 	args = convertTaterFFmpegArgsToHLS(
