@@ -24,8 +24,13 @@ const (
 	taterLocalHLSSessionQuery = "tater_hls_session"
 	taterLocalHLSSegmentQuery = "tater_hls_segment"
 	taterLocalHLSSegmentTime  = 4
-	taterLocalHLSFirstWait    = 15 * time.Second
-	taterLocalHLSIdleTimeout  = 5 * time.Minute
+	// Keep several complete segments ready before AVPlayer reaches the moving
+	// edge of an EVENT playlist. Reading a little faster than wall clock also
+	// rebuilds that cushion after brief storage or provider delays.
+	taterLocalHLSInitialSegments = 6
+	taterLocalHLSReadRate        = "1.02"
+	taterLocalHLSFirstWait       = 15 * time.Second
+	taterLocalHLSIdleTimeout     = 5 * time.Minute
 )
 
 type taterLocalHLSManager struct {
@@ -84,7 +89,7 @@ func (h *LocalStreamHandler) serveLocalHLSPlaylist(
 
 	deadline := time.Now().Add(taterLocalHLSFirstWait)
 	for time.Now().Before(deadline) {
-		if session.playlistReady() || session.finished() {
+		if session.playlistBuffered(taterLocalHLSInitialSegments) || session.finished() {
 			break
 		}
 		time.Sleep(150 * time.Millisecond)
@@ -394,7 +399,10 @@ func convertTaterFFmpegArgsToHLS(
 	}
 	for i, arg := range args {
 		if arg == "-i" {
-			pace := []string{"-readrate", "1", "-readrate_initial_burst", strconv.Itoa(taterLocalHLSSegmentTime * 2)}
+			pace := []string{
+				"-readrate", taterLocalHLSReadRate,
+				"-readrate_initial_burst", strconv.Itoa(taterLocalHLSSegmentTime * taterLocalHLSInitialSegments),
+			}
 			paced := make([]string, 0, len(args)+len(pace))
 			paced = append(paced, args[:i]...)
 			paced = append(paced, pace...)
@@ -545,13 +553,28 @@ func (s *taterLocalHLSSession) expireWhenIdle(ctx context.Context) {
 }
 
 func (s *taterLocalHLSSession) playlistReady() bool {
+	return s.playlistBuffered(1)
+}
+
+func (s *taterLocalHLSSession) playlistBuffered(minSegments int) bool {
 	data, err := os.ReadFile(s.playlistPath)
 	if err != nil {
 		return false
 	}
-	playlist := string(data)
-	return strings.Contains(playlist, "#EXTINF:") &&
-		(strings.Contains(playlist, ".ts") || strings.Contains(playlist, ".m4s"))
+	if minSegments < 1 {
+		minSegments = 1
+	}
+	segments := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" || strings.HasPrefix(name, "#") {
+			continue
+		}
+		if strings.HasSuffix(name, ".ts") || strings.HasSuffix(name, ".m4s") {
+			segments++
+		}
+	}
+	return segments >= minSegments
 }
 
 func (s *taterLocalHLSSession) playlist() ([]byte, error) {

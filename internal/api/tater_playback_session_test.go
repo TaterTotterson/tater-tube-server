@@ -522,6 +522,100 @@ func TestBuildTaterPlaybackPlanRemuxesHDRHEVCContainerAsHLS(t *testing.T) {
 	require.Equal(t, "hls", query.Get("tater_output_container"))
 }
 
+func TestBuildTaterPlaybackPlanNormalizesEAC3InTVOSHEVCHLS(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/files/stream?path=movie.mkv",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion:        5,
+			Platform:                 "tvos",
+			Containers:               []string{"mp4", "hls"},
+			VideoCodecs:              []string{"hevc"},
+			AudioCodecs:              []string{"aac", "eac3"},
+			VideoHDRFormats:          []string{"hdr10"},
+			DisplayHDRFormats:        []string{"hdr10"},
+			DisplayHDREnabled:        true,
+			MaxVideoBitDepth:         10,
+			MaxAudioChannels:         6,
+			AudioDownmix:             true,
+			PreferredStreamContainer: "hls",
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mkv", VideoCodec: "hevc", VideoRange: "hdr10", VideoBitDepth: 10,
+		Width: 3840, Height: 1716, AudioCodec: "eac3", AudioChannels: 6,
+	})
+
+	require.Equal(t, "audio_transcode", plan.Mode)
+	require.Equal(t, "direct", plan.VideoMode)
+	require.Equal(t, "transcode", plan.AudioMode)
+	require.Equal(t, "aac", plan.AudioCodec)
+	require.Equal(t, 6, plan.OutputAudioChannels)
+	require.Equal(t, "hls", plan.OutputContainer)
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Equal(t, "audio", query.Get("transcode"))
+	require.Equal(t, "hevc", query.Get("tater_video_codec"))
+	require.Equal(t, "hls", query.Get("tater_output_container"))
+	require.Equal(t, "6", query.Get("tater_audio_channels"))
+}
+
+func TestBuildTaterPlaybackPlanKeepsEAC3DirectInCompatibleTVOSMP4(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/files/stream?path=movie.mp4",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion:        5,
+			Platform:                 "tvos",
+			Containers:               []string{"mp4", "hls"},
+			VideoCodecs:              []string{"hevc"},
+			AudioCodecs:              []string{"aac", "eac3"},
+			VideoHDRFormats:          []string{"hdr10"},
+			DisplayHDRFormats:        []string{"hdr10"},
+			DisplayHDREnabled:        true,
+			MaxVideoBitDepth:         10,
+			MaxAudioChannels:         6,
+			AudioDownmix:             true,
+			PreferredStreamContainer: "hls",
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mp4", VideoCodec: "hevc", VideoRange: "hdr10", VideoBitDepth: 10,
+		Width: 3840, Height: 1716, AudioCodec: "eac3", AudioChannels: 6,
+	})
+
+	require.Equal(t, "direct", plan.Mode)
+	require.Equal(t, "direct", plan.VideoMode)
+	require.Equal(t, "direct", plan.AudioMode)
+	require.Equal(t, "eac3", plan.AudioCodec)
+}
+
+func TestBuildTaterPlaybackPlanKeepsEAC3RemuxForNonTVOSPlayer(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/files/stream?path=movie.mkv",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion:        5,
+			Platform:                 "linux",
+			Containers:               []string{"mp4", "hls"},
+			VideoCodecs:              []string{"hevc"},
+			AudioCodecs:              []string{"aac", "eac3"},
+			VideoHDRFormats:          []string{"hdr10"},
+			DisplayHDRFormats:        []string{"hdr10"},
+			DisplayHDREnabled:        true,
+			MaxVideoBitDepth:         10,
+			MaxAudioChannels:         6,
+			AudioDownmix:             true,
+			PreferredStreamContainer: "hls",
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mkv", VideoCodec: "hevc", VideoRange: "hdr10", VideoBitDepth: 10,
+		Width: 3840, Height: 1716, AudioCodec: "eac3", AudioChannels: 6,
+	})
+
+	require.Equal(t, "remux", plan.Mode)
+	require.Equal(t, "direct", plan.VideoMode)
+	require.Equal(t, "direct", plan.AudioMode)
+	require.Equal(t, "eac3", plan.AudioCodec)
+}
+
 func TestBuildTaterPlaybackPlanPreservesHDRAsHEVCWhenTVOSMustEncodeVideo(t *testing.T) {
 	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
 		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
