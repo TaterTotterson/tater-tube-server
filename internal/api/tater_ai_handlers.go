@@ -64,6 +64,7 @@ type taterCandidate struct {
 	Source      string          `json:"source"`
 	Year        string          `json:"year,omitempty"`
 	Description string          `json:"description,omitempty"`
+	Genres      []string        `json:"genres,omitempty"`
 	Launch      taterUsenetItem `json:"launch"`
 }
 
@@ -312,11 +313,28 @@ func (s *Server) handleTaterCoreCandidates(c *fiber.Ctx) error {
 	candidates := s.taterRecommendationCandidates(
 		c.Context(), cfg, resolveBaseURL(c, ""), profileID,
 	)
+	catalogCount := len(candidates)
 	limit := queryInt(c, "limit", 200, 1, 500)
-	if len(candidates) > limit {
-		candidates = candidates[:limit]
+	excluded := map[string]bool{}
+	for _, id := range strings.Split(c.Query("exclude_ids"), ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			excluded[id] = true
+		}
 	}
-	return RespondSuccess(c, fiber.Map{"candidates": candidates, "generated_at": time.Now().UTC()})
+	seed := strings.TrimSpace(c.Query("seed"))
+	if seed == "" {
+		seed = time.Now().UTC().Format("2006-01-02T15")
+	}
+	weekendMorning := c.Query("weekend_morning") == "1" ||
+		strings.EqualFold(strings.TrimSpace(c.Query("weekend_morning")), "true")
+	candidates = taterBalancedRecommendationCandidates(
+		candidates, limit, seed, excluded, weekendMorning,
+	)
+	return RespondSuccess(c, fiber.Map{
+		"candidates": candidates, "catalog_count": catalogCount,
+		"shortlist_count": len(candidates), "selection": "balanced_rotating",
+		"generated_at": time.Now().UTC(),
+	})
 }
 
 func (s *Server) handleTaterCoreSaveRecommendations(c *fiber.Ctx) error {
@@ -798,10 +816,260 @@ func (s *Server) taterRecommendationCandidates(
 		}
 		result = append(result, taterCandidate{
 			ID: id, Title: item.Title, MediaType: mediaType, Source: "local_media",
-			Year: item.Date, Description: item.Description, Launch: item,
+			Year: item.Date, Description: item.Description,
+			Genres: taterRecommendationGenres(item), Launch: item,
 		})
 	}
 	return result
+}
+
+func taterRecommendationGenres(item taterUsenetItem) []string {
+	values := append([]string(nil), item.Genres...)
+	if len(values) == 0 && strings.TrimSpace(item.Genre) != "" {
+		values = append(values, item.Genre)
+	}
+	if len(values) == 0 && strings.TrimSpace(item.Category) != "" {
+		values = append(values, item.Category)
+	}
+	genres := []string{}
+	seen := map[string]bool{}
+	for _, raw := range values {
+		for _, value := range strings.FieldsFunc(raw, func(r rune) bool {
+			return r == ',' || r == ';' || r == '|' || r == '/'
+		}) {
+			genre := cleanTaterText(value)
+			key := strings.ToLower(genre)
+			if genre == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			genres = append(genres, genre)
+		}
+	}
+	return genres
+}
+
+func taterBalancedRecommendationCandidates(
+	candidates []taterCandidate,
+	limit int,
+	seed string,
+	excluded map[string]bool,
+	weekendMorning bool,
+) []taterCandidate {
+	if limit <= 0 || len(candidates) == 0 {
+		return []taterCandidate{}
+	}
+	available := make([]taterCandidate, 0, len(candidates))
+	deferred := make([]taterCandidate, 0, len(excluded))
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		if candidate.ID == "" || seen[candidate.ID] {
+			continue
+		}
+		seen[candidate.ID] = true
+		if excluded[candidate.ID] {
+			deferred = append(deferred, candidate)
+		} else {
+			available = append(available, candidate)
+		}
+	}
+
+	ordered := taterContextualCandidateOrder(available, limit, seed, weekendMorning)
+	if len(ordered) < limit && len(deferred) > 0 {
+		ordered = append(
+			ordered,
+			taterContextualCandidateOrder(deferred, limit-len(ordered), seed+"\x00previous", weekendMorning)...,
+		)
+	}
+	if len(ordered) > limit {
+		ordered = ordered[:limit]
+	}
+	return ordered
+}
+
+func taterContextualCandidateOrder(
+	candidates []taterCandidate,
+	limit int,
+	seed string,
+	weekendMorning bool,
+) []taterCandidate {
+	if limit <= 0 || len(candidates) == 0 {
+		return []taterCandidate{}
+	}
+	if !weekendMorning {
+		ordered := taterBalancedMediaCandidateOrder(candidates, seed)
+		return ordered[:min(limit, len(ordered))]
+	}
+
+	weekend := make([]taterCandidate, 0, len(candidates))
+	general := make([]taterCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if taterWeekendMorningCandidate(candidate) {
+			weekend = append(weekend, candidate)
+		} else {
+			general = append(general, candidate)
+		}
+	}
+	weekend = taterBalancedMediaCandidateOrder(weekend, seed+"\x00weekend-morning")
+	general = taterBalancedMediaCandidateOrder(general, seed+"\x00general")
+	prioritySlots := min(len(weekend), max(1, limit/3))
+	result := append([]taterCandidate(nil), weekend[:prioritySlots]...)
+	generalSlots := min(len(general), limit-len(result))
+	result = append(result, general[:generalSlots]...)
+	if len(result) < limit && prioritySlots < len(weekend) {
+		remaining := min(len(weekend)-prioritySlots, limit-len(result))
+		result = append(result, weekend[prioritySlots:prioritySlots+remaining]...)
+	}
+	return result
+}
+
+func taterBalancedMediaCandidateOrder(candidates []taterCandidate, seed string) []taterCandidate {
+	groups := map[string][]taterCandidate{}
+	for _, candidate := range candidates {
+		key := strings.ToLower(strings.TrimSpace(candidate.MediaType))
+		switch key {
+		case "show", "tv", "tvshow":
+			key = "series"
+		case "film":
+			key = "movie"
+		}
+		if key == "" {
+			key = "other"
+		}
+		groups[key] = append(groups[key], candidate)
+	}
+
+	keys := make([]string, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+		groups[key] = taterGenreBalancedCandidateOrder(groups[key], seed+"\x00"+key)
+	}
+	sort.SliceStable(keys, func(i, j int) bool {
+		leftPriority := taterCandidateMediaPriority(keys[i])
+		rightPriority := taterCandidateMediaPriority(keys[j])
+		if leftPriority != rightPriority {
+			return leftPriority < rightPriority
+		}
+		return taterSeededOrderKey(seed, "media", keys[i]) <
+			taterSeededOrderKey(seed, "media", keys[j])
+	})
+
+	result := make([]taterCandidate, 0, len(candidates))
+	for round := 0; len(result) < len(candidates); round++ {
+		added := false
+		for _, key := range keys {
+			if round >= len(groups[key]) {
+				continue
+			}
+			result = append(result, groups[key][round])
+			added = true
+		}
+		if !added {
+			break
+		}
+	}
+	return result
+}
+
+func taterCandidateMediaPriority(mediaType string) int {
+	switch mediaType {
+	case "movie", "series":
+		return 0
+	case "live":
+		return 1
+	default:
+		return 2
+	}
+}
+
+func taterGenreBalancedCandidateOrder(candidates []taterCandidate, seed string) []taterCandidate {
+	groups := map[string][]taterCandidate{}
+	for _, candidate := range candidates {
+		key := taterRecommendationGenreBucket(candidate, seed)
+		groups[key] = append(groups[key], candidate)
+	}
+	keys := make([]string, 0, len(groups))
+	for key, rows := range groups {
+		keys = append(keys, key)
+		sort.SliceStable(rows, func(i, j int) bool {
+			return taterSeededOrderKey(seed, key, rows[i].ID) <
+				taterSeededOrderKey(seed, key, rows[j].ID)
+		})
+		groups[key] = rows
+	}
+	sort.SliceStable(keys, func(i, j int) bool {
+		return taterSeededOrderKey(seed, "genre", keys[i]) <
+			taterSeededOrderKey(seed, "genre", keys[j])
+	})
+
+	result := make([]taterCandidate, 0, len(candidates))
+	for round := 0; len(result) < len(candidates); round++ {
+		added := false
+		for _, key := range keys {
+			if round >= len(groups[key]) {
+				continue
+			}
+			result = append(result, groups[key][round])
+			added = true
+		}
+		if !added {
+			break
+		}
+	}
+	return result
+}
+
+func taterRecommendationGenreBucket(candidate taterCandidate, seed string) string {
+	if len(candidate.Genres) == 0 {
+		return "uncategorized"
+	}
+	selected := ""
+	selectedRank := ""
+	for _, raw := range candidate.Genres {
+		genre := strings.ToLower(cleanTaterText(raw))
+		if genre == "" {
+			continue
+		}
+		rank := taterSeededOrderKey(seed, candidate.ID, genre)
+		if selected == "" || rank < selectedRank {
+			selected = genre
+			selectedRank = rank
+		}
+	}
+	if selected == "" {
+		return "uncategorized"
+	}
+	return selected
+}
+
+func taterWeekendMorningCandidate(candidate taterCandidate) bool {
+	for _, genre := range candidate.Genres {
+		value := strings.ToLower(cleanTaterText(genre))
+		for _, keyword := range []string{"animation", "animated", "anime", "cartoon", "family", "kids", "children"} {
+			if strings.Contains(value, keyword) {
+				return true
+			}
+		}
+	}
+	if taterLocalDiscoverMatchesGenre(candidate.Launch, "animation") ||
+		taterLocalDiscoverMatchesGenre(candidate.Launch, "family") {
+		return true
+	}
+	title := strings.ToLower(cleanTaterText(candidate.Title))
+	for _, keyword := range []string{
+		"anime", "cartoon", "animated", "kids", "children", "looney", "tom and jerry", "disney", "pixar",
+	} {
+		if strings.Contains(title, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func taterSeededOrderKey(seed string, parts ...string) string {
+	value := append([]string{seed}, parts...)
+	sum := sha256.Sum256([]byte(strings.Join(value, "\x00")))
+	return hex.EncodeToString(sum[:])
 }
 
 func (s *Server) taterHistoryRecommendationCandidates(

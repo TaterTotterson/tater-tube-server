@@ -744,6 +744,97 @@ func TestBuildTaterTVPlaybackPlanUsesHEVCFMP4ForHDRCapableTVOS(t *testing.T) {
 	require.Equal(t, "6", query.Get("tater_audio_channels"))
 }
 
+func TestBuildTaterTVPlaybackPlanNegotiatesFixed4KHDR10Output(t *testing.T) {
+	plan := buildTaterTVPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/tv/channel/08/playlist.m3u8?player_token=secret",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion:        6,
+			Platform:                 "tvos",
+			PreferredStreamContainer: "hls",
+			VideoCodecs:              []string{"h264", "hevc"},
+			AudioCodecs:              []string{"aac"},
+			VideoHDRFormats:          []string{"hdr10", "dolby_vision"},
+			DisplayHDRFormats:        []string{"hdr10", "dolby_vision"},
+			DisplayHDREnabled:        true,
+			MaxVideoBitDepth:         10,
+			MaxWidth:                 3840,
+			MaxHeight:                2160,
+			MaxAudioChannels:         6,
+			AudioDownmix:             true,
+			TubeTVOutputVideoRange:   "hdr10",
+			TubeTVOutputFrameRate:    60000.0 / 1001.0,
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "h264", VideoRange: "sdr", VideoBitDepth: 8,
+		Width: 1920, Height: 1080, AudioCodec: "aac", AudioChannels: 2,
+	})
+
+	require.Equal(t, "hevc", plan.VideoCodec)
+	require.Equal(t, "hdr10", plan.OutputVideoRange)
+	require.Equal(t, 3840, plan.OutputWidth)
+	require.Equal(t, 2160, plan.OutputHeight)
+	require.Equal(t, 6, plan.OutputAudioChannels)
+	require.InDelta(t, 60000.0/1001.0, plan.OutputFrameRate, 0.001)
+	require.Contains(t, plan.QualityLabel, "4K HDR10 59.94 fps")
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Equal(t, "hdr10", query.Get("tater_tv_output_range"))
+	require.Equal(t, "60000/1001", query.Get("tater_tv_output_fps"))
+}
+
+func TestBuildTaterTVPlaybackPlanNegotiatesBestSDROutput(t *testing.T) {
+	plan := buildTaterTVPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/tv/channel/08/playlist.m3u8?player_token=secret",
+		Profile:   "hdmi_1080p",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion:        6,
+			Platform:                 "tvos",
+			PreferredStreamContainer: "hls",
+			VideoCodecs:              []string{"h264", "hevc"},
+			MaxWidth:                 1920,
+			MaxHeight:                1080,
+			TubeTVOutputVideoRange:   "sdr",
+			TubeTVOutputFrameRate:    50,
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "hevc", VideoRange: "hdr10", VideoBitDepth: 10,
+		Width: 3840, Height: 2160, AudioCodec: "aac", AudioChannels: 2,
+	})
+
+	require.Equal(t, "h264", plan.VideoCodec)
+	require.Equal(t, "sdr", plan.OutputVideoRange)
+	require.True(t, plan.ToneMapped)
+	require.Equal(t, 1920, plan.OutputWidth)
+	require.Equal(t, 1080, plan.OutputHeight)
+	require.Equal(t, float64(50), plan.OutputFrameRate)
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Equal(t, "sdr", query.Get("tater_tv_output_range"))
+	require.Equal(t, "50", query.Get("tater_tv_output_fps"))
+}
+
+func TestBuildTaterTVPlaybackPlanKeepsLegacyRangeSelection(t *testing.T) {
+	plan := buildTaterTVPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/tv/channel/08/playlist.m3u8?player_token=secret",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion:        5,
+			Platform:                 "tvos",
+			PreferredStreamContainer: "hls",
+			VideoCodecs:              []string{"h264", "hevc"},
+			VideoHDRFormats:          []string{"hdr10"},
+			DisplayHDRFormats:        []string{"hdr10"},
+			DisplayHDREnabled:        true,
+			MaxVideoBitDepth:         10,
+		},
+	}, taterPlaybackMediaInfo{VideoRange: "sdr", Width: 1920, Height: 1080})
+
+	require.Equal(t, "sdr", plan.OutputVideoRange)
+	require.Zero(t, plan.OutputFrameRate)
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Empty(t, query.Get("tater_tv_output_range"))
+	require.Empty(t, query.Get("tater_tv_output_fps"))
+}
+
 func TestTaterPlaybackTubeTVChannelNumberOnlyMatchesChannelPlaylist(t *testing.T) {
 	require.Equal(t, "08", taterPlaybackTubeTVChannelNumber(
 		"http://tube.local/api/tater/tv/channel/08/playlist.m3u8?player_token=secret",

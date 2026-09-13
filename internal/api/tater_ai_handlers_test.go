@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -150,6 +151,105 @@ func TestTaterGreetingForHour(t *testing.T) {
 	for _, test := range tests {
 		if got := taterGreetingForHour(test.hour); got != test.want {
 			t.Fatalf("hour %d: got %q, want %q", test.hour, got, test.want)
+		}
+	}
+}
+
+func TestTaterBalancedRecommendationCandidatesIncludesMoviesSeriesAndGenres(t *testing.T) {
+	candidates := []taterCandidate{}
+	for i := 0; i < 300; i++ {
+		genre := "Action"
+		if i%2 == 0 {
+			genre = "Comedy"
+		}
+		candidates = append(candidates, taterCandidate{
+			ID: fmt.Sprintf("movie-%03d", i), Title: fmt.Sprintf("Movie %03d", i),
+			MediaType: "movie", Genres: []string{genre},
+		})
+	}
+	for i := 0; i < 24; i++ {
+		genre := "Drama"
+		if i%2 == 0 {
+			genre = "Animation"
+		}
+		candidates = append(candidates, taterCandidate{
+			ID: fmt.Sprintf("series-%03d", i), Title: fmt.Sprintf("Series %03d", i),
+			MediaType: "series", Genres: []string{genre},
+		})
+	}
+
+	selected := taterBalancedRecommendationCandidates(candidates, 200, "batch-one", nil, false)
+	if len(selected) != 200 {
+		t.Fatalf("expected 200 candidates, got %d", len(selected))
+	}
+	seriesCount := 0
+	seenGenres := map[string]bool{}
+	seenIDs := map[string]bool{}
+	for _, candidate := range selected {
+		if seenIDs[candidate.ID] {
+			t.Fatalf("duplicate candidate %q", candidate.ID)
+		}
+		seenIDs[candidate.ID] = true
+		if candidate.MediaType == "series" {
+			seriesCount++
+		}
+		for _, genre := range candidate.Genres {
+			seenGenres[genre] = true
+		}
+	}
+	if seriesCount != 24 {
+		t.Fatalf("expected every available series in the shortlist, got %d", seriesCount)
+	}
+	for _, genre := range []string{"Action", "Comedy", "Drama", "Animation"} {
+		if !seenGenres[genre] {
+			t.Fatalf("expected genre %q in shortlist", genre)
+		}
+	}
+
+	rotated := taterBalancedRecommendationCandidates(candidates, 200, "batch-two", nil, false)
+	if selected[0].ID == rotated[0].ID && selected[1].ID == rotated[1].ID {
+		t.Fatalf("different batch seeds did not rotate the shortlist")
+	}
+}
+
+func TestTaterBalancedRecommendationCandidatesDefersPreviousPicks(t *testing.T) {
+	candidates := make([]taterCandidate, 0, 40)
+	excluded := map[string]bool{}
+	for i := 0; i < 40; i++ {
+		id := fmt.Sprintf("movie-%02d", i)
+		candidates = append(candidates, taterCandidate{ID: id, MediaType: "movie"})
+		if i < 8 {
+			excluded[id] = true
+		}
+	}
+	selected := taterBalancedRecommendationCandidates(candidates, 20, "fresh", excluded, false)
+	for _, candidate := range selected {
+		if excluded[candidate.ID] {
+			t.Fatalf("previous pick %q returned while fresh alternatives exist", candidate.ID)
+		}
+	}
+}
+
+func TestTaterBalancedRecommendationCandidatesPrioritizesWeekendMorningTitles(t *testing.T) {
+	candidates := []taterCandidate{}
+	for i := 0; i < 24; i++ {
+		candidates = append(candidates, taterCandidate{
+			ID: fmt.Sprintf("general-%02d", i), MediaType: "movie", Genres: []string{"Drama"},
+		})
+	}
+	for i := 0; i < 12; i++ {
+		mediaType := "movie"
+		if i%2 == 0 {
+			mediaType = "series"
+		}
+		candidates = append(candidates, taterCandidate{
+			ID: fmt.Sprintf("cartoon-%02d", i), MediaType: mediaType, Genres: []string{"Animation", "Family"},
+		})
+	}
+	selected := taterBalancedRecommendationCandidates(candidates, 24, "saturday", nil, true)
+	for i, candidate := range selected[:8] {
+		if !taterWeekendMorningCandidate(candidate) {
+			t.Fatalf("priority slot %d was not a weekend-morning title: %#v", i, candidate)
 		}
 	}
 }

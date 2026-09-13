@@ -50,6 +50,8 @@ type taterPlaybackCapabilities struct {
 	DisplayHDREnabled        bool     `json:"display_hdr_enabled"`
 	MaxVideoBitDepth         int      `json:"max_video_bit_depth"`
 	DolbyVisionProfiles      []int    `json:"dolby_vision_profiles"`
+	TubeTVOutputVideoRange   string   `json:"tube_tv_output_video_range"`
+	TubeTVOutputFrameRate    float64  `json:"tube_tv_output_frame_rate"`
 }
 
 type taterPlaybackSessionRequest struct {
@@ -117,6 +119,7 @@ type taterPlaybackSessionResponse struct {
 	OutputHeight        int                    `json:"output_height,omitempty"`
 	OutputAudioChannels int                    `json:"output_audio_channels,omitempty"`
 	ResolutionLabel     string                 `json:"resolution_label,omitempty"`
+	OutputFrameRate     float64                `json:"output_frame_rate,omitempty"`
 	Source              taterPlaybackMediaInfo `json:"source"`
 }
 
@@ -375,24 +378,41 @@ func buildTaterTVPlaybackPlan(req taterPlaybackSessionRequest, source taterPlayb
 	}
 
 	hdrFormats := taterPlaybackSupportedHDRFormats(caps)
+	fixedOutputRange, fixedFrameRate, fixedFrameRateValue, hasFixedOutput := taterTVPlaybackFixedOutput(caps)
 	videoCodec := "h264"
-	if taterPlaybackCanUseHDRHEVC(caps) && len(hdrFormats) > 0 {
+	if hasFixedOutput {
+		switch {
+		case fixedOutputRange == "hdr10":
+			videoCodec = "hevc"
+		case selectedProfile.MaxWidth > 1920 && taterPlaybackCanUseTubeTVHEVC(caps):
+			// Apple TV requires HEVC for a practical 4K HLS output even when the
+			// connected display is SDR.
+			videoCodec = "hevc"
+		}
+	} else if taterPlaybackCanUseHDRHEVC(caps) && len(hdrFormats) > 0 {
 		// A Tube TV session can cross from SDR into HDR after it starts. Keep the
 		// codec stable for the whole session so tvOS never has to switch from AVC
 		// to HEVC at a program or break boundary.
 		videoCodec = "hevc"
 	}
 	outputRange, toneMapped := taterTVPlaybackOutputRange(source, hdrFormats)
-	if videoCodec != "hevc" && sourceRange != "sdr" {
+	if hasFixedOutput {
+		outputRange = fixedOutputRange
+		toneMapped = sourceRange != "sdr" && outputRange == "sdr"
+	} else if videoCodec != "hevc" && sourceRange != "sdr" {
 		outputRange = "sdr"
 		toneMapped = true
 	}
 
 	// Tube TV normalizes every program, commercial and bumper to one stable
 	// audio layout for the lifetime of the HLS session. tvOS can request AAC
-	// 5.1 when both the current program and configured output are multichannel;
-	// older players keep the established stereo contract.
+	// 5.1 when the configured output is multichannel. Capability-v6 sessions do
+	// not base that choice on whichever program happened to be on air when the
+	// channel opened; doing so could make the layout change between sessions.
 	outputAudioChannels := taterPlaybackTranscodeAudioChannels(caps, source.AudioChannels)
+	if hasFixedOutput && caps.MaxAudioChannels >= 6 {
+		outputAudioChannels = 6
+	}
 	if outputAudioChannels != 6 {
 		outputAudioChannels = 2
 	}
@@ -413,19 +433,26 @@ func buildTaterTVPlaybackPlan(req taterPlaybackSessionRequest, source taterPlayb
 		ToneMapped:          toneMapped,
 		SelectedAudioTrack:  selectedAudioTrack,
 		OutputAudioChannels: outputAudioChannels,
+		OutputFrameRate:     fixedFrameRateValue,
 		Source:              source,
 	}
 	if sourceRange != "sdr" {
 		plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, toneMapped) + plan.QualityLabel
 	}
-	if toneMapped {
+	if hasFixedOutput {
+		plan.Reason = "Tube TV is normalized to one display mode so programs and breaks transition smoothly."
+	} else if toneMapped {
 		plan.Reason = "The current Tube TV picture is converted to SDR for this display while the channel remains continuous."
 	} else if outputRange != "sdr" {
 		plan.Reason = "The current Tube TV picture is preserved as Apple-compatible HEVC HDR."
 	}
-	plan.OutputWidth, plan.OutputHeight = taterPlaybackOutputDimensions(
-		source.Width, source.Height, selectedProfile.MaxWidth, selectedProfile.MaxHeight,
-	)
+	if hasFixedOutput {
+		plan.OutputWidth, plan.OutputHeight = selectedProfile.MaxWidth, selectedProfile.MaxHeight
+	} else {
+		plan.OutputWidth, plan.OutputHeight = taterPlaybackOutputDimensions(
+			source.Width, source.Height, selectedProfile.MaxWidth, selectedProfile.MaxHeight,
+		)
+	}
 	plan.ResolutionLabel = taterPlaybackResolutionLabel(
 		source.Width, source.Height, plan.OutputWidth, plan.OutputHeight,
 	)
@@ -439,7 +466,64 @@ func buildTaterTVPlaybackPlan(req taterPlaybackSessionRequest, source taterPlayb
 		outputAudioChannels, "hls",
 	)
 	plan.StreamURL = annotateTaterTVHDRFormats(plan.StreamURL, hdrFormats)
+	if hasFixedOutput {
+		plan.StreamURL = annotateTaterTVFixedOutput(plan.StreamURL, fixedOutputRange, fixedFrameRate)
+		frameRateLabel := taterTVPlaybackFrameRateLabel(fixedFrameRateValue)
+		resolution := taterPlaybackResolutionName(plan.OutputWidth, plan.OutputHeight)
+		display := strings.TrimSpace(strings.Join([]string{resolution, strings.ToUpper(fixedOutputRange), frameRateLabel}, " "))
+		plan.QualityLabel = display + " • Video " + taterPlaybackVideoCodecLabel(videoCodec) +
+			" • Audio AAC" + taterPlaybackAudioChannelsSuffix(outputAudioChannels)
+	}
 	return plan
+}
+
+func taterPlaybackCanUseTubeTVHEVC(caps taterPlaybackCapabilities) bool {
+	return strings.EqualFold(strings.TrimSpace(caps.Platform), "tvos") &&
+		cleanTaterPreferredStreamContainer(caps.PreferredStreamContainer) == "hls" &&
+		taterCodecListContains(caps.VideoCodecs, "hevc")
+}
+
+func taterTVPlaybackFixedOutput(caps taterPlaybackCapabilities) (string, string, float64, bool) {
+	requestedRange := cleanTaterVideoRange(caps.TubeTVOutputVideoRange)
+	if caps.CapabilityVersion < 6 ||
+		!strings.EqualFold(strings.TrimSpace(caps.Platform), "tvos") ||
+		cleanTaterPreferredStreamContainer(caps.PreferredStreamContainer) != "hls" ||
+		(requestedRange != "sdr" && requestedRange != "hdr10") {
+		return "", "", 0, false
+	}
+
+	outputRange := "sdr"
+	if requestedRange == "hdr10" && taterPlaybackCanUseHDRHEVC(caps) &&
+		taterPlaybackRangeSupported(caps.VideoHDRFormats, "hdr10") &&
+		taterPlaybackRangeSupported(caps.DisplayHDRFormats, "hdr10") {
+		outputRange = "hdr10"
+	}
+	frameRate, frameRateValue := normalizeTaterTVOutputFrameRate(caps.TubeTVOutputFrameRate)
+	return outputRange, frameRate, frameRateValue, true
+}
+
+func normalizeTaterTVOutputFrameRate(value float64) (string, float64) {
+	switch {
+	case value >= 59 && value <= 61:
+		return "60000/1001", 60000.0 / 1001.0
+	case value >= 49 && value <= 51:
+		return "50", 50
+	case value >= 29 && value <= 31:
+		return "30000/1001", 30000.0 / 1001.0
+	case value >= 23.5 && value <= 24.5:
+		return "24000/1001", 24000.0 / 1001.0
+	default:
+		// Apple TV normally renders at 59.94/60 Hz. Use that safe default if a
+		// capability-v6 client requests a fixed Tube TV mode without a usable rate.
+		return "60000/1001", 60000.0 / 1001.0
+	}
+}
+
+func taterTVPlaybackFrameRateLabel(value float64) string {
+	if value <= 0 {
+		return ""
+	}
+	return strconv.FormatFloat(value, 'f', 2, 64) + " fps"
 }
 
 func taterPlaybackVideoCodecLabel(codec string) string {
@@ -575,6 +659,24 @@ func annotateTaterTVHDRFormats(rawURL string, formats []string) string {
 	query.Del("tater_hdr_formats")
 	if len(formats) > 0 {
 		query.Set("tater_hdr_formats", strings.Join(formats, ","))
+	}
+	u.RawQuery = query.Encode()
+	return u.String()
+}
+
+func annotateTaterTVFixedOutput(rawURL, videoRange, frameRate string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return rawURL
+	}
+	query := u.Query()
+	query.Del("tater_tv_output_range")
+	query.Del("tater_tv_output_fps")
+	if videoRange = cleanTaterVideoRange(videoRange); videoRange == "sdr" || videoRange == "hdr10" {
+		query.Set("tater_tv_output_range", videoRange)
+	}
+	if frameRate != "" {
+		query.Set("tater_tv_output_fps", frameRate)
 	}
 	u.RawQuery = query.Encode()
 	return u.String()
@@ -941,7 +1043,7 @@ func taterPlaybackPlannedURL(rawURL, mode, profile, videoCodec, audioCodec strin
 		return rawURL
 	}
 	query := u.Query()
-	for _, key := range []string{"direct", "transcode", "profile", "codec", "audio_codec", "start", "tater_audio_track", "tater_audio_channels", "tater_tone_map", "tater_strip_dolby_vision", "tater_video_codec", "tater_source_video_range", "tater_output_video_range", "tater_output_container", "tater_source_width", "tater_source_height", "tater_output_width", "tater_output_height", "tater_hdr_formats"} {
+	for _, key := range []string{"direct", "transcode", "profile", "codec", "audio_codec", "start", "tater_audio_track", "tater_audio_channels", "tater_tone_map", "tater_strip_dolby_vision", "tater_video_codec", "tater_source_video_range", "tater_output_video_range", "tater_output_container", "tater_source_width", "tater_source_height", "tater_output_width", "tater_output_height", "tater_hdr_formats", "tater_tv_output_range", "tater_tv_output_fps"} {
 		query.Del(key)
 	}
 	switch mode {

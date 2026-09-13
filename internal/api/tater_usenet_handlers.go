@@ -816,7 +816,7 @@ func taterLocalDiscoverDefinitions() []taterLocalDiscoverDefinition {
 
 func taterLocalDiscoverGenres() []taterLocalDiscoverGenre {
 	return []taterLocalDiscoverGenre{
-		{ID: "animation", Title: "Animation & Cartoons", Keywords: []string{"animation", "animated", "cartoon", "cartoons", "looney", "tom and jerry", "disney", "pixar"}},
+		{ID: "animation", Title: "Animation & Cartoons", Keywords: []string{"animation", "animated", "anime", "cartoon", "cartoons", "looney", "tom and jerry", "disney", "pixar"}},
 		{ID: "action", Title: "Action", Keywords: []string{"action", "mission", "martial", "kung fu", "explosion", "commando", "rampage"}},
 		{ID: "comedy", Title: "Comedy", Keywords: []string{"comedy", "stand up", "standup", "funny", "sitcom"}},
 		{ID: "horror", Title: "Horror", Keywords: []string{"horror", "haunting", "ghost", "zombie", "vampire", "frankenstein", "dracula", "scream", "slasher", "terror", "evil dead", "halloween"}},
