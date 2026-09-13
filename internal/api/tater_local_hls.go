@@ -32,11 +32,13 @@ const (
 	taterLocalHLSReadRate        = "1.02"
 	taterLocalHLSFirstWait       = 35 * time.Second
 	taterLocalHLSIdleTimeout     = 5 * time.Minute
+	taterLocalHLSSupersededTTL   = 2 * time.Minute
 )
 
 type taterLocalHLSManager struct {
-	mu       sync.Mutex
-	sessions map[string]*taterLocalHLSSession
+	mu         sync.Mutex
+	sessions   map[string]*taterLocalHLSSession
+	superseded map[string]time.Time
 }
 
 type taterLocalHLSSession struct {
@@ -171,6 +173,9 @@ func (h *LocalStreamHandler) prepareLocalHLSSession(
 	}
 
 	key := taterLocalHLSKey(r, player.ID, path)
+	if globalTaterLocalHLS.isSuperseded(key) {
+		return nil, fmt.Errorf("HLS playback generation was superseded")
+	}
 	if existing := globalTaterLocalHLS.get(key); existing != nil {
 		if !existing.finished() || (existing.failure() == nil && existing.playlistReady()) {
 			existing.touch()
@@ -525,6 +530,9 @@ func (m *taterLocalHLSManager) get(id string) *taterLocalHLSSession {
 
 func (m *taterLocalHLSManager) addOrReplace(id string, session *taterLocalHLSSession) (*taterLocalHLSSession, bool) {
 	m.mu.Lock()
+	if m.superseded == nil {
+		m.superseded = map[string]time.Time{}
+	}
 	if existing := m.sessions[id]; existing != nil {
 		m.mu.Unlock()
 		return existing, false
@@ -534,6 +542,7 @@ func (m *taterLocalHLSManager) addOrReplace(id string, session *taterLocalHLSSes
 		for existingID, existing := range m.sessions {
 			if existing != nil && existing.slot == session.slot {
 				delete(m.sessions, existingID)
+				m.superseded[existingID] = time.Now().Add(taterLocalHLSSupersededTTL)
 				replaced = append(replaced, existing)
 			}
 		}
@@ -549,6 +558,19 @@ func (m *taterLocalHLSManager) addOrReplace(id string, session *taterLocalHLSSes
 		existing.stopAndCleanup()
 	}
 	return session, true
+}
+
+func (m *taterLocalHLSManager) isSuperseded(id string) bool {
+	now := time.Now()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for supersededID, expiresAt := range m.superseded {
+		if !expiresAt.After(now) {
+			delete(m.superseded, supersededID)
+		}
+	}
+	expiresAt, found := m.superseded[id]
+	return found && expiresAt.After(now)
 }
 
 func (m *taterLocalHLSManager) removeIfSame(id string, session *taterLocalHLSSession) {

@@ -106,6 +106,9 @@ func TestTaterLocalHLSManagerReplacesSupersededSeekSession(t *testing.T) {
 	if manager.get(oldSession.id) != nil {
 		t.Fatal("superseded HLS session remains registered")
 	}
+	if !manager.isSuperseded(oldSession.id) {
+		t.Fatal("superseded HLS generation can be recreated by a late playlist request")
+	}
 	if manager.get(newSession.id) != newSession {
 		t.Fatal("replacement HLS session is not registered")
 	}
