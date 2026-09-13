@@ -39,6 +39,8 @@ const (
 
 var errTaterTVHLSIdle = errors.New("Tube TV HLS session idle")
 
+var taterTVFFmpegFilterCache sync.Map
+
 type taterTVHLSManager struct {
 	mu       sync.Mutex
 	sessions map[string]*taterTVHLSSession
@@ -62,6 +64,8 @@ type taterTVHLSSession struct {
 	audioChannels     int
 	clientLogoOverlay bool
 	hdrFormats        []string
+	outputVideoRange  string
+	outputFrameRate   string
 	channel           taterTVChannel
 	guideStartedAt    time.Time
 	sessionStartedAt  time.Time
@@ -150,7 +154,11 @@ func (h *TaterTVStreamHandler) serveHLSSegment(w http.ResponseWriter, r *http.Re
 	requestedAccel := h.requestedHLSAccel(cfg, r)
 	clientLogoOverlay := taterTVClientLogoOverlayRequested(r)
 	audioChannels := taterTVRequestedHLSAudioChannels(r)
-	key := taterTVHLSKey(number, sessionID, profileID, requestedAccel, requestedTranscodeCodec(r), clientLogoOverlay, taterTVRequestedHDRFormats(r), audioChannels)
+	key := taterTVHLSKey(
+		number, sessionID, profileID, requestedAccel, requestedTranscodeCodec(r),
+		clientLogoOverlay, taterTVRequestedHDRFormats(r), audioChannels,
+		taterTVRequestedOutputVideoRange(r), taterTVRequestedOutputFrameRate(r),
+	)
 	session := globalTaterTVHLS.get(key)
 	if session == nil {
 		http.Error(w, "HLS session not found", http.StatusNotFound)
@@ -217,6 +225,8 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 	clientLogoOverlay := taterTVClientLogoOverlayRequested(r)
 	hdrFormats := taterTVRequestedHDRFormats(r)
 	audioChannels := taterTVRequestedHLSAudioChannels(r)
+	outputVideoRange := taterTVRequestedOutputVideoRange(r)
+	outputFrameRate := taterTVRequestedOutputFrameRate(r)
 	transcoder := &StreamHandler{configGetter: h.configGetter, streamTracker: h.streamTracker}
 	accel, selectedHardwareDevice, videoCodecPreference := transcoder.selectTranscodeAccelerationAndCodec(r.Context(), ffmpegPath, cfg.Transcoding, profile, requestedAccel, requestedCodec)
 	if requestedCodec == transcodeCodecHEVC && videoCodecPreference != transcodeCodecHEVC {
@@ -226,13 +236,31 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 			accel, selectedHardwareDevice = transcoder.selectTranscodeAcceleration(r.Context(), ffmpegPath, cfg.Transcoding, profile, requestedAccel)
 		}
 	}
+	if outputVideoRange == "hdr10" && normalizeTranscodeCodec(videoCodecPreference) != transcodeCodecHEVC {
+		// A hardware or codec fallback must never label an 8-bit AVC stream as
+		// HDR10. Keep the new session stable, but safely normalize it to SDR.
+		outputVideoRange = "sdr"
+	}
+	if outputVideoRange == "hdr10" && !taterTVFFmpegHasFilter(r.Context(), ffmpegPath, "zscale") {
+		// A mixed channel will eventually contain SDR artwork, commercials, or
+		// bumpers. If this FFmpeg cannot place those pictures safely inside an
+		// HDR10 signal, choose one reliable SDR session up front rather than fail
+		// later at an item boundary.
+		slog.WarnContext(r.Context(), "Tube TV HDR10 normalization unavailable; using fixed SDR output",
+			"channel", channel.Number,
+			"ffmpeg", ffmpegPath)
+		outputVideoRange = "sdr"
+	}
 	transcodeCfg := cfg.Transcoding
 	if selectedHardwareDevice != "" {
 		transcodeCfg.HardwareDevice = selectedHardwareDevice
 	}
 
 	publicID := taterTVHLSPublicID(r, guide.StartedAt)
-	key := taterTVHLSKey(channel.Number, publicID, profileID, requestedAccel, videoCodecPreference, clientLogoOverlay, hdrFormats, audioChannels)
+	key := taterTVHLSKey(
+		channel.Number, publicID, profileID, requestedAccel, videoCodecPreference,
+		clientLogoOverlay, hdrFormats, audioChannels, outputVideoRange, outputFrameRate,
+	)
 	session := globalTaterTVHLS.get(key)
 	if session != nil {
 		if session.finished() {
@@ -274,6 +302,8 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 		audioChannels:     audioChannels,
 		clientLogoOverlay: clientLogoOverlay,
 		hdrFormats:        hdrFormats,
+		outputVideoRange:  outputVideoRange,
+		outputFrameRate:   outputFrameRate,
 		channel:           channel,
 		guideStartedAt:    guide.StartedAt,
 		sessionStartedAt:  time.Now(),
@@ -359,6 +389,9 @@ func (h *TaterTVStreamHandler) recordHLSPlayback(r *http.Request, session *tater
 		AudioMode:        "transcode",
 		AudioCodec:       "aac",
 		AudioChannels:    session.audioChannels,
+		OutputWidth:      session.profile.MaxWidth,
+		OutputHeight:     session.profile.MaxHeight,
+		OutputVideoRange: session.outputVideoRange,
 		HardwareActive:   session.effectiveAccel != "" && session.effectiveAccel != "none",
 	})
 }
@@ -490,6 +523,7 @@ func (s *taterTVHLSSession) transcodeProgramSegments(ctx context.Context, items 
 			timelineOffset, taterTVLogoForItem(item, logoFile),
 			s.channel.LogoPosition, playlistPath, segmentPattern,
 			sourceRange, outputRange, toneMapFilter, s.audioChannels,
+			s.outputFrameRate,
 		)
 		var stderr limitedBuffer
 		cmd := exec.CommandContext(ctx, s.ffmpegPath, args...)
@@ -511,6 +545,7 @@ func (s *taterTVHLSSession) transcodeProgramSegments(ctx context.Context, items 
 			"video_codec", s.videoCodec,
 			"audio_codec", "aac",
 			"audio_channels", s.audioChannels,
+			"output_frame_rate", s.outputFrameRate,
 			"source_video_range", sourceRange,
 			"output_video_range", outputRange)
 
@@ -579,6 +614,9 @@ func (s *taterTVHLSSession) itemVideoRangePlan(ctx context.Context, item taterTV
 	if sourceRange == "" {
 		sourceRange = "sdr"
 	}
+	if targetRange := cleanTaterVideoRange(s.outputVideoRange); targetRange != "" {
+		return s.fixedItemVideoRangePlan(ctx, info, sourceRange, targetRange)
+	}
 	outputRange := "sdr"
 	toneMapped := sourceRange != "sdr"
 	if normalizeTranscodeCodec(s.preferredCodec) == transcodeCodecHEVC {
@@ -592,6 +630,76 @@ func (s *taterTVHLSSession) itemVideoRangePlan(ctx context.Context, item taterTV
 		return sourceRange, "sdr", "", fmt.Errorf("tone mapping is unavailable for %s", sourceRange)
 	}
 	return sourceRange, "sdr", implementation, nil
+}
+
+func (s *taterTVHLSSession) fixedItemVideoRangePlan(
+	ctx context.Context,
+	info taterPlaybackMediaInfo,
+	sourceRange, targetRange string,
+) (string, string, string, error) {
+	if targetRange == "sdr" {
+		if sourceRange == "sdr" {
+			return sourceRange, targetRange, "", nil
+		}
+		implementation := taterToneMapFilterForFFmpeg(ctx, s.ffmpegPath, sourceRange)
+		if implementation == "" {
+			return sourceRange, targetRange, "", fmt.Errorf("tone mapping is unavailable for %s", sourceRange)
+		}
+		return sourceRange, targetRange, implementation, nil
+	}
+
+	if targetRange != "hdr10" {
+		return sourceRange, "sdr", "", fmt.Errorf("unsupported fixed Tube TV range %s", targetRange)
+	}
+
+	switch sourceRange {
+	case "hdr10", "hdr10plus":
+		return sourceRange, targetRange, "", nil
+	case "dolby_vision":
+		if info.DolbyVisionProfile == 7 ||
+			(info.DolbyVisionProfile == 8 && info.DolbyVisionCompatibilityID == 1) {
+			return sourceRange, targetRange, "", nil
+		}
+	}
+
+	if !taterTVFFmpegHasFilter(ctx, s.ffmpegPath, "zscale") {
+		return sourceRange, targetRange, "", fmt.Errorf("HDR10 normalization requires FFmpeg zscale")
+	}
+	switch sourceRange {
+	case "sdr":
+		return sourceRange, targetRange, "sdr_to_hdr10_zscale", nil
+	case "hlg":
+		return sourceRange, targetRange, "hlg_to_hdr10_zscale", nil
+	case "dolby_vision":
+		if info.DolbyVisionProfile == 8 && info.DolbyVisionCompatibilityID == 4 {
+			return sourceRange, targetRange, "hlg_to_hdr10_zscale", nil
+		}
+		implementation := taterToneMapFilterForFFmpeg(ctx, s.ffmpegPath, sourceRange)
+		if implementation == "" {
+			return sourceRange, targetRange, "", fmt.Errorf("Dolby Vision normalization requires tone mapping support")
+		}
+		return sourceRange, targetRange, implementation + "_to_hdr10_zscale", nil
+	default:
+		return sourceRange, targetRange, "sdr_to_hdr10_zscale", nil
+	}
+}
+
+func taterTVFFmpegHasFilter(parent context.Context, ffmpegPath, filterName string) bool {
+	ffmpegPath = strings.TrimSpace(ffmpegPath)
+	filterName = strings.ToLower(strings.TrimSpace(filterName))
+	if ffmpegPath == "" || filterName == "" {
+		return false
+	}
+	key := ffmpegPath + "|" + filterName
+	if cached, ok := taterTVFFmpegFilterCache.Load(key); ok {
+		return cached.(bool)
+	}
+	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, ffmpegPath, "-hide_banner", "-filters").CombinedOutput()
+	found := err == nil && strings.Contains(strings.ToLower(string(out)), " "+filterName+" ")
+	taterTVFFmpegFilterCache.Store(key, found)
+	return found
 }
 
 func (s *taterTVHLSSession) monitorHLSItem(ctx context.Context, cmd *exec.Cmd, done <-chan error, itemDirRel, playlistPath string, item taterTVStreamItem) error {
@@ -682,6 +790,12 @@ func (s *taterTVHLSSession) segmentURI(relPath, playerToken string) string {
 	}
 	if len(s.hdrFormats) > 0 {
 		q.Set("tater_hdr_formats", strings.Join(s.hdrFormats, ","))
+	}
+	if s.outputVideoRange != "" {
+		q.Set("tater_tv_output_range", s.outputVideoRange)
+	}
+	if s.outputFrameRate != "" {
+		q.Set("tater_tv_output_fps", s.outputFrameRate)
 	}
 	return u + "?" + q.Encode()
 }
@@ -894,11 +1008,11 @@ func buildTaterTVChannelHLSArgsWithTimelineAndRange(cfg config.TranscodingConfig
 		cfg, profile, accel, preferredCodec, inputPath, startSeconds,
 		durationSeconds, timelineOffset, logoFile, logoPosition,
 		outputPlaylist, segmentPattern, sourceVideoRange, outputVideoRange,
-		toneMapFilter, 2,
+		toneMapFilter, 2, "",
 	)
 }
 
-func buildTaterTVChannelHLSArgsWithTimelineRangeAndAudio(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, inputPath string, startSeconds, durationSeconds, timelineOffset float64, logoFile, logoPosition, outputPlaylist, segmentPattern, sourceVideoRange, outputVideoRange, toneMapFilter string, audioChannels int) []string {
+func buildTaterTVChannelHLSArgsWithTimelineRangeAndAudio(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, inputPath string, startSeconds, durationSeconds, timelineOffset float64, logoFile, logoPosition, outputPlaylist, segmentPattern, sourceVideoRange, outputVideoRange, toneMapFilter string, audioChannels int, outputFrameRate string) []string {
 	audioChannels = normalizeTaterTVHLSAudioChannels(audioChannels)
 	audioBitrate, audioChannels := taterAACTranscodeSettings(profile.AudioBitrate, audioChannels)
 	args := []string{
@@ -926,13 +1040,13 @@ func buildTaterTVChannelHLSArgsWithTimelineRangeAndAudio(cfg config.TranscodingC
 		args = append(args, "-t", strconv.FormatFloat(durationSeconds, 'f', 3, 64))
 	}
 	videoCodec, filters := transcodeVideoSettingsForCodec(accel, cfg.HardwareDevice, profile, preferredCodec)
-	if cleanTaterVideoRange(sourceVideoRange) != "sdr" && cleanTaterVideoRange(outputVideoRange) == "sdr" {
-		filters = appendTaterToneMapFilter(filters, sourceVideoRange, "sdr", toneMapFilter)
-	}
+	filters = appendTaterTVRangeConversionFilter(
+		filters, sourceVideoRange, outputVideoRange, toneMapFilter,
+	)
 	if normalizeTranscodeCodec(preferredCodec) == transcodeCodecHEVC {
 		filters = taterVideoFiltersForHEVCMain10(filters, videoCodec)
 	}
-	filters = taterTVHLSNormalizeFilters(filters, profile)
+	filters = taterTVHLSNormalizeFilters(filters, profile, outputFrameRate)
 	if logoFile != "" {
 		args = append(args,
 			"-filter_complex", taterTVChannelLogoFilter(filters, profile, logoPosition),
@@ -963,9 +1077,12 @@ func buildTaterTVChannelHLSArgsWithTimelineRangeAndAudio(cfg config.TranscodingC
 	}
 	args = append(args,
 		"-flags:v", "+cgop",
-		"-g", "60",
+		"-g", strconv.Itoa(taterTVHLSGOPSize(outputFrameRate)),
 		"-bf", "0",
 	)
+	if outputFrameRate != "" {
+		args = append(args, "-fps_mode", "cfr")
+	}
 	if videoCodec == "h264_qsv" || videoCodec == "hevc_qsv" {
 		args = append(args, "-forced_idr", "1")
 	}
@@ -1014,24 +1131,88 @@ func buildTaterTVChannelHLSArgsWithTimelineRangeAndAudio(cfg config.TranscodingC
 	return args
 }
 
-func taterTVHLSNormalizeFilters(filters string, profile transcodeProfile) string {
+func appendTaterTVRangeConversionFilter(filters, sourceRange, targetRange, implementation string) string {
+	sourceRange = cleanTaterVideoRange(sourceRange)
+	targetRange = cleanTaterVideoRange(targetRange)
+	implementation = strings.ToLower(strings.TrimSpace(implementation))
+	if targetRange == "sdr" {
+		return appendTaterToneMapFilter(filters, sourceRange, targetRange, implementation)
+	}
+	if targetRange != "hdr10" || implementation == "" {
+		return filters
+	}
+
+	// SDR material remains visually SDR (nominal 100-nit white), but is encoded
+	// inside the fixed BT.2020/PQ Tube TV signal. This keeps the television in
+	// HDR10 mode without stretching SDR contrast or changing HDMI modes.
+	sdrToHDR10 := "zscale=pin=bt709:tin=bt709:min=bt709:rin=tv:" +
+		"p=bt2020:t=linear:m=bt2020nc:r=tv:npl=100," +
+		"format=gbrpf32le,zscale=p=bt2020:t=smpte2084:m=bt2020nc:r=tv:npl=100," +
+		"format=yuv420p10le"
+	hlgToHDR10 := "zscale=pin=bt2020:tin=arib-std-b67:min=bt2020nc:rin=tv:" +
+		"p=bt2020:t=linear:m=bt2020nc:r=tv:npl=1000," +
+		"format=gbrpf32le,zscale=p=bt2020:t=smpte2084:m=bt2020nc:r=tv:npl=1000," +
+		"format=yuv420p10le"
+
+	conversion := ""
+	switch implementation {
+	case "sdr_to_hdr10_zscale":
+		conversion = sdrToHDR10
+	case "hlg_to_hdr10_zscale":
+		conversion = hlgToHDR10
+	case "tonemapx_to_hdr10_zscale", "zscale_to_hdr10_zscale":
+		// Profile-5 or otherwise non-compatible Dolby Vision is first reduced to
+		// a safe SDR picture, then placed in the session's fixed HDR10 container.
+		toneMapImplementation := strings.TrimSuffix(implementation, "_to_hdr10_zscale")
+		conversion = appendTaterToneMapFilter("", sourceRange, "sdr", toneMapImplementation)
+		if conversion != "" {
+			conversion += "," + sdrToHDR10
+		}
+	}
+	if conversion == "" {
+		return filters
+	}
+	if strings.TrimSpace(filters) == "" {
+		return conversion
+	}
+	return conversion + "," + filters
+}
+
+func taterTVHLSNormalizeFilters(filters string, profile transcodeProfile, outputFrameRate string) string {
 	preFilters, postFilters := splitTaterTVOverlayFilters(filters)
-	// Keep the source cadence for every scheduled item. Tube TV marks item
-	// boundaries with EXT-X-DISCONTINUITY and supplies a fresh fMP4 init map, so
-	// Apple clients can follow a frame-rate change between a program, commercial,
-	// and bumper. Forcing the whole channel to 30000/1001 introduced visible 3:2
-	// judder in the common case of 24000/1001 film content.
 	normalize := fmt.Sprintf(
 		"pad=w=%d:h=%d:x=(ow-iw)/2:y=(oh-ih)/2:color=black,setsar=1",
 		profile.MaxWidth,
 		profile.MaxHeight,
 	)
+	if outputFrameRate != "" {
+		// Capability-v6 Apple clients request a single channel cadence. Repeating
+		// frames here is deliberate: it avoids an HDMI refresh-rate switch at each
+		// program, commercial, or bumper boundary.
+		normalize += ",fps=" + outputFrameRate
+	}
 	if strings.TrimSpace(preFilters) == "" {
 		preFilters = normalize
 	} else {
 		preFilters += "," + normalize
 	}
 	return preFilters + postFilters
+}
+
+func taterTVHLSGOPSize(outputFrameRate string) int {
+	rate, err := strconv.ParseFloat(strings.TrimSpace(outputFrameRate), 64)
+	if strings.Contains(outputFrameRate, "/") {
+		parts := strings.SplitN(outputFrameRate, "/", 2)
+		numerator, numeratorErr := strconv.ParseFloat(parts[0], 64)
+		denominator, denominatorErr := strconv.ParseFloat(parts[1], 64)
+		if numeratorErr == nil && denominatorErr == nil && denominator > 0 {
+			rate, err = numerator/denominator, nil
+		}
+	}
+	if err != nil || rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return 60
+	}
+	return max(1, int(math.Round(rate*float64(taterTVHLSSegmentSeconds))))
 }
 
 func taterTVHLSRoot(cfg *config.Config) string {
@@ -1056,7 +1237,7 @@ func taterTVHLSPublicID(r *http.Request, guideStartedAt time.Time) string {
 	return taterTVSafeName(session, "live")
 }
 
-func taterTVHLSKey(number, sessionID, profileID, requestedAccel, preferredCodec string, clientLogoOverlay bool, hdrFormats []string, audioChannels int) string {
+func taterTVHLSKey(number, sessionID, profileID, requestedAccel, preferredCodec string, clientLogoOverlay bool, hdrFormats []string, audioChannels int, outputVideoRange, outputFrameRate string) string {
 	logoMode := "server-logo"
 	if clientLogoOverlay {
 		logoMode = "client-logo"
@@ -1066,6 +1247,8 @@ func taterTVHLSKey(number, sessionID, profileID, requestedAccel, preferredCodec 
 		normalizeTranscodeCodec(preferredCodec), logoMode,
 		strings.Join(normalizeTaterTVHDRFormats(hdrFormats), ","),
 		strconv.Itoa(normalizeTaterTVHLSAudioChannels(audioChannels)),
+		taterTVNormalizeRequestedOutputVideoRange(outputVideoRange),
+		taterTVNormalizeRequestedOutputFrameRate(outputFrameRate),
 	}, "|")
 	sum := sha1.Sum([]byte(raw))
 	return number + "-" + hex.EncodeToString(sum[:])[:16]
@@ -1087,6 +1270,38 @@ func taterTVRequestedHDRFormats(r *http.Request) []string {
 		return nil
 	}
 	return normalizeTaterTVHDRFormats(strings.Split(r.URL.Query().Get("tater_hdr_formats"), ","))
+}
+
+func taterTVRequestedOutputVideoRange(r *http.Request) string {
+	if r == nil || r.URL == nil {
+		return ""
+	}
+	return taterTVNormalizeRequestedOutputVideoRange(r.URL.Query().Get("tater_tv_output_range"))
+}
+
+func taterTVNormalizeRequestedOutputVideoRange(value string) string {
+	value = cleanTaterVideoRange(value)
+	if value == "sdr" || value == "hdr10" {
+		return value
+	}
+	return ""
+}
+
+func taterTVRequestedOutputFrameRate(r *http.Request) string {
+	if r == nil || r.URL == nil {
+		return ""
+	}
+	return taterTVNormalizeRequestedOutputFrameRate(r.URL.Query().Get("tater_tv_output_fps"))
+}
+
+func taterTVNormalizeRequestedOutputFrameRate(value string) string {
+	value = strings.TrimSpace(value)
+	switch value {
+	case "60000/1001", "50", "30000/1001", "24000/1001":
+		return value
+	default:
+		return ""
+	}
 }
 
 func normalizeTaterTVHDRFormats(values []string) []string {
