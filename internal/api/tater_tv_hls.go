@@ -26,10 +26,11 @@ import (
 
 const (
 	taterTVHLSSegmentSeconds    = 2
+	taterTVHLSInitialSegments   = 6
 	taterTVHLSLiveStartSegments = 2
 	taterTVHLSRunWindow         = 12 * time.Hour
 	taterTVHLSPlaylistLimit     = 12
-	taterTVHLSFirstWait         = 10 * time.Second
+	taterTVHLSFirstWait         = 30 * time.Second
 	taterTVHLSIdleTimeout       = 15 * time.Second
 	// Leave slightly more than one 48 kHz AAC/video frame between independently
 	// muxed items so encoder padding cannot make the next DTS overlap the last.
@@ -108,10 +109,18 @@ func (h *TaterTVStreamHandler) serveHLSPlaylist(w http.ResponseWriter, r *http.R
 	}
 	deadline := time.Now().Add(taterTVHLSFirstWait)
 	for time.Now().Before(deadline) {
-		if session.segmentCount() > 0 || session.finished() {
+		if taterTVHLSInitialPlaylistReady(session) || session.finished() {
 			break
 		}
+		// The playlist request is still active while the initial live window is
+		// being prepared, so do not let the session's idle monitor stop FFmpeg.
+		session.touch()
 		time.Sleep(200 * time.Millisecond)
+	}
+	if !taterTVHLSInitialPlaylistReady(session) {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "Tube TV stream is still preparing", http.StatusServiceUnavailable)
+		return
 	}
 
 	playlist := session.playlist(playerToken)
@@ -119,6 +128,10 @@ func (h *TaterTVStreamHandler) serveHLSPlaylist(w http.ResponseWriter, r *http.R
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(playlist))
+}
+
+func taterTVHLSInitialPlaylistReady(session *taterTVHLSSession) bool {
+	return session != nil && session.segmentCount() >= taterTVHLSInitialSegments
 }
 
 func (h *TaterTVStreamHandler) serveHLSSegment(w http.ResponseWriter, r *http.Request) {
@@ -874,7 +887,10 @@ func buildTaterTVChannelHLSArgsWithTimelineAndRange(cfg config.TranscodingConfig
 	args = append(args, transcodeHardwareInitArgs(cfg, accel)...)
 	args = append(args,
 		"-readrate", "1",
-		"-readrate_initial_burst", strconv.Itoa(taterTVHLSSegmentSeconds),
+		// Apple requires at least six segments in a live playlist. Allow FFmpeg
+		// to prepare that initial window without real-time input throttling, then
+		// return to real-time pacing for the rest of the channel.
+		"-readrate_initial_burst", strconv.Itoa(taterTVHLSInitialSegments*taterTVHLSSegmentSeconds),
 	)
 	if startSeconds > 0 {
 		args = append(args, "-ss", strconv.FormatFloat(startSeconds, 'f', 3, 64))

@@ -2457,7 +2457,7 @@ func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
 
 	for _, expected := range []string{
 		"-readrate 1",
-		"-readrate_initial_burst 2",
+		"-readrate_initial_burst 12",
 		"-filter_complex",
 		"overlay=x=W-w-",
 		"-af aresample=async=1:first_pts=0",
@@ -2489,6 +2489,21 @@ func TestTaterTVHLSArgsNormalizeAudioAndSegments(t *testing.T) {
 	}
 	if strings.Contains(joined, "fps=") || strings.Contains(joined, " -r ") {
 		t.Fatalf("HLS args must preserve each item's native frame cadence: %s", joined)
+	}
+}
+
+func TestTaterTVHLSInitialPlaylistRequiresSixSegments(t *testing.T) {
+	session := &taterTVHLSSession{}
+	for range taterTVHLSInitialSegments - 1 {
+		session.segments = append(session.segments, taterTVHLSSegment{Duration: 2})
+	}
+	if taterTVHLSInitialPlaylistReady(session) {
+		t.Fatal("a live HLS playlist must not be served with fewer than six segments")
+	}
+
+	session.segments = append(session.segments, taterTVHLSSegment{Duration: 2})
+	if !taterTVHLSInitialPlaylistReady(session) {
+		t.Fatal("a six-segment live HLS window should be ready for Apple clients")
 	}
 }
 
