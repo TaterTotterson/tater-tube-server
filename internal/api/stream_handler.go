@@ -1541,6 +1541,13 @@ func buildFFmpegVideoOnlyArgsWithToneMapFilterAudioTrackContainerAndRange(cfg co
 			args = append(args, "-ss", strconv.FormatFloat(startSeconds, 'f', 3, 64))
 		}
 		args = append(args, "-i", inputPath)
+		if startSeconds > 0 {
+			// The fast input seek can retain video keyframe pre-roll while copied
+			// audio begins at the requested timestamp. A zero-length output seek
+			// discards that pre-roll on the normalized input timeline, keeping the
+			// newly encoded video aligned with the untouched audio track.
+			args = append(args, "-ss", "0")
+		}
 	} else {
 		args = append(args, "-i", "pipe:0")
 	}
