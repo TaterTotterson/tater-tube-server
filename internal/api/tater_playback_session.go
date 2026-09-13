@@ -77,6 +77,7 @@ type taterPlaybackAudioTrack struct {
 
 type taterPlaybackMediaInfo struct {
 	Container                  string                    `json:"container,omitempty"`
+	DurationSeconds            float64                   `json:"duration_seconds,omitempty"`
 	VideoCodec                 string                    `json:"video_codec,omitempty"`
 	VideoProfile               string                    `json:"video_profile,omitempty"`
 	Width                      int                       `json:"width,omitempty"`
@@ -158,6 +159,7 @@ type taterFFprobePlaybackResult struct {
 	} `json:"streams"`
 	Format struct {
 		FormatName string `json:"format_name"`
+		Duration   string `json:"duration"`
 	} `json:"format"`
 }
 
@@ -672,6 +674,16 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 			audioCompatible = false
 		}
 	}
+	// Keep compatible HEVC video direct, but normalize E-AC-3 when an MKV must be
+	// repackaged as fragmented-MP4 HLS for tvOS. Long-running copied E-AC-3
+	// fMP4 sessions can accumulate audible delay in AVPlayer even while the
+	// source timestamps remain aligned. Audio-only conversion is inexpensive,
+	// preserves 5.1, and gives the HLS stream one continuous Apple-safe clock.
+	if strings.EqualFold(strings.TrimSpace(caps.Platform), "tvos") &&
+		preferredContainer == "hls" && requiresContainerChange &&
+		videoCodec == "hevc" && audioCodec == "eac3" && audioCompatible {
+		audioCompatible = false
+	}
 
 	plan := taterPlaybackSessionResponse{
 		StreamURL:           req.StreamURL,
@@ -1001,7 +1013,7 @@ func probeTaterPlaybackMedia(parent context.Context, cfg *config.Config, path st
 	defer cancel()
 	cmd := exec.CommandContext(ctx, ffprobePath,
 		"-v", "error",
-		"-show_entries", "format=format_name:stream=index,codec_type,codec_name,profile,width,height,channels,channel_layout,pix_fmt,color_space,color_transfer,color_primaries,bits_per_raw_sample,bit_rate:stream_tags=language,title:stream_disposition=default,comment,visual_impaired:stream_side_data=side_data_type,dv_profile,dv_level,rpu_present_flag,el_present_flag,bl_present_flag,dv_bl_signal_compatibility_id",
+		"-show_entries", "format=format_name,duration:stream=index,codec_type,codec_name,profile,width,height,channels,channel_layout,pix_fmt,color_space,color_transfer,color_primaries,bits_per_raw_sample,bit_rate:stream_tags=language,title:stream_disposition=default,comment,visual_impaired:stream_side_data=side_data_type,dv_profile,dv_level,rpu_present_flag,el_present_flag,bl_present_flag,dv_bl_signal_compatibility_id",
 		"-of", "json",
 		path,
 	)
@@ -1014,6 +1026,9 @@ func probeTaterPlaybackMedia(parent context.Context, cfg *config.Config, path st
 		return taterPlaybackMediaInfo{}, err
 	}
 	info := taterPlaybackMediaInfo{Container: cleanTaterContainerName(result.Format.FormatName)}
+	if duration, parseErr := strconv.ParseFloat(strings.TrimSpace(result.Format.Duration), 64); parseErr == nil && duration > 0 {
+		info.DurationSeconds = duration
+	}
 	audioIndex := 0
 	for _, stream := range result.Streams {
 		switch strings.ToLower(strings.TrimSpace(stream.CodecType)) {

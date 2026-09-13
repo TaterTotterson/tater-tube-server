@@ -1452,6 +1452,7 @@ func buildFFmpegAudioOnlyVideoArgsWithTrackContainerAndChannels(audioBitrate, in
 		"-b:a", audioBitrate,
 		"-ac", strconv.Itoa(audioChannels),
 		"-ar", "48000",
+		"-af", "aresample=48000:async=1:first_pts=0",
 		"-fflags", "+genpts",
 		"-f", outputFormat,
 		"pipe:1",

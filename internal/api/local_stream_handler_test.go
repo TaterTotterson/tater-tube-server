@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -25,7 +26,7 @@ func TestConvertTaterFFmpegArgsToHLSUsesSegmentedOutput(t *testing.T) {
 		t.Fatalf("expected progressive MPEG-TS output to be replaced: %s", joined)
 	}
 	for _, expected := range []string{
-		"-readrate 1 -readrate_initial_burst 8 -i /media/movie.mkv",
+		"-readrate 1.02 -readrate_initial_burst 24 -i /media/movie.mkv",
 		"-f hls",
 		"-hls_time 4",
 		"-hls_playlist_type event",
@@ -35,6 +36,29 @@ func TestConvertTaterFFmpegArgsToHLSUsesSegmentedOutput(t *testing.T) {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("expected %q in HLS args: %s", expected, joined)
 		}
+	}
+}
+
+func TestTaterLocalHLSPlaylistRequiresRequestedBuffer(t *testing.T) {
+	root := t.TempDir()
+	playlistPath := filepath.Join(root, "index.m3u8")
+	session := &taterLocalHLSSession{playlistPath: playlistPath}
+	playlist := "#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n"
+	for index := 0; index < taterLocalHLSInitialSegments-1; index++ {
+		playlist += "#EXTINF:4.000000,\nsegment-" + strconv.Itoa(index) + ".m4s\n"
+	}
+	if err := os.WriteFile(playlistPath, []byte(playlist), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if session.playlistBuffered(taterLocalHLSInitialSegments) {
+		t.Fatal("playlist should not be ready before the startup cushion is complete")
+	}
+	playlist += "#EXTINF:4.000000,\nsegment-final.m4s\n"
+	if err := os.WriteFile(playlistPath, []byte(playlist), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !session.playlistBuffered(taterLocalHLSInitialSegments) {
+		t.Fatal("playlist should be ready once the startup cushion is complete")
 	}
 }
 
