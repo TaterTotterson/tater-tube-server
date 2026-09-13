@@ -74,6 +74,43 @@ func TestTaterLocalHLSStartupSegmentsUsesShorterSeekRunway(t *testing.T) {
 	}
 }
 
+func TestTaterLocalHLSManagerReplacesSupersededSeekSession(t *testing.T) {
+	manager := &taterLocalHLSManager{sessions: map[string]*taterLocalHLSSession{}}
+	oldCanceled := make(chan struct{})
+	oldRoot := t.TempDir()
+	oldSession := &taterLocalHLSSession{
+		id:   "old-seek",
+		slot: "same-player-and-source",
+		root: oldRoot,
+		cancel: func() {
+			close(oldCanceled)
+		},
+	}
+	if _, created := manager.addOrReplace(oldSession.id, oldSession); !created {
+		t.Fatal("initial HLS session was not created")
+	}
+
+	newSession := &taterLocalHLSSession{
+		id:   "new-seek",
+		slot: oldSession.slot,
+		root: t.TempDir(),
+	}
+	if got, created := manager.addOrReplace(newSession.id, newSession); !created || got != newSession {
+		t.Fatal("replacement HLS session was not installed")
+	}
+	select {
+	case <-oldCanceled:
+	default:
+		t.Fatal("superseded HLS conversion was not canceled")
+	}
+	if manager.get(oldSession.id) != nil {
+		t.Fatal("superseded HLS session remains registered")
+	}
+	if manager.get(newSession.id) != newSession {
+		t.Fatal("replacement HLS session is not registered")
+	}
+}
+
 func TestConvertTaterFFmpegArgsToHLSUsesFragmentedMP4ForCopiedHEVC(t *testing.T) {
 	args := buildFFmpegRemuxArgs("/media/movie.mkv", 0, 0)
 	args = convertTaterFFmpegArgsToHLS(

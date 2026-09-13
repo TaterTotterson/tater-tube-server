@@ -41,6 +41,7 @@ type taterLocalHLSManager struct {
 
 type taterLocalHLSSession struct {
 	id           string
+	slot         string
 	playerID     string
 	playerToken  string
 	playlistURL  string
@@ -197,6 +198,7 @@ func (h *LocalStreamHandler) prepareLocalHLSSession(
 	ctx, cancel := context.WithCancel(context.Background())
 	session := &taterLocalHLSSession{
 		id:           key,
+		slot:         taterLocalHLSSlot(player.ID),
 		playerID:     player.ID,
 		playerToken:  playerToken,
 		playlistURL:  "/api/tater/local/stream",
@@ -206,7 +208,7 @@ func (h *LocalStreamHandler) prepareLocalHLSSession(
 		tracker:      h.streamTracker,
 		accessed:     time.Now(),
 	}
-	session, created := globalTaterLocalHLS.addOrGet(key, session)
+	session, created := globalTaterLocalHLS.addOrReplace(key, session)
 	if !created {
 		cancel()
 		_ = os.RemoveAll(root)
@@ -496,6 +498,11 @@ func taterLocalHLSKey(r *http.Request, playerID, path string) string {
 	return hex.EncodeToString(sum[:])[:20]
 }
 
+func taterLocalHLSSlot(playerID string) string {
+	sum := sha1.Sum([]byte("player|" + strings.TrimSpace(playerID)))
+	return hex.EncodeToString(sum[:])[:20]
+}
+
 func taterLocalHLSStartupSegments(r *http.Request) int {
 	if r == nil || r.URL == nil {
 		return taterLocalHLSInitialSegments
@@ -516,13 +523,31 @@ func (m *taterLocalHLSManager) get(id string) *taterLocalHLSSession {
 	return m.sessions[id]
 }
 
-func (m *taterLocalHLSManager) addOrGet(id string, session *taterLocalHLSSession) (*taterLocalHLSSession, bool) {
+func (m *taterLocalHLSManager) addOrReplace(id string, session *taterLocalHLSSession) (*taterLocalHLSSession, bool) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if existing := m.sessions[id]; existing != nil {
+		m.mu.Unlock()
 		return existing, false
 	}
+	var replaced []*taterLocalHLSSession
+	if session.slot != "" {
+		for existingID, existing := range m.sessions {
+			if existing != nil && existing.slot == session.slot {
+				delete(m.sessions, existingID)
+				replaced = append(replaced, existing)
+			}
+		}
+	}
 	m.sessions[id] = session
+	m.mu.Unlock()
+
+	// A converted seek uses a different URL/session ID because its start time
+	// changes. Starting a different title also changes the source path. A player
+	// can consume only one of these streams at a time, so stop its superseded
+	// FFmpeg job immediately instead of retaining conversions until idle expiry.
+	for _, existing := range replaced {
+		existing.stopAndCleanup()
+	}
 	return session, true
 }
 
