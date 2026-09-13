@@ -639,12 +639,15 @@ func TestBuildTaterTVPlaybackPlanUsesHEVCFMP4ForHDRCapableTVOS(t *testing.T) {
 	require.Equal(t, "full_transcode", plan.Mode)
 	require.Equal(t, "hevc", plan.VideoCodec)
 	require.Equal(t, "hls", plan.OutputContainer)
+	require.Equal(t, "aac", plan.AudioCodec)
+	require.Equal(t, 6, plan.OutputAudioChannels)
 	require.Equal(t, "hdr10", plan.OutputVideoRange)
 	require.False(t, plan.ToneMapped)
 	query := playbackPlanQuery(t, plan.StreamURL)
 	require.Equal(t, "hevc", query.Get("codec"))
 	require.Equal(t, "hdr10,hlg,dolby_vision", query.Get("tater_hdr_formats"))
 	require.Equal(t, "hls", query.Get("tater_output_container"))
+	require.Equal(t, "6", query.Get("tater_audio_channels"))
 }
 
 func TestTaterPlaybackTubeTVChannelNumberOnlyMatchesChannelPlaylist(t *testing.T) {
@@ -693,9 +696,11 @@ func TestBuildTaterTVPlaybackPlanKeepsRetroPlayerOnH264(t *testing.T) {
 	require.Equal(t, "h264", plan.VideoCodec)
 	require.Equal(t, "sdr", plan.OutputVideoRange)
 	require.True(t, plan.ToneMapped)
+	require.Equal(t, 2, plan.OutputAudioChannels)
 	query := playbackPlanQuery(t, plan.StreamURL)
 	require.Equal(t, "h264", query.Get("codec"))
 	require.Empty(t, query.Get("tater_hdr_formats"))
+	require.Equal(t, "2", query.Get("tater_audio_channels"))
 }
 
 func TestTaterPlaybackVideoRangeDetectsHDRAndDolbyVision(t *testing.T) {

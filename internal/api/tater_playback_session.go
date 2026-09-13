@@ -387,9 +387,13 @@ func buildTaterTVPlaybackPlan(req taterPlaybackSessionRequest, source taterPlayb
 	}
 
 	// Tube TV normalizes every program, commercial and bumper to one stable
-	// audio layout. Keep its established stereo contract independent from the
-	// multichannel policy used for individual local and Discovery titles.
-	outputAudioChannels := 2
+	// audio layout for the lifetime of the HLS session. tvOS can request AAC
+	// 5.1 when both the current program and configured output are multichannel;
+	// older players keep the established stereo contract.
+	outputAudioChannels := taterPlaybackTranscodeAudioChannels(caps, source.AudioChannels)
+	if outputAudioChannels != 6 {
+		outputAudioChannels = 2
+	}
 	plan := taterPlaybackSessionResponse{
 		StreamURL:           req.StreamURL,
 		Mode:                "full_transcode",
