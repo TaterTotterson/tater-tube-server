@@ -56,6 +56,7 @@ type taterLocalLibraryFileIndex struct {
 	SizeBytes          int64    `json:"size_bytes"`
 	ModifiedUnix       int64    `json:"modified_unix"`
 	ModifiedUnixNano   int64    `json:"modified_unix_nano"`
+	AddedUnix          int64    `json:"added_unix,omitempty"`
 	Title              string   `json:"title,omitempty"`
 	Artist             string   `json:"artist,omitempty"`
 	AlbumArtist        string   `json:"album_artist,omitempty"`
@@ -571,6 +572,18 @@ func scanTaterLocalLibrary(
 				rel = cleanLocalRelativePath(filepath.ToSlash(rel))
 				key := taterLocalLibraryFileKey(category.ID, sourceIndex, rel)
 				file := previousFiles[key]
+				addedUnix := file.AddedUnix
+				if addedUnix <= 0 {
+					if file.Key == key && file.ModifiedUnix > 0 {
+						// Existing indexes predate added_unix. Preserve their file
+						// timestamp instead of making the whole library look new.
+						addedUnix = file.ModifiedUnix
+					} else {
+						// Every file discovered by this scan receives the same time,
+						// which lets Recently Added retain an import batch together.
+						addedUnix = index.GeneratedAt.Unix()
+					}
+				}
 				unchanged := file.Key == key && file.SizeBytes == info.Size() &&
 					file.ModifiedUnixNano == info.ModTime().UnixNano()
 				if !unchanged {
@@ -583,6 +596,7 @@ func scanTaterLocalLibrary(
 						SizeBytes:        info.Size(),
 						ModifiedUnix:     info.ModTime().Unix(),
 						ModifiedUnixNano: info.ModTime().UnixNano(),
+						AddedUnix:        addedUnix,
 					}
 					if category.LibraryType == "music" {
 						metadata := taterLocalMusicMetadataForPath(cfg, path)
@@ -598,6 +612,7 @@ func scanTaterLocalLibrary(
 						file.HasEmbeddedArtwork = metadata.HasArtwork
 					}
 				}
+				file.AddedUnix = addedUnix
 				// NFO sidecars can change without changing the video itself, so refresh
 				// their small metadata payload even when the indexed media file is unchanged.
 				if category.LibraryType != "music" {
