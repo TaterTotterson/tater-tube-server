@@ -158,6 +158,31 @@ func TestConvertTaterFFmpegArgsToHLSPreservesTranscodedHDRAsMain10(t *testing.T)
 	}
 }
 
+func TestBuildTaterLocalHLSCommandRebuildsFullTranscodeAudioClock(t *testing.T) {
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"http://tube.local/api/tater/local/stream?transcode=1&profile=hdmi_1080p&codec=h264&tater_audio_channels=6",
+		nil,
+	)
+	command, err := buildTaterLocalHLSCommand(
+		request,
+		&config.Config{Transcoding: config.TranscodingConfig{}},
+		"/media/movie.mkv",
+		"/tmp/local/index.m3u8",
+		"/tmp/local/segment-%06d.ts",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(command.args, " ")
+	if !strings.Contains(joined, "-af aresample=48000:async=1:first_pts=0") {
+		t.Fatalf("expected synchronized audio clock in full HLS transcode args: %s", joined)
+	}
+	if command.audioMode != "transcode" || command.audioCodec != "aac" || command.audioChannels != 6 {
+		t.Fatalf("unexpected full HLS audio plan: mode=%s codec=%s channels=%d", command.audioMode, command.audioCodec, command.audioChannels)
+	}
+}
+
 func TestBuildTaterLocalHLSCommandStripsDolbyVisionForHDRBaseFallback(t *testing.T) {
 	request := httptest.NewRequest(
 		http.MethodGet,
