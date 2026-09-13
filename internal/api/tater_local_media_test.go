@@ -1102,6 +1102,95 @@ func TestTaterLocalDiscoverRowsAndItems(t *testing.T) {
 	}
 }
 
+func TestTaterRecentlyAddedGroupsLatestTVImportBatch(t *testing.T) {
+	configDir := t.TempDir()
+	tvRoot := filepath.Join(configDir, "tv")
+	showPath := "Example Show (2024)"
+	seasonPath := filepath.Join(showPath, "Season 01")
+	if err := os.MkdirAll(filepath.Join(tvRoot, seasonPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig(configDir)
+	cfg.LocalMedia.Enabled = boolPtr(true)
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID:          "tv",
+		Name:        "TV Shows",
+		LibraryType: "tv",
+		Paths:       []string{tvRoot},
+		Enabled:     boolPtr(true),
+	}}
+
+	type episodeFixture struct {
+		name      string
+		addedUnix int64
+	}
+	episodes := []episodeFixture{
+		{name: "Example.Show.S01E01.Pilot.mkv", addedUnix: 100},
+		{name: "Example.Show.S01E02.Second.mkv", addedUnix: 200},
+		{name: "Example.Show.S01E03.Third.mkv", addedUnix: 200},
+	}
+	files := make([]taterLocalLibraryFileIndex, 0, len(episodes))
+	for _, episode := range episodes {
+		relPath := filepath.ToSlash(filepath.Join(seasonPath, episode.name))
+		files = append(files, taterLocalLibraryFileIndex{
+			Key:              taterLocalLibraryFileKey("tv", 0, relPath),
+			CategoryID:       "tv",
+			LibraryType:      "tv",
+			SourceIndex:      0,
+			Path:             relPath,
+			SizeBytes:        1024,
+			ModifiedUnix:     episode.addedUnix,
+			ModifiedUnixNano: episode.addedUnix * int64(time.Second),
+			AddedUnix:        episode.addedUnix,
+		})
+	}
+	index := taterLocalLibraryIndex{
+		Schema:            taterLocalLibraryIndexSchema,
+		ConfigFingerprint: taterLocalLibraryFingerprint(cfg),
+		GeneratedAt:       time.Now().UTC(),
+		Categories:        []taterLocalLibraryCategoryIndex{},
+		Albums:            []taterLocalMusicAlbumIndex{},
+		Videos:            []taterLocalVideoIndex{},
+		Files:             files,
+	}
+	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), index); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := taterLocalDiscoverItems(
+		cfg,
+		"http://server",
+		"player-token",
+		"local-discover:recent",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one grouped show card, got %#v", items)
+	}
+	show := items[0]
+	if show.Title != "Example Show" || show.MediaType != "show" {
+		t.Fatalf("unexpected grouped show: %#v", show)
+	}
+	if show.Index != 200 || show.SizeText != "2 RECENT EPISODES" {
+		t.Fatalf("unexpected recent batch metadata: %#v", show)
+	}
+	if len(show.RecentItems) != 2 {
+		t.Fatalf("expected the two episodes from the latest import batch, got %#v", show.RecentItems)
+	}
+	if !strings.Contains(show.RecentItems[0].Path, "S01E02") ||
+		!strings.Contains(show.RecentItems[1].Path, "S01E03") {
+		t.Fatalf("expected the latest batch in episode order, got %#v", show.RecentItems)
+	}
+	for _, episode := range show.RecentItems {
+		if !strings.Contains(episode.StreamURL, "player_token=player-token") {
+			t.Fatalf("expected authenticated episode stream URL, got %q", episode.StreamURL)
+		}
+	}
+}
+
 func hasTaterLocalDiscoverTitle(rows []taterUsenetCategory, title string) bool {
 	for _, row := range rows {
 		if row.Title == title && row.Type == "localDiscover" {
