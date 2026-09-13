@@ -61,9 +61,10 @@ func (h *StreamHandler) serveStreamHLSPlaylist(
 		return
 	}
 
+	requiredSegments := taterLocalHLSStartupSegments(r)
 	deadline := time.Now().Add(taterLocalHLSFirstWait)
 	for time.Now().Before(deadline) {
-		if session.playlistBuffered(taterLocalHLSInitialSegments) || session.finished() {
+		if session.playlistBuffered(requiredSegments) || session.finished() {
 			break
 		}
 		time.Sleep(150 * time.Millisecond)

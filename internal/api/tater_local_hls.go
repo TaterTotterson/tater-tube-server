@@ -28,8 +28,9 @@ const (
 	// edge of an EVENT playlist. Reading a little faster than wall clock also
 	// rebuilds that cushion after brief storage or provider delays.
 	taterLocalHLSInitialSegments = 6
+	taterLocalHLSSeekSegments    = 2
 	taterLocalHLSReadRate        = "1.02"
-	taterLocalHLSFirstWait       = 15 * time.Second
+	taterLocalHLSFirstWait       = 35 * time.Second
 	taterLocalHLSIdleTimeout     = 5 * time.Minute
 )
 
@@ -87,9 +88,10 @@ func (h *LocalStreamHandler) serveLocalHLSPlaylist(
 		return
 	}
 
+	requiredSegments := taterLocalHLSStartupSegments(r)
 	deadline := time.Now().Add(taterLocalHLSFirstWait)
 	for time.Now().Before(deadline) {
-		if session.playlistBuffered(taterLocalHLSInitialSegments) || session.finished() {
+		if session.playlistBuffered(requiredSegments) || session.finished() {
 			break
 		}
 		time.Sleep(150 * time.Millisecond)
@@ -492,6 +494,20 @@ func taterLocalHLSKey(r *http.Request, playerID, path string) string {
 	raw := strings.Join([]string{strings.TrimSpace(playerID), strings.TrimSpace(path), query.Encode()}, "|")
 	sum := sha1.Sum([]byte(raw))
 	return hex.EncodeToString(sum[:])[:20]
+}
+
+func taterLocalHLSStartupSegments(r *http.Request) int {
+	if r == nil || r.URL == nil {
+		return taterLocalHLSInitialSegments
+	}
+	start, err := strconv.ParseFloat(strings.TrimSpace(r.URL.Query().Get("start")), 64)
+	if err == nil && start > 0 {
+		// A seek already has a paused frame on screen. Return once a smaller
+		// playable cushion exists while FFmpeg continues building the normal
+		// six-segment runway at its initial burst rate.
+		return taterLocalHLSSeekSegments
+	}
+	return taterLocalHLSInitialSegments
 }
 
 func (m *taterLocalHLSManager) get(id string) *taterLocalHLSSession {

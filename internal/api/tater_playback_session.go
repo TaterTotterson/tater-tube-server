@@ -21,12 +21,20 @@ import (
 const taterPlaybackProbeTimeout = 12 * time.Second
 
 type taterPlaybackProbeCacheEntry struct {
-	Size    int64
-	ModTime int64
-	Info    taterPlaybackMediaInfo
+	Size     int64
+	ModTime  int64
+	CachedAt time.Time
+	Info     taterPlaybackMediaInfo
 }
 
 var taterPlaybackProbeCache sync.Map
+
+type taterPlaybackCapabilityProfile struct {
+	Capabilities taterPlaybackCapabilities
+	UpdatedAt    time.Time
+}
+
+var taterPlaybackCapabilityProfiles sync.Map
 
 type taterPlaybackCapabilities struct {
 	CapabilityVersion        int      `json:"capability_version"`
@@ -60,6 +68,7 @@ type taterPlaybackSessionRequest struct {
 	Profile      string                    `json:"profile"`
 	Capabilities taterPlaybackCapabilities `json:"capabilities"`
 	AudioTrack   *int                      `json:"audio_track,omitempty"`
+	ForceProbe   bool                      `json:"force_probe,omitempty"`
 }
 
 type taterPlaybackAudioTrack struct {
@@ -166,6 +175,29 @@ type taterFFprobePlaybackResult struct {
 	} `json:"format"`
 }
 
+func (s *Server) handleTaterPlayerCapabilities(c *fiber.Ctx) error {
+	_, playerToken, ok := s.taterAuthorizedConfig(c)
+	if !ok {
+		return nil
+	}
+
+	var capabilities taterPlaybackCapabilities
+	if err := c.BodyParser(&capabilities); err != nil {
+		return RespondValidationError(c, "Invalid playback capabilities", err.Error())
+	}
+	if capabilities.CapabilityVersion <= 0 || capabilities.MaxWidth <= 0 || capabilities.MaxHeight <= 0 {
+		return RespondValidationError(c, "Invalid playback capabilities", "A version and display size are required")
+	}
+	taterPlaybackCapabilityProfiles.Store(hashTaterSecret(playerToken), taterPlaybackCapabilityProfile{
+		Capabilities: capabilities,
+		UpdatedAt:    time.Now(),
+	})
+	return RespondSuccess(c, fiber.Map{
+		"capability_version": capabilities.CapabilityVersion,
+		"cached":             true,
+	})
+}
+
 func (s *Server) handleTaterPlayerPlaybackSession(c *fiber.Ctx) error {
 	cfg, playerToken, ok := s.taterAuthorizedConfig(c)
 	if !ok {
@@ -175,6 +207,27 @@ func (s *Server) handleTaterPlayerPlaybackSession(c *fiber.Ctx) error {
 	var req taterPlaybackSessionRequest
 	if err := c.BodyParser(&req); err != nil {
 		return RespondValidationError(c, "Invalid playback request", err.Error())
+	}
+	profileKey := hashTaterSecret(playerToken)
+	if req.Capabilities.CapabilityVersion > 0 {
+		taterPlaybackCapabilityProfiles.Store(profileKey, taterPlaybackCapabilityProfile{
+			Capabilities: req.Capabilities,
+			UpdatedAt:    time.Now(),
+		})
+	} else if cached, found := taterPlaybackCapabilityProfiles.Load(profileKey); found {
+		profile := cached.(taterPlaybackCapabilityProfile)
+		if time.Since(profile.UpdatedAt) <= 24*time.Hour {
+			req.Capabilities = profile.Capabilities
+		} else {
+			taterPlaybackCapabilityProfiles.Delete(profileKey)
+		}
+	}
+	if req.Capabilities.CapabilityVersion <= 0 {
+		return RespondValidationError(
+			c,
+			"Playback capabilities are required",
+			"Report this player's capabilities again",
+		)
 	}
 	req.StreamURL = strings.TrimSpace(req.StreamURL)
 	if req.StreamURL == "" {
@@ -187,13 +240,13 @@ func (s *Server) handleTaterPlayerPlaybackSession(c *fiber.Ctx) error {
 	source := taterPlaybackMediaInfoFromReleaseName(req.StreamURL)
 	isTubeTV := taterPlaybackTubeTVChannelNumber(req.StreamURL) != ""
 	if probeTarget, found, err := taterPlaybackTubeTVProbeTarget(cfg, req.StreamURL, resolveBaseURL(c, "")); err == nil && found {
-		if probed, probeErr := probeTaterPlaybackMediaCached(c.Context(), cfg, probeTarget); probeErr == nil {
+		if probed, probeErr := probeTaterPlaybackMediaWithCachePolicy(c.Context(), cfg, probeTarget, req.ForceProbe); probeErr == nil {
 			source = probed
 		}
 	} else if probeTarget, found, err := taterPlaybackProbeTarget(cfg, req.StreamURL, playerToken); err != nil {
 		return RespondValidationError(c, "Playback source is invalid", err.Error())
 	} else if found {
-		if probed, probeErr := probeTaterPlaybackMediaCached(c.Context(), cfg, probeTarget); probeErr == nil {
+		if probed, probeErr := probeTaterPlaybackMediaWithCachePolicy(c.Context(), cfg, probeTarget, req.ForceProbe); probeErr == nil {
 			source = probed
 		}
 	}
@@ -339,19 +392,48 @@ func taterPlaybackProbeTarget(cfg *config.Config, rawURL, playerToken string) (s
 }
 
 func probeTaterPlaybackMediaCached(parent context.Context, cfg *config.Config, path string) (taterPlaybackMediaInfo, error) {
+	return probeTaterPlaybackMediaWithCachePolicy(parent, cfg, path, false)
+}
+
+func probeTaterPlaybackMediaWithCachePolicy(
+	parent context.Context,
+	cfg *config.Config,
+	path string,
+	force bool,
+) (taterPlaybackMediaInfo, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return taterPlaybackMediaInfo{}, fmt.Errorf("playback source is empty")
 	}
 	stat, statErr := os.Stat(path)
 	if statErr != nil || stat.IsDir() {
-		return probeTaterPlaybackMedia(parent, cfg, path)
+		// The virtual probe URL contains the paired-player token. Hash the key so
+		// credentials never become inspectable cache-map keys or diagnostics.
+		cacheKey := "remote:" + hashTaterSecret(path)
+		if !force {
+			if cached, ok := taterPlaybackProbeCache.Load(cacheKey); ok {
+				entry := cached.(taterPlaybackProbeCacheEntry)
+				if time.Since(entry.CachedAt) <= 2*time.Hour {
+					return entry.Info, nil
+				}
+			}
+		}
+		info, err := probeTaterPlaybackMedia(parent, cfg, path)
+		if err != nil {
+			return taterPlaybackMediaInfo{}, err
+		}
+		taterPlaybackProbeCache.Store(cacheKey, taterPlaybackProbeCacheEntry{
+			Size: -1, ModTime: 0, CachedAt: time.Now(), Info: info,
+		})
+		return info, nil
 	}
 	cacheKey := filepath.Clean(path)
-	if cached, ok := taterPlaybackProbeCache.Load(cacheKey); ok {
-		entry := cached.(taterPlaybackProbeCacheEntry)
-		if entry.Size == stat.Size() && entry.ModTime == stat.ModTime().UnixNano() {
-			return entry.Info, nil
+	if !force {
+		if cached, ok := taterPlaybackProbeCache.Load(cacheKey); ok {
+			entry := cached.(taterPlaybackProbeCacheEntry)
+			if entry.Size == stat.Size() && entry.ModTime == stat.ModTime().UnixNano() {
+				return entry.Info, nil
+			}
 		}
 	}
 	info, err := probeTaterPlaybackMedia(parent, cfg, path)
@@ -359,7 +441,7 @@ func probeTaterPlaybackMediaCached(parent context.Context, cfg *config.Config, p
 		return taterPlaybackMediaInfo{}, err
 	}
 	taterPlaybackProbeCache.Store(cacheKey, taterPlaybackProbeCacheEntry{
-		Size: stat.Size(), ModTime: stat.ModTime().UnixNano(), Info: info,
+		Size: stat.Size(), ModTime: stat.ModTime().UnixNano(), CachedAt: time.Now(), Info: info,
 	})
 	return info, nil
 }
