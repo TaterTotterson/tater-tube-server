@@ -2508,8 +2508,8 @@ func TestTaterTVHLSInitialPlaylistRequiresSixSegments(t *testing.T) {
 }
 
 func TestTaterTVClientLogoOverlayUsesSeparateHLSSession(t *testing.T) {
-	serverKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecH264, false, nil)
-	clientKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecH264, true, nil)
+	serverKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecH264, false, nil, 2)
+	clientKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecH264, true, nil, 2)
 	if serverKey == clientKey {
 		t.Fatal("client-composited channel logos must not reuse a server-logo HLS session")
 	}
@@ -2526,6 +2526,7 @@ func TestTaterTVClientLogoOverlayUsesSeparateHLSSession(t *testing.T) {
 		profileID:         "hdmi_4k",
 		requestedAccel:    "qsv",
 		preferredCodec:    transcodeCodecH264,
+		audioChannels:     2,
 		clientLogoOverlay: true,
 	}
 	segmentURL := session.segmentURI("item-00000/seg-00000.ts", "player-token")
@@ -2535,14 +2536,34 @@ func TestTaterTVClientLogoOverlayUsesSeparateHLSSession(t *testing.T) {
 }
 
 func TestTaterTVHDRCapabilitiesUseSeparateHLSSessions(t *testing.T) {
-	sdrKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecH264, true, nil)
-	hdrKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecHEVC, true, []string{"hlg", "hdr10"})
-	reorderedHDRKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecHEVC, true, []string{"hdr10", "hlg"})
+	sdrKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecH264, true, nil, 2)
+	hdrKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecHEVC, true, []string{"hlg", "hdr10"}, 2)
+	reorderedHDRKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecHEVC, true, []string{"hdr10", "hlg"}, 2)
 	if sdrKey == hdrKey {
 		t.Fatal("HDR-capable Apple sessions must not reuse an SDR HLS session")
 	}
 	if hdrKey != reorderedHDRKey {
 		t.Fatal("equivalent HDR capabilities should reuse the same HLS session")
+	}
+}
+
+func TestTaterTVAudioLayoutsUseSeparateHLSSessions(t *testing.T) {
+	stereoKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecHEVC, true, []string{"hdr10"}, 2)
+	surroundKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecHEVC, true, []string{"hdr10"}, 6)
+	if stereoKey == surroundKey {
+		t.Fatal("stereo and 5.1 clients must not reuse the same HLS session")
+	}
+}
+
+func TestTaterTVHLSArgsUseStableAAC51WhenRequested(t *testing.T) {
+	args := buildTaterTVChannelHLSArgsWithTimelineRangeAndAudio(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_4k"], "qsv", transcodeCodecHEVC,
+		"/media/movie.mkv", 0, 30, 0, "", "", "/tmp/hls/index.m3u8",
+		"/tmp/hls/seg-%05d.m4s", "hdr10", "hdr10", "", 6,
+	)
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-c:a aac -b:a 320k -ac 6 -ar 48000") {
+		t.Fatalf("expected a stable AAC 5.1 HLS output: %s", joined)
 	}
 }
 
