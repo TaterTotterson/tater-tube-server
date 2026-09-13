@@ -210,7 +210,7 @@ func TestBuildFFmpegVideoOnlyArgsFileSeek(t *testing.T) {
 	)
 	joined := strings.Join(args, " ")
 
-	require.Contains(t, joined, "-ss 12.500 -i /media/movie.mkv")
+	require.Contains(t, joined, "-ss 12.500 -i /media/movie.mkv -ss 0 -map 0:v:0")
 	require.NotContains(t, joined, "-i pipe:0")
 }
 
