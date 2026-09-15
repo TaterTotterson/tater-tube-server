@@ -37,29 +37,45 @@ type taterPlaybackCapabilityProfile struct {
 var taterPlaybackCapabilityProfiles sync.Map
 
 type taterPlaybackCapabilities struct {
-	CapabilityVersion        int      `json:"capability_version"`
-	Platform                 string   `json:"platform"`
-	Engine                   string   `json:"engine"`
-	OutputName               string   `json:"output_name"`
-	OutputConnection         string   `json:"output_connection"`
-	PreferredStreamContainer string   `json:"preferred_stream_container"`
-	Containers               []string `json:"containers"`
-	VideoCodecs              []string `json:"video_codecs"`
-	AudioCodecs              []string `json:"audio_codecs"`
-	AudioPassthrough         []string `json:"audio_passthrough"`
-	MaxWidth                 int      `json:"max_width"`
-	MaxHeight                int      `json:"max_height"`
-	MaxAudioChannels         int      `json:"max_audio_channels"`
-	AudioDownmix             bool     `json:"audio_downmix"`
-	CompatibilityMode        bool     `json:"compatibility_mode"`
-	PassthroughAvailable     bool     `json:"passthrough_available"`
-	VideoHDRFormats          []string `json:"video_hdr_formats"`
-	DisplayHDRFormats        []string `json:"display_hdr_formats"`
-	DisplayHDREnabled        bool     `json:"display_hdr_enabled"`
-	MaxVideoBitDepth         int      `json:"max_video_bit_depth"`
-	DolbyVisionProfiles      []int    `json:"dolby_vision_profiles"`
-	TubeTVOutputVideoRange   string   `json:"tube_tv_output_video_range"`
-	TubeTVOutputFrameRate    float64  `json:"tube_tv_output_frame_rate"`
+	CapabilityVersion        int                         `json:"capability_version"`
+	Platform                 string                      `json:"platform"`
+	Engine                   string                      `json:"engine"`
+	OutputName               string                      `json:"output_name"`
+	OutputConnection         string                      `json:"output_connection"`
+	PreferredStreamContainer string                      `json:"preferred_stream_container"`
+	Containers               []string                    `json:"containers"`
+	VideoCodecs              []string                    `json:"video_codecs"`
+	VideoDecoders            []taterPlaybackVideoDecoder `json:"video_decoders"`
+	AudioCodecs              []string                    `json:"audio_codecs"`
+	AudioPassthrough         []string                    `json:"audio_passthrough"`
+	MaxWidth                 int                         `json:"max_width"`
+	MaxHeight                int                         `json:"max_height"`
+	MaxAudioChannels         int                         `json:"max_audio_channels"`
+	AudioDownmix             bool                        `json:"audio_downmix"`
+	CompatibilityMode        bool                        `json:"compatibility_mode"`
+	PassthroughAvailable     bool                        `json:"passthrough_available"`
+	VideoHDRFormats          []string                    `json:"video_hdr_formats"`
+	DisplayHDRFormats        []string                    `json:"display_hdr_formats"`
+	DisplayHDREnabled        bool                        `json:"display_hdr_enabled"`
+	MaxVideoBitDepth         int                         `json:"max_video_bit_depth"`
+	DolbyVisionProfiles      []int                       `json:"dolby_vision_profiles"`
+	TubeTVOutputVideoRange   string                      `json:"tube_tv_output_video_range"`
+	TubeTVOutputFrameRate    float64                     `json:"tube_tv_output_frame_rate"`
+}
+
+type taterPlaybackVideoDecoder struct {
+	Codec               string                          `json:"codec"`
+	Profile             string                          `json:"profile"`
+	MaxLevel            int                             `json:"max_level"`
+	MaxBitDepth         int                             `json:"max_bit_depth"`
+	HardwareAccelerated bool                            `json:"hardware_accelerated"`
+	PerformanceLimits   []taterPlaybackVideoPerformance `json:"performance_limits"`
+}
+
+type taterPlaybackVideoPerformance struct {
+	MaxWidth     int     `json:"max_width"`
+	MaxHeight    int     `json:"max_height"`
+	MaxFrameRate float64 `json:"max_frame_rate"`
 }
 
 type taterPlaybackSessionRequest struct {
@@ -91,6 +107,8 @@ type taterPlaybackMediaInfo struct {
 	DurationSeconds            float64                   `json:"duration_seconds,omitempty"`
 	VideoCodec                 string                    `json:"video_codec,omitempty"`
 	VideoProfile               string                    `json:"video_profile,omitempty"`
+	VideoLevel                 int                       `json:"video_level,omitempty"`
+	VideoFrameRate             float64                   `json:"video_frame_rate,omitempty"`
 	Width                      int                       `json:"width,omitempty"`
 	Height                     int                       `json:"height,omitempty"`
 	VideoRange                 string                    `json:"video_range,omitempty"`
@@ -148,6 +166,8 @@ type taterFFprobePlaybackResult struct {
 		CodecType        string                         `json:"codec_type"`
 		CodecName        string                         `json:"codec_name"`
 		Profile          string                         `json:"profile"`
+		Level            int                            `json:"level"`
+		AverageFrameRate string                         `json:"avg_frame_rate"`
 		Width            int                            `json:"width"`
 		Height           int                            `json:"height"`
 		Channels         int                            `json:"channels"`
@@ -627,6 +647,61 @@ func taterPlaybackUsesNativeTV(caps taterPlaybackCapabilities) bool {
 		(platform == "tvos" && cleanTaterPreferredStreamContainer(caps.PreferredStreamContainer) == "hls")
 }
 
+func taterPlaybackAndroidDecoderSupports(caps taterPlaybackCapabilities, source taterPlaybackMediaInfo) bool {
+	if caps.CapabilityVersion < 7 ||
+		!strings.EqualFold(strings.TrimSpace(caps.Platform), "android_tv") ||
+		len(caps.VideoDecoders) == 0 || cleanTaterCodecName(source.VideoCodec) == "" {
+		return true
+	}
+
+	codec := cleanTaterCodecName(source.VideoCodec)
+	profile := cleanTaterVideoProfile(source.VideoProfile)
+	for _, decoder := range caps.VideoDecoders {
+		if cleanTaterCodecName(decoder.Codec) != codec {
+			continue
+		}
+		decoderProfile := cleanTaterVideoProfile(decoder.Profile)
+		if profile != "" && decoderProfile != "" && profile != decoderProfile {
+			continue
+		}
+		if source.VideoLevel > 0 && decoder.MaxLevel > 0 && source.VideoLevel > decoder.MaxLevel {
+			continue
+		}
+		if source.VideoBitDepth > 0 && decoder.MaxBitDepth > 0 && source.VideoBitDepth > decoder.MaxBitDepth {
+			continue
+		}
+		if source.Width > 0 && source.Height > 0 && len(decoder.PerformanceLimits) > 0 {
+			withinLimit := false
+			for _, limit := range decoder.PerformanceLimits {
+				if source.Width > limit.MaxWidth || source.Height > limit.MaxHeight {
+					continue
+				}
+				if source.VideoFrameRate > 0 && limit.MaxFrameRate > 0 &&
+					source.VideoFrameRate > limit.MaxFrameRate+0.5 {
+					continue
+				}
+				withinLimit = true
+				break
+			}
+			if !withinLimit {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func cleanTaterVideoProfile(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, value)
+}
+
 func taterPlaybackSupportedHDRFormats(caps taterPlaybackCapabilities) []string {
 	if !caps.DisplayHDREnabled {
 		return nil
@@ -643,6 +718,31 @@ func taterPlaybackSupportedHDRFormats(caps taterPlaybackCapabilities) []string {
 		formats = append(formats, format)
 	}
 	return formats
+}
+
+func parseTaterPlaybackFrameRate(value string) float64 {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "0/0" {
+		return 0
+	}
+	parts := strings.SplitN(value, "/", 2)
+	if len(parts) == 1 {
+		frameRate, _ := strconv.ParseFloat(parts[0], 64)
+		if frameRate > 0 && !math.IsInf(frameRate, 0) && !math.IsNaN(frameRate) {
+			return frameRate
+		}
+		return 0
+	}
+	numerator, numeratorErr := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	denominator, denominatorErr := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	if numeratorErr != nil || denominatorErr != nil || numerator <= 0 || denominator <= 0 {
+		return 0
+	}
+	frameRate := numerator / denominator
+	if math.IsInf(frameRate, 0) || math.IsNaN(frameRate) {
+		return 0
+	}
+	return frameRate
 }
 
 func taterTVPlaybackOutputRange(source taterPlaybackMediaInfo, hdrFormats []string) (string, bool) {
@@ -785,6 +885,9 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 	videoCompatible := videoCodec == ""
 	if videoCodec != "" {
 		videoCompatible = taterCodecListContains(caps.VideoCodecs, videoCodec)
+	}
+	if videoCompatible && !taterPlaybackAndroidDecoderSupports(caps, source) {
+		videoCompatible = false
 	}
 	if source.Width > 0 && caps.MaxWidth > 0 && source.Width > caps.MaxWidth {
 		videoCompatible = false
@@ -1220,7 +1323,7 @@ func probeTaterPlaybackMedia(parent context.Context, cfg *config.Config, path st
 	defer cancel()
 	cmd := exec.CommandContext(ctx, ffprobePath,
 		"-v", "error",
-		"-show_entries", "format=format_name,duration:stream=index,codec_type,codec_name,profile,width,height,channels,channel_layout,pix_fmt,color_space,color_transfer,color_primaries,bits_per_raw_sample,bit_rate:stream_tags=language,title:stream_disposition=default,comment,visual_impaired:stream_side_data=side_data_type,dv_profile,dv_level,rpu_present_flag,el_present_flag,bl_present_flag,dv_bl_signal_compatibility_id",
+		"-show_entries", "format=format_name,duration:stream=index,codec_type,codec_name,profile,level,avg_frame_rate,width,height,channels,channel_layout,pix_fmt,color_space,color_transfer,color_primaries,bits_per_raw_sample,bit_rate:stream_tags=language,title:stream_disposition=default,comment,visual_impaired:stream_side_data=side_data_type,dv_profile,dv_level,rpu_present_flag,el_present_flag,bl_present_flag,dv_bl_signal_compatibility_id",
 		"-of", "json",
 		path,
 	)
@@ -1243,6 +1346,8 @@ func probeTaterPlaybackMedia(parent context.Context, cfg *config.Config, path st
 			if info.VideoCodec == "" {
 				info.VideoCodec = cleanTaterCodecName(stream.CodecName)
 				info.VideoProfile = strings.TrimSpace(stream.Profile)
+				info.VideoLevel = stream.Level
+				info.VideoFrameRate = parseTaterPlaybackFrameRate(stream.AverageFrameRate)
 				info.Width = stream.Width
 				info.Height = stream.Height
 				info.PixelFormat = strings.ToLower(strings.TrimSpace(stream.PixelFormat))
