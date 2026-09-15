@@ -616,10 +616,15 @@ func taterPlaybackVideoCodecLabel(codec string) string {
 }
 
 func taterPlaybackCanUseHDRHEVC(caps taterPlaybackCapabilities) bool {
-	return strings.EqualFold(strings.TrimSpace(caps.Platform), "tvos") &&
-		cleanTaterPreferredStreamContainer(caps.PreferredStreamContainer) == "hls" &&
+	return taterPlaybackUsesNativeTV(caps) &&
 		taterCodecListContains(caps.VideoCodecs, "hevc") &&
 		caps.DisplayHDREnabled && caps.MaxVideoBitDepth >= 10
+}
+
+func taterPlaybackUsesNativeTV(caps taterPlaybackCapabilities) bool {
+	platform := strings.ToLower(strings.TrimSpace(caps.Platform))
+	return platform == "android_tv" ||
+		(platform == "tvos" && cleanTaterPreferredStreamContainer(caps.PreferredStreamContainer) == "hls")
 }
 
 func taterPlaybackSupportedHDRFormats(caps taterPlaybackCapabilities) []string {
@@ -822,10 +827,10 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 			toneMapped = true
 			rangeFallback = false
 		}
-		// HDR that must be resized or converted for tvOS stays HEVC Main 10 in
-		// fragmented-MP4 HLS. Unsupported Dolby Vision profiles still take the
-		// safe SDR tone-map path selected above.
-		if strings.EqualFold(strings.TrimSpace(caps.Platform), "tvos") &&
+		// HDR that must be resized or converted for a native TV player stays
+		// HEVC Main 10. Unsupported Dolby Vision profiles still take the safe
+		// SDR tone-map path selected above.
+		if taterPlaybackUsesNativeTV(caps) &&
 			(!videoCompatible || videoCodec != "hevc") {
 			if !toneMapped && taterPlaybackCanUseHDRHEVC(caps) {
 				if encodedRange := taterPlaybackReencodedHDRRange(caps, source, outputRange); encodedRange != "" {
@@ -868,14 +873,14 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		videoCodec == "hevc" && audioCodec == "eac3" && audioCompatible {
 		audioCompatible = false
 	}
-	// When tvOS needs a newly encoded video track, rebuild the audio alongside
-	// it instead of copying source timestamps into the new HLS timeline. AVPlayer
-	// can otherwise accumulate audible drift during longer playback even when
-	// the copied codec itself is supported. Direct/remux video paths keep their
-	// normal compatible-audio behavior, and other player platforms are unchanged.
-	synchronizeTVOSAudio := strings.EqualFold(strings.TrimSpace(caps.Platform), "tvos") &&
-		preferredContainer == "hls" && !videoCompatible && audioCompatible
-	if synchronizeTVOSAudio {
+	// Native TV players get one freshly encoded audio/video timeline whenever
+	// the video must be encoded. Copying source audio timestamps beside a new
+	// video clock can accumulate audible drift in both AVPlayer and Media3.
+	// Direct and remux paths still preserve compatible source audio unchanged.
+	platform := strings.ToLower(strings.TrimSpace(caps.Platform))
+	synchronizeNativeTVAudio := taterPlaybackUsesNativeTV(caps) &&
+		!videoCompatible && audioCompatible
+	if synchronizeNativeTVAudio {
 		audioCompatible = false
 	}
 
@@ -963,8 +968,12 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		plan.QualityLabel = taterPlaybackRangePrefix(sourceRange, outputRange, toneMapped) + "Video " + taterPlaybackVideoCodecLabel(transcodeVideoCodec) + " • Audio AAC" + taterPlaybackAudioChannelsSuffix(transcodeAudioChannels)
 		plan.Reason = "Both source tracks need conversion for this player."
 	}
-	if synchronizeTVOSAudio && !toneMapped {
-		plan.Reason = "Video and audio are converted together to keep Apple TV playback synchronized."
+	if synchronizeNativeTVAudio && !toneMapped {
+		if platform == "tvos" {
+			plan.Reason = "Video and audio are converted together to keep Apple TV playback synchronized."
+		} else {
+			plan.Reason = "Video and audio are converted together to keep Android TV playback synchronized."
+		}
 	}
 	if toneMapped {
 		if audioCompatible {
@@ -1062,10 +1071,11 @@ func annotateTaterPlaybackURL(
 }
 
 func taterPlaybackTranscodeAudioChannels(caps taterPlaybackCapabilities, sourceChannels int) int {
-	// Multichannel AAC is currently an explicit tvOS playback contract. Older
-	// players never send this query value and retain the established stereo
-	// transcode path.
-	if !strings.EqualFold(strings.TrimSpace(caps.Platform), "tvos") {
+	// Native TV clients explicitly report their active output channel capacity.
+	// Preserve 5.1 when the source and output support it; otherwise produce a
+	// high-quality stereo mix that built-in TV speakers can reliably play.
+	platform := strings.ToLower(strings.TrimSpace(caps.Platform))
+	if platform != "tvos" && platform != "android_tv" {
 		return 0
 	}
 	if sourceChannels >= 6 && caps.MaxAudioChannels >= 6 {

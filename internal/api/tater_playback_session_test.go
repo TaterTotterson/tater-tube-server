@@ -333,6 +333,130 @@ func TestBuildTaterPlaybackPlanTVOSTranscodesAudioWithVideoToKeepClocksSynchroni
 	require.Equal(t, "6", query.Get("tater_audio_channels"))
 }
 
+func TestBuildTaterPlaybackPlanAndroidTVTranscodesAudioWithVideoToKeepClocksSynchronized(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion:        6,
+			Platform:                 "android_tv",
+			PreferredStreamContainer: "",
+			VideoCodecs:              []string{"h264", "hevc"},
+			AudioCodecs:              []string{"aac", "ac3", "eac3"},
+			MaxWidth:                 3840,
+			MaxHeight:                2160,
+			MaxAudioChannels:         2,
+			AudioDownmix:             true,
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mkv", VideoCodec: "av1", Width: 3840, Height: 2160,
+		AudioCodec: "eac3", AudioChannels: 6,
+	})
+
+	require.Equal(t, "full_transcode", plan.Mode)
+	require.Equal(t, "transcode", plan.VideoMode)
+	require.Equal(t, "transcode", plan.AudioMode)
+	require.Equal(t, "aac", plan.AudioCodec)
+	require.Equal(t, 2, plan.OutputAudioChannels)
+	require.Contains(t, plan.Reason, "keep Android TV playback synchronized")
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Equal(t, "1", query.Get("transcode"))
+	require.Equal(t, "2", query.Get("tater_audio_channels"))
+	require.Empty(t, query.Get("tater_output_container"))
+}
+
+func TestBuildTaterPlaybackPlanAndroidTVTranscodesSurroundForBuiltInSpeakers(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion:        6,
+			Platform:                 "android_tv",
+			PreferredStreamContainer: "",
+			VideoCodecs:              []string{"av1"},
+			AudioCodecs:              []string{"eac3", "aac"},
+			MaxWidth:                 3840,
+			MaxHeight:                2160,
+			MaxAudioChannels:         2,
+			AudioDownmix:             false,
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mkv", VideoCodec: "av1", Width: 3840, Height: 2160,
+		AudioCodec: "eac3", AudioChannels: 6,
+	})
+
+	require.Equal(t, "audio_transcode", plan.Mode)
+	require.Equal(t, "direct", plan.VideoMode)
+	require.Equal(t, "transcode", plan.AudioMode)
+	require.Equal(t, "aac", plan.AudioCodec)
+	require.Equal(t, 2, plan.OutputAudioChannels)
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Equal(t, "audio", query.Get("transcode"))
+	require.Equal(t, "2", query.Get("tater_audio_channels"))
+	require.Empty(t, query.Get("tater_output_container"))
+}
+
+func TestBuildTaterPlaybackPlanAndroidTVPreservesSurroundWhenBothTracksTranscode(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion:        6,
+			Platform:                 "android_tv",
+			PreferredStreamContainer: "",
+			VideoCodecs:              []string{"h264", "hevc"},
+			AudioCodecs:              []string{"aac"},
+			MaxWidth:                 3840,
+			MaxHeight:                2160,
+			MaxAudioChannels:         8,
+			AudioDownmix:             true,
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mkv", VideoCodec: "av1", Width: 3840, Height: 2160,
+		AudioCodec: "dts_hd", AudioChannels: 8,
+	})
+
+	require.Equal(t, "full_transcode", plan.Mode)
+	require.Equal(t, 6, plan.OutputAudioChannels)
+	require.Contains(t, plan.QualityLabel, "AAC 5.1")
+	require.Equal(t, "6", playbackPlanQuery(t, plan.StreamURL).Get("tater_audio_channels"))
+}
+
+func TestBuildTaterPlaybackPlanAndroidTVPreservesHDRAsHEVCWhenVideoMustTranscode(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion:        6,
+			Platform:                 "android_tv",
+			PreferredStreamContainer: "",
+			VideoCodecs:              []string{"h264", "hevc"},
+			AudioCodecs:              []string{"aac"},
+			VideoHDRFormats:          []string{"hdr10"},
+			DisplayHDRFormats:        []string{"hdr10"},
+			DisplayHDREnabled:        true,
+			MaxVideoBitDepth:         10,
+			MaxWidth:                 3840,
+			MaxHeight:                2160,
+			MaxAudioChannels:         2,
+			AudioDownmix:             true,
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mkv", VideoCodec: "av1", Width: 3840, Height: 2160,
+		VideoRange: "hdr10", VideoBitDepth: 10, AudioCodec: "aac", AudioChannels: 2,
+	})
+
+	require.Equal(t, "full_transcode", plan.Mode)
+	require.Equal(t, "hevc", plan.VideoCodec)
+	require.Equal(t, "hdr10", plan.OutputVideoRange)
+	require.False(t, plan.ToneMapped)
+	require.Equal(t, 3840, plan.OutputWidth)
+	require.Equal(t, 2160, plan.OutputHeight)
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Equal(t, "hevc", query.Get("codec"))
+	require.Equal(t, "hdr10", query.Get("tater_output_video_range"))
+}
+
 func TestBuildTaterPlaybackPlanReports4KTo1080p(t *testing.T) {
 	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
 		StreamURL: "http://tube.local/api/files/stream?path=queue%2FMovie.mkv",
