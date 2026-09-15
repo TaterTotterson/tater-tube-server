@@ -365,6 +365,115 @@ func TestBuildTaterPlaybackPlanAndroidTVTranscodesAudioWithVideoToKeepClocksSync
 	require.Empty(t, query.Get("tater_output_container"))
 }
 
+func TestBuildTaterPlaybackPlanAndroidTVUsesDetailedAV1DecoderLimits(t *testing.T) {
+	caps := taterPlaybackCapabilities{
+		CapabilityVersion: 7,
+		Platform:          "android_tv",
+		VideoCodecs:       []string{"h264", "av1"},
+		AudioCodecs:       []string{"aac"},
+		MaxWidth:          3840,
+		MaxHeight:         2160,
+		MaxAudioChannels:  2,
+		VideoDecoders: []taterPlaybackVideoDecoder{
+			{
+				Codec:       "av1",
+				Profile:     "main",
+				MaxLevel:    12,
+				MaxBitDepth: 10,
+				PerformanceLimits: []taterPlaybackVideoPerformance{
+					{MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 30},
+				},
+			},
+		},
+	}
+	source := taterPlaybackMediaInfo{
+		Container: "mkv", VideoCodec: "av1", VideoProfile: "Main", VideoLevel: 8,
+		VideoFrameRate: 24000.0 / 1001.0, VideoBitDepth: 10, Width: 3840, Height: 2160,
+		AudioCodec: "aac", AudioChannels: 2,
+	}
+
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL:    "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Profile:      "hdmi_4k",
+		Capabilities: caps,
+	}, source)
+
+	require.Equal(t, "direct", plan.Mode)
+	require.Equal(t, "direct", plan.VideoMode)
+
+	source.VideoFrameRate = 60
+	plan = buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL:    "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Profile:      "hdmi_4k",
+		Capabilities: caps,
+	}, source)
+	require.Equal(t, "full_transcode", plan.Mode)
+	require.Equal(t, "transcode", plan.VideoMode)
+	require.Contains(t, plan.Reason, "keep Android TV playback synchronized")
+}
+
+func TestBuildTaterPlaybackPlanAndroidTVRejectsUnsupportedDecoderProfile(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Profile:   "hdmi_1080p",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion: 7,
+			Platform:          "android_tv",
+			VideoCodecs:       []string{"h264"},
+			AudioCodecs:       []string{"aac"},
+			MaxWidth:          1920,
+			MaxHeight:         1080,
+			MaxAudioChannels:  2,
+			VideoDecoders: []taterPlaybackVideoDecoder{
+				{
+					Codec: "h264", Profile: "high", MaxLevel: 42, MaxBitDepth: 8,
+					PerformanceLimits: []taterPlaybackVideoPerformance{
+						{MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60},
+					},
+				},
+			},
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mkv", VideoCodec: "h264", VideoProfile: "High 10", VideoLevel: 41,
+		VideoFrameRate: 24, VideoBitDepth: 10, Width: 1920, Height: 1080,
+		AudioCodec: "aac", AudioChannels: 2,
+	})
+
+	require.Equal(t, "full_transcode", plan.Mode)
+	require.Equal(t, "transcode", plan.VideoMode)
+}
+
+func TestDetailedAndroidDecoderLimitsDoNotAffectTVOS(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Profile:   "hdmi_1080p",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion: 7,
+			Platform:          "tvos",
+			VideoCodecs:       []string{"h264"},
+			AudioCodecs:       []string{"aac"},
+			MaxWidth:          1920,
+			MaxHeight:         1080,
+			MaxAudioChannels:  2,
+			VideoDecoders: []taterPlaybackVideoDecoder{
+				{Codec: "h264", Profile: "baseline", MaxLevel: 30, MaxBitDepth: 8},
+			},
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mp4", VideoCodec: "h264", VideoProfile: "High", VideoLevel: 41,
+		VideoFrameRate: 24, VideoBitDepth: 8, Width: 1920, Height: 1080,
+		AudioCodec: "aac", AudioChannels: 2,
+	})
+
+	require.Equal(t, "direct", plan.Mode)
+}
+
+func TestParseTaterPlaybackFrameRate(t *testing.T) {
+	require.InDelta(t, 23.976, parseTaterPlaybackFrameRate("24000/1001"), 0.001)
+	require.Equal(t, 60.0, parseTaterPlaybackFrameRate("60"))
+	require.Zero(t, parseTaterPlaybackFrameRate("0/0"))
+}
+
 func TestBuildTaterPlaybackPlanAndroidTVTranscodesSurroundForBuiltInSpeakers(t *testing.T) {
 	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
 		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
