@@ -118,7 +118,9 @@ func (s *Server) handleTaterPlayerHome(c *fiber.Ctx) error {
 	}
 
 	if response.Capabilities.LocalMedia {
-		recentlyAdded, recentErr := taterLocalDiscoverItems(cfg, baseURL, playerToken, "local-discover:recent")
+		recentlyAdded, recentErr := taterLocalDiscoverItemsWithLimit(
+			cfg, baseURL, playerToken, "local-discover:recent", taterPlayerHomeItemLimit,
+		)
 		if recentErr != nil {
 			response.Warnings = append(response.Warnings, "Recently Added is temporarily unavailable")
 		} else {

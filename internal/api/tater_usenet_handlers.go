@@ -866,17 +866,36 @@ func taterLocalDiscoverItemsWithLimit(cfg *config.Config, baseURL, playerToken, 
 	if err != nil {
 		return nil, err
 	}
+	var recentBatches map[string]*taterRecentTVBatch
 	if strings.EqualFold(strings.TrimSpace(discoverID), "local-discover:recent") {
-		items = taterAttachRecentlyAddedTVEpisodes(cfg, baseURL, playerToken, items)
+		recentBatches = taterCollectRecentTVBatches(cfg, items)
 	}
 	rows := taterFilterLocalDiscoverItems(items, discoverID)
 	if limit > 0 && len(rows) > limit {
 		rows = rows[:limit]
 	}
+	if recentBatches != nil {
+		rows = taterAttachRecentlyAddedTVEpisodes(cfg, baseURL, playerToken, rows, recentBatches)
+	}
 	return rows, nil
 }
 
-func taterAttachRecentlyAddedTVEpisodes(cfg *config.Config, baseURL, playerToken string, items []taterUsenetItem) []taterUsenetItem {
+type taterRecentTVBatch struct {
+	addedUnix int64
+	files     []taterLocalLibraryFileIndex
+}
+
+func taterCollectRecentTVBatches(cfg *config.Config, items []taterUsenetItem) map[string]*taterRecentTVBatch {
+	// Read and decode the index once. This helper runs while the player home
+	// response is being assembled; reopening a large index for every show can
+	// make the initial request exceed a TV client's timeout.
+	index, ok := taterFreshLocalLibraryIndex(cfg)
+	if !ok {
+		return nil
+	}
+
+	showItems := map[string][]int{}
+	latestByShow := map[string]*taterRecentTVBatch{}
 	for itemIndex := range items {
 		item := &items[itemIndex]
 		if !strings.EqualFold(item.MediaType, "show") {
@@ -886,38 +905,81 @@ func taterAttachRecentlyAddedTVEpisodes(cfg *config.Config, baseURL, playerToken
 		if !ok || !strings.EqualFold(strings.TrimSpace(cat.LibraryType), "tv") {
 			continue
 		}
-		files, ok := taterIndexedLocalFiles(cfg, cat, item.SourceIndex)
-		if !ok {
+		showPath := cleanLocalRelativePath(item.Path)
+		if showPath == "" {
 			continue
 		}
+		key := taterRecentTVShowKey(cat.ID, item.SourceIndex, showPath)
+		showItems[key] = append(showItems[key], itemIndex)
+		latestByShow[key] = &taterRecentTVBatch{}
+	}
 
-		showPath := cleanLocalRelativePath(item.Path)
-		showPrefix := showPath + "/"
-		batchAddedUnix := int64(0)
-		batchFiles := []taterLocalLibraryFileIndex{}
-		for _, file := range files {
-			path := cleanLocalRelativePath(file.Path)
-			if showPath == "" || !strings.HasPrefix(path, showPrefix) {
+	// Walk the indexed files once. A show can live below a nested folder, so
+	// check each ancestor until its matching show card is found.
+	for _, file := range index.Files {
+		if !strings.EqualFold(strings.TrimSpace(file.LibraryType), "tv") ||
+			!isMediaExtension(filepath.Ext(file.Path)) {
+			continue
+		}
+		filePath := cleanLocalRelativePath(file.Path)
+		for candidate := cleanLocalRelativePath(filepath.ToSlash(filepath.Dir(filePath))); candidate != ""; candidate = cleanLocalRelativePath(filepath.ToSlash(filepath.Dir(candidate))) {
+			key := taterRecentTVShowKey(file.CategoryID, file.SourceIndex, candidate)
+			batch, exists := latestByShow[key]
+			if !exists {
 				continue
 			}
 			addedUnix := taterLocalFileAddedUnix(file)
 			switch {
-			case addedUnix > batchAddedUnix:
-				batchAddedUnix = addedUnix
-				batchFiles = []taterLocalLibraryFileIndex{file}
-			case addedUnix == batchAddedUnix && addedUnix > 0:
-				batchFiles = append(batchFiles, file)
+			case addedUnix > batch.addedUnix:
+				batch.addedUnix = addedUnix
+				batch.files = []taterLocalLibraryFileIndex{file}
+			case addedUnix == batch.addedUnix && addedUnix > 0:
+				batch.files = append(batch.files, file)
 			}
+			break
 		}
-		if len(batchFiles) == 0 {
+	}
+
+	for key, itemIndexes := range showItems {
+		batch := latestByShow[key]
+		if batch == nil || len(batch.files) == 0 {
+			continue
+		}
+		for _, itemIndex := range itemIndexes {
+			items[itemIndex].Index = int(batch.addedUnix)
+		}
+	}
+	return latestByShow
+}
+
+func taterAttachRecentlyAddedTVEpisodes(
+	cfg *config.Config,
+	baseURL, playerToken string,
+	items []taterUsenetItem,
+	batches map[string]*taterRecentTVBatch,
+) []taterUsenetItem {
+	for itemIndex := range items {
+		item := &items[itemIndex]
+		if !strings.EqualFold(item.MediaType, "show") {
+			continue
+		}
+		cat, ok := taterLocalMediaCategory(cfg, item.CategoryID)
+		if !ok || !strings.EqualFold(strings.TrimSpace(cat.LibraryType), "tv") {
+			continue
+		}
+		batch := batches[taterRecentTVShowKey(cat.ID, item.SourceIndex, item.Path)]
+		if batch == nil || len(batch.files) == 0 {
 			continue
 		}
 
-		episodes := make([]taterUsenetItem, 0, len(batchFiles))
-		for _, file := range batchFiles {
+		episodes := make([]taterUsenetItem, 0, len(batch.files))
+		for _, file := range batch.files {
 			episodes = append(episodes, taterIndexedLocalVideoItem(
 				cfg, cat, file, baseURL, playerToken, "episode",
 			))
+		}
+		if len(episodes) == 0 {
+			continue
 		}
 		episodes = taterAttachLocalPlayStates(cfg, episodes)
 		decorateTaterPlayerHomeItems(cfg, baseURL, playerToken, episodes)
@@ -925,7 +987,7 @@ func taterAttachRecentlyAddedTVEpisodes(cfg *config.Config, baseURL, playerToken
 			return taterEpisodeSortKey(episodes[i].Path) < taterEpisodeSortKey(episodes[j].Path)
 		})
 		item.RecentItems = episodes
-		item.Index = int(batchAddedUnix)
+		item.Index = int(batch.addedUnix)
 		if len(episodes) == 1 {
 			item.SizeText = episodes[0].Title
 		} else {
@@ -933,6 +995,14 @@ func taterAttachRecentlyAddedTVEpisodes(cfg *config.Config, baseURL, playerToken
 		}
 	}
 	return items
+}
+
+func taterRecentTVShowKey(categoryID string, sourceIndex int, showPath string) string {
+	return strings.Join([]string{
+		strings.TrimSpace(categoryID),
+		strconv.Itoa(sourceIndex),
+		cleanLocalRelativePath(showPath),
+	}, "\x00")
 }
 
 func taterLocalFileAddedUnix(file taterLocalLibraryFileIndex) int64 {
