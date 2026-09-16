@@ -412,6 +412,67 @@ func TestBuildTaterPlaybackPlanAndroidTVUsesDetailedAV1DecoderLimits(t *testing.
 	require.Contains(t, plan.Reason, "keep Android TV playback synchronized")
 }
 
+func TestBuildTaterPlaybackPlanAndroidTVAlwaysUpscalesCompatibleVideo(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mp4",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion: 7,
+			Platform:          "android_tv",
+			VideoCodecs:       []string{"h264"},
+			AudioCodecs:       []string{"aac"},
+			MaxWidth:          3840,
+			MaxHeight:         2160,
+			MaxAudioChannels:  2,
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mp4", VideoCodec: "h264", Width: 1920, Height: 1080,
+		AudioCodec: "aac", AudioChannels: 2,
+	})
+
+	require.Equal(t, "full_transcode", plan.Mode)
+	require.Equal(t, "transcode", plan.VideoMode)
+	require.Equal(t, "transcode", plan.AudioMode)
+	require.Equal(t, 3840, plan.OutputWidth)
+	require.Equal(t, 2160, plan.OutputHeight)
+	require.Equal(t, "1080p → 4K", plan.ResolutionLabel)
+	require.Contains(t, plan.Reason, "match this display")
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Equal(t, "1920", query.Get("tater_source_width"))
+	require.Equal(t, "1080", query.Get("tater_source_height"))
+	require.Equal(t, "3840", query.Get("tater_output_width"))
+	require.Equal(t, "2160", query.Get("tater_output_height"))
+	require.Equal(t, "spline36", query.Get("tater_scaler"))
+}
+
+func TestBuildTaterPlaybackPlanTVOSUpscalesWithoutNewCapabilityField(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mp4",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion:        6,
+			Platform:                 "tvos",
+			PreferredStreamContainer: "hls",
+			VideoCodecs:              []string{"h264"},
+			AudioCodecs:              []string{"aac"},
+			MaxWidth:                 3840,
+			MaxHeight:                2160,
+			MaxAudioChannels:         2,
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mp4", VideoCodec: "h264", Width: 1920, Height: 1080,
+		AudioCodec: "aac", AudioChannels: 2,
+	})
+
+	require.Equal(t, "full_transcode", plan.Mode)
+	require.Equal(t, "transcode", plan.VideoMode)
+	require.Equal(t, "transcode", plan.AudioMode)
+	require.Equal(t, 3840, plan.OutputWidth)
+	require.Equal(t, 2160, plan.OutputHeight)
+	require.Equal(t, "1080p → 4K", plan.ResolutionLabel)
+	require.Equal(t, "spline36", playbackPlanQuery(t, plan.StreamURL).Get("tater_scaler"))
+}
+
 func TestBuildTaterPlaybackPlanAndroidTVRejectsUnsupportedDecoderProfile(t *testing.T) {
 	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
 		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",

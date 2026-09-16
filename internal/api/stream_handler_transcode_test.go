@@ -285,6 +285,18 @@ func TestBuildFFmpegTranscodeArgsQSV(t *testing.T) {
 	require.Contains(t, joined, "-c:v h264_qsv")
 }
 
+func TestBuildFFmpegTranscodeArgsUsesSpline36ForRequestedUpscale(t *testing.T) {
+	args := buildFFmpegTranscodeArgsWithOptions(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_4k"], "qsv", transcodeCodecH264,
+		transcodeOutputOptions{
+			Scaler: "spline36", OutputWidth: 3840, OutputHeight: 1600,
+		},
+	)
+	joined := strings.Join(args, " ")
+	require.Contains(t, joined, "-vf zscale=w=3840:h=1600:filter=spline36,format=nv12")
+	require.NotContains(t, joined, "force_original_aspect_ratio")
+}
+
 func TestFirstDRIRenderDeviceForVendor(t *testing.T) {
 	dir := t.TempDir()
 	intelRender := filepath.Join(dir, "renderD129")

@@ -877,6 +877,7 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		profile = "hdmi_1080p"
 	}
 	selectedProfile := transcodeProfiles[profile]
+	platform := strings.ToLower(strings.TrimSpace(caps.Platform))
 	preferredContainer := cleanTaterPreferredStreamContainer(caps.PreferredStreamContainer)
 	transcodeAudioChannels := taterPlaybackTranscodeAudioChannels(caps, source.AudioChannels)
 
@@ -893,6 +894,14 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		videoCompatible = false
 	}
 	if source.Height > 0 && caps.MaxHeight > 0 && source.Height > caps.MaxHeight {
+		videoCompatible = false
+	}
+	upscaleWidth, upscaleHeight := taterPlaybackOutputDimensions(
+		source.Width, source.Height, selectedProfile.MaxWidth, selectedProfile.MaxHeight,
+	)
+	serverUpscale := (platform == "tvos" || platform == "android_tv") &&
+		upscaleWidth > source.Width && upscaleHeight > source.Height
+	if serverUpscale {
 		videoCompatible = false
 	}
 	containerCompatible := source.Container == "" ||
@@ -980,7 +989,6 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 	// the video must be encoded. Copying source audio timestamps beside a new
 	// video clock can accumulate audible drift in both AVPlayer and Media3.
 	// Direct and remux paths still preserve compatible source audio unchanged.
-	platform := strings.ToLower(strings.TrimSpace(caps.Platform))
 	synchronizeNativeTVAudio := taterPlaybackUsesNativeTV(caps) &&
 		!videoCompatible && audioCompatible
 	if synchronizeNativeTVAudio {
@@ -1084,6 +1092,8 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		} else {
 			plan.Reason = "The picture is tone-mapped for the connected display and the audio is converted for the player."
 		}
+	} else if serverUpscale {
+		plan.Reason = "Lower-resolution video and audio are converted together to match this display and remain synchronized."
 	}
 	plan.OutputWidth, plan.OutputHeight = source.Width, source.Height
 	if plan.VideoMode == "transcode" {
@@ -1104,7 +1114,25 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		source.Width, source.Height, plan.OutputWidth, plan.OutputHeight,
 		plan.OutputAudioChannels, annotatedOutputContainer,
 	)
+	if serverUpscale {
+		plan.StreamURL = annotateTaterPlaybackScaler(plan.StreamURL, "spline36")
+	}
 	return plan
+}
+
+func annotateTaterPlaybackScaler(rawURL, scaler string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return rawURL
+	}
+	query := u.Query()
+	if strings.EqualFold(strings.TrimSpace(scaler), "spline36") {
+		query.Set("tater_scaler", "spline36")
+	} else {
+		query.Del("tater_scaler")
+	}
+	u.RawQuery = query.Encode()
+	return u.String()
 }
 
 func annotateTaterPlaybackURL(
@@ -1251,7 +1279,7 @@ func taterPlaybackPlannedURL(rawURL, mode, profile, videoCodec, audioCodec strin
 		return rawURL
 	}
 	query := u.Query()
-	for _, key := range []string{"direct", "transcode", "profile", "codec", "audio_codec", "start", "tater_audio_track", "tater_audio_channels", "tater_tone_map", "tater_strip_dolby_vision", "tater_video_codec", "tater_source_video_range", "tater_output_video_range", "tater_output_container", "tater_source_width", "tater_source_height", "tater_output_width", "tater_output_height", "tater_hdr_formats", "tater_tv_output_range", "tater_tv_output_fps"} {
+	for _, key := range []string{"direct", "transcode", "profile", "codec", "audio_codec", "start", "tater_audio_track", "tater_audio_channels", "tater_tone_map", "tater_strip_dolby_vision", "tater_video_codec", "tater_source_video_range", "tater_output_video_range", "tater_output_container", "tater_source_width", "tater_source_height", "tater_output_width", "tater_output_height", "tater_scaler", "tater_hdr_formats", "tater_tv_output_range", "tater_tv_output_fps"} {
 		query.Del(key)
 	}
 	switch mode {
