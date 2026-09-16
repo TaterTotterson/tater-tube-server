@@ -474,6 +474,24 @@ func requestedTaterAudioChannels(r *http.Request) int {
 	}
 }
 
+func requestedTaterVideoDimension(r *http.Request, key string) int {
+	if r == nil {
+		return 0
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get(key)))
+	if err != nil || value <= 0 || value > 16384 {
+		return 0
+	}
+	return value
+}
+
+func requestedTaterScaler(r *http.Request) string {
+	if r != nil && strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("tater_scaler")), "spline36") {
+		return "spline36"
+	}
+	return ""
+}
+
 func taterAACTranscodeSettings(audioBitrate string, requestedChannels int) (string, int) {
 	if requestedChannels == 6 {
 		return "320k", 6
@@ -745,6 +763,9 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 			AudioChannels: requestedTaterAudioChannels(r),
 			ToneMapSource: toneMapSource, ToneMapTarget: toneMapTarget,
 			ToneMapFilter: toneMapFilter,
+			Scaler:        requestedTaterScaler(r),
+			OutputWidth:   requestedTaterVideoDimension(r, "tater_output_width"),
+			OutputHeight:  requestedTaterVideoDimension(r, "tater_output_height"),
 		},
 	)
 	videoCodec, _ := transcodeVideoSettingsForCodec(accel, transcodeCfg.HardwareDevice, profile, videoCodecPreference)
@@ -1603,6 +1624,9 @@ type transcodeOutputOptions struct {
 	ToneMapFilter    string
 	SourceVideoRange string
 	OutputVideoRange string
+	Scaler           string
+	OutputWidth      int
+	OutputHeight     int
 }
 
 func buildFFmpegTranscodeArgsWithOptions(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, options transcodeOutputOptions) []string {
@@ -1630,7 +1654,10 @@ func buildFFmpegTranscodeArgsWithOptions(cfg config.TranscodingConfig, profile t
 		args = append(args, "-t", strconv.FormatFloat(options.DurationSeconds, 'f', 3, 64))
 	}
 
-	videoCodec, filters := transcodeVideoSettingsForCodec(accel, cfg.HardwareDevice, profile, preferredCodec)
+	videoCodec, filters := transcodeVideoSettingsForCodecAndScaler(
+		accel, cfg.HardwareDevice, profile, preferredCodec,
+		options.Scaler, options.OutputWidth, options.OutputHeight,
+	)
 	filters = appendTaterToneMapFilter(
 		filters, options.ToneMapSource, options.ToneMapTarget, options.ToneMapFilter,
 	)
@@ -2033,7 +2060,19 @@ func transcodeVideoSettings(accel, device string, profile transcodeProfile) (cod
 }
 
 func transcodeVideoSettingsForCodec(accel, device string, profile transcodeProfile, preferredCodec string) (codec string, filters string) {
+	return transcodeVideoSettingsForCodecAndScaler(accel, device, profile, preferredCodec, "", 0, 0)
+}
+
+func transcodeVideoSettingsForCodecAndScaler(
+	accel, device string,
+	profile transcodeProfile,
+	preferredCodec, scaler string,
+	outputWidth, outputHeight int,
+) (codec string, filters string) {
 	scaleFilter := "scale=w=" + strconv.Itoa(profile.MaxWidth) + ":h=" + strconv.Itoa(profile.MaxHeight) + ":force_original_aspect_ratio=decrease:force_divisible_by=2"
+	if strings.EqualFold(strings.TrimSpace(scaler), "spline36") && outputWidth > 0 && outputHeight > 0 {
+		scaleFilter = "zscale=w=" + strconv.Itoa(outputWidth) + ":h=" + strconv.Itoa(outputHeight) + ":filter=spline36"
+	}
 
 	if normalizeTranscodeCodec(preferredCodec) == transcodeCodecHEVC {
 		switch accel {

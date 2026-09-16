@@ -374,6 +374,9 @@ func buildTaterLocalHLSCommand(
 					AudioChannels: command.audioChannels,
 					ToneMapSource: toneMapSource, ToneMapTarget: toneMapTarget, ToneMapFilter: toneMapFilter,
 					SourceVideoRange: sourceVideoRange, OutputVideoRange: outputVideoRange,
+					Scaler:       requestedTaterScaler(r),
+					OutputWidth:  requestedTaterVideoDimension(r, "tater_output_width"),
+					OutputHeight: requestedTaterVideoDimension(r, "tater_output_height"),
 				},
 			)
 			// A full tvOS HLS conversion owns both clocks. Correct small source
