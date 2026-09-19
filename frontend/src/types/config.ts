@@ -96,6 +96,7 @@ export interface TranscodingConfig {
 
 export interface UpscalingConfig {
 	mode: "off" | "standard" | "auto" | "ai" | string;
+	model: "fsrcnnx-8" | "fsrcnnx-16" | "artcnn-c4f16" | "artcnn-c4f32" | string;
 }
 
 export interface TranscodingHardwareOption {

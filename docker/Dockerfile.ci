@@ -120,7 +120,22 @@ RUN apt-get update && \
         -o /tmp/FSRCNNX_x2_8-0-4-1.glsl && \
     echo "e800dbc5c1c95185cc82216c597724533ff5f2880179f256eef600f03e8dc2ae  /tmp/FSRCNNX_x2_8-0-4-1.glsl" | sha256sum -c - && \
     install -m 0644 /tmp/FSRCNNX_x2_8-0-4-1.glsl /usr/share/tater-tube-server/ai-upscaling/FSRCNNX_x2_8-0-4-1.glsl && \
-    rm -f /tmp/FSRCNNX_x2_8-0-4-1.glsl && \
+    curl -fsSL --retry 3 \
+        https://github.com/igv/FSRCNN-TensorFlow/releases/download/1.1/FSRCNNX_x2_16-0-4-1.glsl \
+        -o /tmp/FSRCNNX_x2_16-0-4-1.glsl && \
+    echo "d5a24a271e5d9a3f7f7a053b150c460a44c25b3cf7f770857d57cc3a2e1c9965  /tmp/FSRCNNX_x2_16-0-4-1.glsl" | sha256sum -c - && \
+    install -m 0644 /tmp/FSRCNNX_x2_16-0-4-1.glsl /usr/share/tater-tube-server/ai-upscaling/FSRCNNX_x2_16-0-4-1.glsl && \
+    curl -fsSL --retry 3 \
+        https://github.com/Artoriuz/ArtCNN/releases/download/v1.6.2/ArtCNN_C4F16.glsl \
+        -o /tmp/ArtCNN_C4F16.glsl && \
+    echo "03d0b3d31cb82c898a94a46663021a3e8f02c5a21d69c5cfdf0208de4bfd453e  /tmp/ArtCNN_C4F16.glsl" | sha256sum -c - && \
+    install -m 0644 /tmp/ArtCNN_C4F16.glsl /usr/share/tater-tube-server/ai-upscaling/ArtCNN_C4F16.glsl && \
+    curl -fsSL --retry 3 \
+        https://github.com/Artoriuz/ArtCNN/releases/download/v1.6.2/ArtCNN_C4F32.glsl \
+        -o /tmp/ArtCNN_C4F32.glsl && \
+    echo "f773bce6cf5fe7e5e5d599a695edd40df5cd7a20c3d08c4d164d07591d5bead3  /tmp/ArtCNN_C4F32.glsl" | sha256sum -c - && \
+    install -m 0644 /tmp/ArtCNN_C4F32.glsl /usr/share/tater-tube-server/ai-upscaling/ArtCNN_C4F32.glsl && \
+    rm -f /tmp/FSRCNNX_x2_8-0-4-1.glsl /tmp/FSRCNNX_x2_16-0-4-1.glsl /tmp/ArtCNN_C4F16.glsl /tmp/ArtCNN_C4F32.glsl && \
     rm -rf /var/lib/apt/lists/*
 
 # Fail image builds if the bundled FFmpeg loses a required portable filter or,

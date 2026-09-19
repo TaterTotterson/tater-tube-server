@@ -589,6 +589,7 @@ export function ConfigurationPage() {
 									"metadata",
 									"streaming",
 									"transcoding",
+									"upscaling",
 									"system",
 									"providers",
 									"sabnzbd",

@@ -540,11 +540,12 @@ func (t *StreamTracker) SetVideoResolutionInfo(id string, sourceWidth, sourceHei
 	}
 }
 
-func (t *StreamTracker) SetUpscalingInfo(id, requested, method string, active bool) {
+func (t *StreamTracker) SetUpscalingInfo(id, requested, method, model string, active bool) {
 	if val, ok := t.streams.Load(id); ok {
 		stream := val.(*streamInternal)
 		stream.UpscalingRequested = strings.ToLower(strings.TrimSpace(requested))
 		stream.UpscalingMethod = strings.ToLower(strings.TrimSpace(method))
+		stream.UpscalingModel = strings.ToLower(strings.TrimSpace(model))
 		stream.UpscalingActive = active && stream.UpscalingMethod != ""
 		stream.lastReadAt = time.Now()
 	}
@@ -786,6 +787,7 @@ func mergePlaybackRecord(existing *nzbfilesystem.ActiveStream, next nzbfilesyste
 		existing.HardwareActive = next.HardwareActive
 		existing.UpscalingRequested = next.UpscalingRequested
 		existing.UpscalingMethod = next.UpscalingMethod
+		existing.UpscalingModel = next.UpscalingModel
 		existing.UpscalingActive = next.UpscalingActive
 	}
 	if next.SourceVideoRange != "" {
@@ -950,6 +952,7 @@ func copyStreamPresentation(dst *nzbfilesystem.ActiveStream, src nzbfilesystem.A
 	dst.OutputHeight = src.OutputHeight
 	dst.UpscalingRequested = src.UpscalingRequested
 	dst.UpscalingMethod = src.UpscalingMethod
+	dst.UpscalingModel = src.UpscalingModel
 	dst.UpscalingActive = src.UpscalingActive
 	dst.SourceVideoRange = src.SourceVideoRange
 	dst.OutputVideoRange = src.OutputVideoRange
@@ -1066,6 +1069,7 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 				existing.OutputHeight = s.OutputHeight
 				existing.UpscalingRequested = s.UpscalingRequested
 				existing.UpscalingMethod = s.UpscalingMethod
+				existing.UpscalingModel = s.UpscalingModel
 				existing.UpscalingActive = s.UpscalingActive
 				if existing.Status != "Streaming" {
 					existing.Status = s.Status

@@ -168,7 +168,7 @@ func (h *StreamHandler) prepareStreamHLSSession(
 		h.streamTracker.SetAudioChannelInfo(session.stream.ID, command.audioChannels)
 		applyTaterRequestedDynamicRangeInfo(h.streamTracker, session.stream.ID, r)
 		applyTaterRequestedResolutionInfo(h.streamTracker, session.stream.ID, r)
-		applyTaterResolvedUpscalingInfo(h.streamTracker, session.stream.ID, r, command.upscalingMethod)
+		applyTaterResolvedUpscalingInfo(h.streamTracker, session.stream.ID, r, command.upscalingMethod, command.upscalingModel)
 	}
 
 	go session.run(sessionCtx, ffmpegPath, command.args)

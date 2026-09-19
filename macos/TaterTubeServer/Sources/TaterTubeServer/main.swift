@@ -218,10 +218,15 @@ private final class ServerManager {
                 pathParts.append(existing)
             }
             environment["PATH"] = pathParts.joined(separator: ":")
-            if let aiShader = Bundle.main.resourceURL?
-                .appendingPathComponent("AI Upscaling/FSRCNNX_x2_8-0-4-1.glsl"),
-               FileManager.default.fileExists(atPath: aiShader.path) {
-                environment["TATER_AI_UPSCALER_SHADER"] = aiShader.path
+            if let aiShaderDirectory = Bundle.main.resourceURL?
+                .appendingPathComponent("AI Upscaling", isDirectory: true),
+               FileManager.default.fileExists(atPath: aiShaderDirectory.path) {
+                environment["TATER_AI_UPSCALER_DIR"] = aiShaderDirectory.path
+                let legacyAIShader = aiShaderDirectory
+                    .appendingPathComponent("FSRCNNX_x2_8-0-4-1.glsl")
+                if FileManager.default.fileExists(atPath: legacyAIShader.path) {
+                    environment["TATER_AI_UPSCALER_SHADER"] = legacyAIShader.path
+                }
             }
             if let moltenVKManifest = Bundle.main.resourceURL?
                 .appendingPathComponent("Vulkan/icd.d/MoltenVK_icd.json"),
