@@ -268,6 +268,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         timeout-minutes: 10
+        env:
+          PATH: /usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: http.version
+          GIT_CONFIG_VALUE_0: HTTP/1.1
         with:
           fetch-depth: 1
 
@@ -347,6 +352,11 @@ jobs:
 
       - name: Commit updater manifest to main
         shell: bash
+        env:
+          PATH: /usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: http.version
+          GIT_CONFIG_VALUE_0: HTTP/1.1
         run: |
           set -euo pipefail
           git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
