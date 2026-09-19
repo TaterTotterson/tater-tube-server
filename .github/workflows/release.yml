@@ -105,6 +105,22 @@ jobs:
           echo "commit=$COMMIT" >> $GITHUB_OUTPUT
           echo "release_tag=$TAG" >> $GITHUB_OUTPUT
 
+      - name: Package source snapshot
+        run: |
+          set -euo pipefail
+          git archive --format=tar.gz --output="${RUNNER_TEMP}/tater-tube-source.tar.gz" "${GITHUB_SHA}"
+          tar -tzf "${RUNNER_TEMP}/tater-tube-source.tar.gz" >/dev/null
+
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v6
+        with:
+          name: source-snapshot
+          path: ${{ runner.temp }}/tater-tube-source.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+          overwrite: true
+
       - name: Ensure GitHub Release exists
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -265,11 +281,8 @@ jobs:
       TATER_NOTARY_PROFILE: "${{ vars.TATER_NOTARY_PROFILE || 'tater-notary' }}"
 
     steps:
-      - name: Download source snapshot
+      - name: Prepare runner workspace
         shell: bash
-        timeout-minutes: 10
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           workspace="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
@@ -280,16 +293,22 @@ jobs:
             exit 1
           fi
           find "${workspace}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-          archive="$(mktemp "${RUNNER_TEMP:?RUNNER_TEMP is required}/tater-tube-source.XXXXXX")"
-          trap 'rm -f "${archive}"' EXIT
-          curl --fail --location --silent --show-error \
-            --retry 3 --retry-all-errors --connect-timeout 30 --max-time 540 \
-            --header "Accept: application/vnd.github+json" \
-            --header "Authorization: Bearer ${GH_TOKEN}" \
-            --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
-            --output "${archive}"
-          tar -xzf "${archive}" -C "${workspace}" --strip-components=1
+
+      - name: Download source snapshot
+        uses: actions/download-artifact@v8
+        with:
+          name: source-snapshot
+          path: ${{ runner.temp }}/tater-tube-source
+
+      - name: Extract source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
+          archive="${RUNNER_TEMP:?RUNNER_TEMP is required}/tater-tube-source/tater-tube-source.tar.gz"
+          test -f "${archive}"
+          tar -xzf "${archive}" -C "${workspace}"
+          rm -rf -- "${RUNNER_TEMP}/tater-tube-source"
           test -f "${workspace}/go.mod"
 
       - name: Set up Go
@@ -307,12 +326,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          brew_prefix="$(brew --prefix)"
-          echo "${brew_prefix}/bin" >> "${GITHUB_PATH}"
-          echo "TATER_FFMPEG_PATH=${brew_prefix}/bin/ffmpeg" >> "${GITHUB_ENV}"
-          echo "TATER_FFPROBE_PATH=${brew_prefix}/bin/ffprobe" >> "${GITHUB_ENV}"
-          test -x "${brew_prefix}/bin/ffmpeg"
-          test -x "${brew_prefix}/bin/ffprobe"
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg-full
+          ffmpeg_prefix="$(brew --prefix ffmpeg-full)"
+          echo "${ffmpeg_prefix}/bin" >> "${GITHUB_PATH}"
+          echo "TATER_FFMPEG_PATH=${ffmpeg_prefix}/bin/ffmpeg" >> "${GITHUB_ENV}"
+          echo "TATER_FFPROBE_PATH=${ffmpeg_prefix}/bin/ffprobe" >> "${GITHUB_ENV}"
+          test -x "${ffmpeg_prefix}/bin/ffmpeg"
+          test -x "${ffmpeg_prefix}/bin/ffprobe"
 
       - name: Build signed updater package
         shell: bash

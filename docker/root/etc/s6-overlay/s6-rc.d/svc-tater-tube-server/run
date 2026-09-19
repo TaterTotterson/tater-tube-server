@@ -1,3 +1,18 @@
 #!/usr/bin/with-contenv bash
 
+# Docker preserves the host group IDs on mapped DRM devices. Add the service
+# user to those numeric groups at startup so AMD VAAPI and Intel QSV work even
+# when the host's video/render GIDs differ from the image.
+for gpu_device in /dev/dri/renderD* /dev/dri/card*; do
+    [[ -e "${gpu_device}" ]] || continue
+    gpu_gid="$(stat -c '%g' "${gpu_device}")"
+    [[ "${gpu_gid}" != "0" ]] || continue
+    gpu_group="$(getent group "${gpu_gid}" | cut -d: -f1)"
+    if [[ -z "${gpu_group}" ]]; then
+        gpu_group="tater-gpu-${gpu_gid}"
+        groupadd --gid "${gpu_gid}" "${gpu_group}"
+    fi
+    usermod --append --groups "${gpu_group}" abc
+done
+
 exec s6-setuidgid abc /app/tater-tube-server serve --config=/config/config.yaml

@@ -47,7 +47,9 @@ docker run ... \
 ```
 
 After the container starts, open `Configuration -> Hardware Transcoding`, run
-**Auto Detect**, confirm the encoder is **Ready**, and select **Save**.
+**Auto Detect**, confirm the encoder is **Ready**, and select **Save**. The
+image automatically grants its service user the mapped DRM device groups for
+AMD and Intel hosts.
 
 ## Date and Time
 

@@ -34,10 +34,11 @@ var taterAIUpscalerProbes = struct {
 }{byFFmpeg: make(map[string]taterAIUpscalerProbe)}
 
 var taterAIUpscalerWarnings sync.Map
+var taterStandardUpscalerWarnings sync.Map
 
 // resolveTaterUpscaler keeps AI upscaling optional and fail-safe. Both Auto
 // and AI use FSRCNNX when the configured FFmpeg build can run it; otherwise
-// playback continues with the portable Spline36 path.
+// playback continues with the portable Spline path.
 func resolveTaterUpscaler(ctx context.Context, ffmpegPath, requested string) (scaler, shaderPath string) {
 	switch strings.ToLower(strings.TrimSpace(requested)) {
 	case "auto", "ai":
@@ -51,12 +52,27 @@ func resolveTaterUpscaler(ctx context.Context, ffmpegPath, requested string) (sc
 				"ffmpeg_path", ffmpegPath,
 				"reason", err)
 		}
-		return "spline36", ""
+		return resolveTaterStandardUpscaler(ctx, ffmpegPath), ""
 	case "spline36", "standard":
-		return "spline36", ""
+		return resolveTaterStandardUpscaler(ctx, ffmpegPath), ""
 	default:
 		return "", ""
 	}
+}
+
+// resolveTaterStandardUpscaler keeps Spline as the default on every FFmpeg
+// build. zscale provides the preferred Spline36 implementation when libzimg is
+// available; swscale's spline implementation is the portable fallback.
+func resolveTaterStandardUpscaler(ctx context.Context, ffmpegPath string) string {
+	ffmpegPath = effectiveFFmpegPath(ffmpegPath)
+	if taterTVFFmpegHasFilter(ctx, ffmpegPath, "zscale") {
+		return "spline36"
+	}
+	if _, alreadyLogged := taterStandardUpscalerWarnings.LoadOrStore(ffmpegPath, struct{}{}); !alreadyLogged {
+		slog.WarnContext(ctx, "FFmpeg zscale is unavailable; using portable Spline upscaling",
+			"ffmpeg_path", ffmpegPath)
+	}
+	return "spline"
 }
 
 func resolveTaterUpscalerForRequest(ctx context.Context, ffmpegPath string, request *http.Request) (scaler, shaderPath string) {
@@ -65,7 +81,7 @@ func resolveTaterUpscalerForRequest(ctx context.Context, ffmpegPath string, requ
 		return resolveTaterUpscaler(ctx, ffmpegPath, requested)
 	}
 	if request == nil || cleanTaterVideoRange(request.URL.Query().Get("tater_source_video_range")) != "sdr" {
-		return "spline36", ""
+		return resolveTaterUpscaler(ctx, ffmpegPath, "standard")
 	}
 	sourceWidth := requestedTaterVideoDimension(request, "tater_source_width")
 	sourceHeight := requestedTaterVideoDimension(request, "tater_source_height")
@@ -73,12 +89,12 @@ func resolveTaterUpscalerForRequest(ctx context.Context, ffmpegPath string, requ
 	outputHeight := requestedTaterVideoDimension(request, "tater_output_height")
 	if sourceWidth <= 0 || sourceHeight <= 0 || outputWidth <= sourceWidth || outputHeight <= sourceHeight ||
 		sourceWidth > 1920 || sourceHeight > 1080 {
-		return "spline36", ""
+		return resolveTaterUpscaler(ctx, ffmpegPath, "standard")
 	}
 	widthScale := float64(outputWidth) / float64(sourceWidth)
 	heightScale := float64(outputHeight) / float64(sourceHeight)
 	if widthScale < 1.3 || heightScale < 1.3 || widthScale > 2.01 || heightScale > 2.01 {
-		return "spline36", ""
+		return resolveTaterUpscaler(ctx, ffmpegPath, "standard")
 	}
 	return resolveTaterUpscaler(ctx, ffmpegPath, requested)
 }

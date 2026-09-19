@@ -125,6 +125,12 @@ function hardwareName(value?: string) {
 	}
 }
 
+function hardwareSettingName(value?: string) {
+	if (!value || value === "none") return "Software x264";
+	if (value === "auto") return "Auto";
+	return hardwareName(value);
+}
+
 function resolutionName(width?: number, height?: number) {
 	const w = Number(width || 0);
 	const h = Number(height || 0);
@@ -190,6 +196,17 @@ function playbackMode(stream?: ActiveStream) {
 			label: "Audio Transcode",
 			className: "badge-warning",
 			detail: withRange(`Video: Direct • Audio: Transcoding (${audioCodec}${audioChannels})`),
+		};
+	}
+	if (videoMode === "direct") {
+		const directAudio =
+			audioMode === "bitstream"
+				? `Audio: Bitstream (${audioCodec})`
+				: `Audio: Direct (${audioCodec})`;
+		return {
+			label: stream.transcoded ? "Remux" : "Direct",
+			className: "badge-outline",
+			detail: withRange(`Video: Direct • ${directAudio}`),
 		};
 	}
 	if (!stream.transcoded) {
@@ -485,7 +502,7 @@ export function Dashboard() {
 						<div className="flex items-start justify-between gap-3">
 							<div>
 								<div className="text-base-content/50 text-xs uppercase tracking-widest">
-									Detected GPU
+									Detected Recommendation
 								</div>
 								<div className="font-semibold">
 									{transcodeDetection?.recommended === "none"
@@ -496,6 +513,12 @@ export function Dashboard() {
 									{transcodeDetection?.recommended_device ||
 										transcodeDetection?.ffmpeg_path ||
 										"ffmpeg scan pending"}
+								</div>
+								<div className="mt-2 text-base-content/50 text-xs uppercase tracking-widest">
+									Active Setting
+								</div>
+								<div className="font-semibold">
+									{hardwareSettingName(transcodeDetection?.current)}
 								</div>
 							</div>
 							<div

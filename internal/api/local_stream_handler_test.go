@@ -183,7 +183,7 @@ func TestBuildTaterLocalHLSCommandRebuildsFullTranscodeAudioClock(t *testing.T) 
 	}
 }
 
-func TestBuildTaterLocalHLSCommandUsesSpline36Upscale(t *testing.T) {
+func TestBuildTaterLocalHLSCommandUsesPortableSplineWhenZscaleIsUnavailable(t *testing.T) {
 	request := httptest.NewRequest(
 		http.MethodGet,
 		"http://tube.local/api/tater/local/stream?transcode=1&profile=hdmi_4k&codec=h264&tater_scaler=spline36&tater_output_width=3840&tater_output_height=1600",
@@ -191,7 +191,9 @@ func TestBuildTaterLocalHLSCommandUsesSpline36Upscale(t *testing.T) {
 	)
 	command, err := buildTaterLocalHLSCommand(
 		request,
-		&config.Config{Transcoding: config.TranscodingConfig{}},
+		&config.Config{Transcoding: config.TranscodingConfig{
+			FFmpegPath: filepath.Join(t.TempDir(), "missing-ffmpeg"),
+		}},
 		"/media/movie.mkv",
 		"/tmp/local/index.m3u8",
 		"/tmp/local/segment-%06d.ts",
@@ -200,8 +202,8 @@ func TestBuildTaterLocalHLSCommandUsesSpline36Upscale(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := strings.Join(command.args, " ")
-	if !strings.Contains(joined, "-vf zscale=w=3840:h=1600:filter=spline36") {
-		t.Fatalf("expected Spline36 in local HLS transcode args: %s", joined)
+	if !strings.Contains(joined, "-vf scale=w=3840:h=1600:flags=spline") {
+		t.Fatalf("expected portable Spline in local HLS transcode args: %s", joined)
 	}
 }
 

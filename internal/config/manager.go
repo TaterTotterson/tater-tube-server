@@ -2038,7 +2038,7 @@ func DefaultConfig(configDir ...string) *Config {
 		Transcoding: TranscodingConfig{
 			Enabled:              &transcodingEnabled,
 			Profile:              "crt_480p",
-			HardwareAcceleration: "none",
+			HardwareAcceleration: "auto",
 			FFmpegPath:           "ffmpeg",
 			HardwareDevice:       "",
 		},

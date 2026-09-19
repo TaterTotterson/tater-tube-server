@@ -8,7 +8,9 @@ import (
 )
 
 func TestDefaultConfigUsesStandardUpscaling(t *testing.T) {
-	assert.Equal(t, "standard", DefaultConfig().Upscaling.Mode)
+	cfg := DefaultConfig()
+	assert.Equal(t, "standard", cfg.Upscaling.Mode)
+	assert.Equal(t, "auto", cfg.Transcoding.HardwareAcceleration)
 }
 
 func TestConfig_Validate_MountPaths(t *testing.T) {

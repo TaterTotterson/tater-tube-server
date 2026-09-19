@@ -12,7 +12,7 @@ dependencies:
 
 ```bash
 xcode-select --install
-brew install ffmpeg go
+brew install ffmpeg-full go
 ```
 
 The runner needs:
@@ -20,7 +20,8 @@ The runner needs:
 - macOS 14 or newer.
 - Xcode/Swift and the Xcode Command Line Tools.
 - Go 1.26 or newer.
-- Homebrew FFmpeg and ffprobe.
+- Homebrew `ffmpeg-full` and ffprobe. The release build requires VideoToolbox,
+  zscale, and libplacebo support.
 - The **Developer ID Application** certificate and private key in the runner
   user's login keychain.
 

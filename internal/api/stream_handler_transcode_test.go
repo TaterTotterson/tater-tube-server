@@ -297,6 +297,25 @@ func TestBuildFFmpegTranscodeArgsUsesSpline36ForRequestedUpscale(t *testing.T) {
 	require.NotContains(t, joined, "force_original_aspect_ratio")
 }
 
+func TestBuildFFmpegTranscodeArgsUsesPortableSplineForRequestedUpscale(t *testing.T) {
+	args := buildFFmpegTranscodeArgsWithOptions(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_4k"], "videotoolbox", transcodeCodecH264,
+		transcodeOutputOptions{
+			Scaler: "spline", OutputWidth: 3840, OutputHeight: 1600,
+		},
+	)
+	joined := strings.Join(args, " ")
+	require.Contains(t, joined, "-vf scale=w=3840:h=1600:flags=spline")
+	require.NotContains(t, joined, "zscale")
+}
+
+func TestResolveTaterStandardUpscalerPrefersZscaleWhenAvailable(t *testing.T) {
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg")
+	require.NoError(t, os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf ' .SC zscale V->V Apply resizing\\n'\n"), 0o755))
+
+	require.Equal(t, "spline36", resolveTaterStandardUpscaler(t.Context(), ffmpegPath))
+}
+
 func TestBuildFFmpegTranscodeArgsUsesAIUpscalerForRequestedUpscale(t *testing.T) {
 	args := buildFFmpegTranscodeArgsWithOptions(
 		config.TranscodingConfig{}, transcodeProfiles["hdmi_4k"], "nvenc", transcodeCodecH264,
@@ -319,7 +338,7 @@ func TestAIUpscalerFallsBackBeforeHardwareProbeForUnsupportedMedia(t *testing.T)
 		nil,
 	)
 	scaler, shaderPath := resolveTaterUpscalerForRequest(t.Context(), "missing-ffmpeg", hdrRequest)
-	require.Equal(t, "spline36", scaler)
+	require.Equal(t, "spline", scaler)
 	require.Empty(t, shaderPath)
 
 	largeScaleRequest := httptest.NewRequest(
@@ -328,8 +347,14 @@ func TestAIUpscalerFallsBackBeforeHardwareProbeForUnsupportedMedia(t *testing.T)
 		nil,
 	)
 	scaler, shaderPath = resolveTaterUpscalerForRequest(t.Context(), "missing-ffmpeg", largeScaleRequest)
-	require.Equal(t, "spline36", scaler)
+	require.Equal(t, "spline", scaler)
 	require.Empty(t, shaderPath)
+}
+
+func TestHardwareDetectionUsesLightweightProbeProfile(t *testing.T) {
+	profile := transcodeHardwareDetectionProfile()
+	require.Equal(t, 640, profile.MaxWidth)
+	require.Equal(t, 480, profile.MaxHeight)
 }
 
 func TestFirstDRIRenderDeviceForVendor(t *testing.T) {

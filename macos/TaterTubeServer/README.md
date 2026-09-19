@@ -7,7 +7,8 @@ keeps server data separate from the app so updates do not replace it.
 ## What the App Includes
 
 - The Tater Tube Server backend and web dashboard.
-- A private FFmpeg and ffprobe runtime with Apple VideoToolbox support.
+- A private FFmpeg and ffprobe runtime with Apple VideoToolbox, zscale, and
+  libplacebo support.
 - A native template-style menu bar icon with a compact active-stream count.
 - State-aware start, stop, restart, dashboard, data-folder, and log controls.
 - An optional **Start at Login** setting.
@@ -24,10 +25,11 @@ self-hosted Mac runner; the recommended release runner is an Apple Silicon Mac.
 
 ## Local Build
 
-Install Xcode Command Line Tools, Go 1.26, and FFmpeg, then build the app:
+Install Xcode Command Line Tools, Go 1.26, and the full FFmpeg formula, then
+build the app:
 
 ```bash
-brew install ffmpeg go
+brew install ffmpeg-full go
 macos/TaterTubeServer/scripts/build_app.sh
 ```
 
