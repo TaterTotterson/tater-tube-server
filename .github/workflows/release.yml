@@ -326,8 +326,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg-full
           ffmpeg_prefix="$(brew --prefix ffmpeg-full)"
+          if [[ ! -x "${ffmpeg_prefix}/bin/ffmpeg" || ! -x "${ffmpeg_prefix}/bin/ffprobe" ]]; then
+            # This is a persistent self-hosted runner. Install only when the
+            # required keg is absent so a release cannot disturb a working
+            # FFmpeg toolchain. Retry once because Homebrew can finish
+            # repairing a stale dependency link during the first attempt.
+            if ! HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg-full; then
+              echo "Initial ffmpeg-full install failed; retrying after Homebrew repaired its dependency state."
+              HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg-full
+            fi
+          fi
           echo "${ffmpeg_prefix}/bin" >> "${GITHUB_PATH}"
           echo "TATER_FFMPEG_PATH=${ffmpeg_prefix}/bin/ffmpeg" >> "${GITHUB_ENV}"
           echo "TATER_FFPROBE_PATH=${ffmpeg_prefix}/bin/ffprobe" >> "${GITHUB_ENV}"
