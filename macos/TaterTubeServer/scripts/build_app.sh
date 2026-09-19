@@ -80,6 +80,7 @@ bundle_ffmpeg() {
   chmod 755 "${FFMPEG_BIN_DIR}/ffmpeg" "${FFMPEG_BIN_DIR}/ffprobe"
 
   local -a pending=("${FFMPEG_BIN_DIR}/ffmpeg" "${FFMPEG_BIN_DIR}/ffprobe")
+  local -a pending_sources=("${ffmpeg_path}" "${ffprobe_path}")
   local index=0
   # Bash 3.2 treats an empty array expansion as unset when nounset is active.
   local -a inspected=("__none__")
@@ -88,6 +89,7 @@ bundle_ffmpeg() {
 
   while (( index < ${#pending[@]} )); do
     local payload="${pending[$index]}"
+    local source_payload="${pending_sources[$index]}"
     index=$((index + 1))
     local already_inspected=0
     local inspected_payload
@@ -102,7 +104,20 @@ bundle_ffmpeg() {
 
     while IFS= read -r dependency; do
       case "${dependency}" in
-        /System/*|/usr/lib/*|@*) continue ;;
+        /System/*|/usr/lib/*) continue ;;
+        @rpath/*)
+          dependency="$(dirname "${source_payload}")/${dependency#@rpath/}"
+          ;;
+        @loader_path/*)
+          dependency="$(dirname "${source_payload}")/${dependency#@loader_path/}"
+          ;;
+        @executable_path/*)
+          dependency="$(dirname "${ffmpeg_path}")/${dependency#@executable_path/}"
+          ;;
+        @*)
+          echo "Unsupported FFmpeg dependency path in ${source_payload}: ${dependency}" >&2
+          exit 1
+          ;;
       esac
       [[ -f "${dependency}" ]] || {
         echo "Missing FFmpeg dependency: ${dependency}" >&2
@@ -131,6 +146,7 @@ bundle_ffmpeg() {
         cp -L "${dependency}" "${destination}"
         chmod u+w "${destination}"
         pending+=("${destination}")
+        pending_sources+=("${dependency}")
       fi
     done < <(otool -L "${payload}" | tail -n +2 | awk '{print $1}')
   done
