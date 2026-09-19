@@ -1822,13 +1822,11 @@ func (h *StreamHandler) selectTranscodeAcceleration(ctx context.Context, ffmpegP
 		return requested, ""
 	}
 	if requested == "auto" {
-		detected := detectTranscodingHardware(cfg)
-		if detected.Recommended != "" && detected.Recommended != "auto" {
-			slog.InfoContext(ctx, "Selected FFmpeg hardware acceleration",
-				"requested", requested,
-				"selected", detected.Recommended,
-				"device", detected.RecommendedDevice)
-			return detected.Recommended, detected.RecommendedDevice
+		accel, device, ok := h.selectTranscodeAccelerationForCodec(
+			ctx, ffmpegPath, cfg, profile, requested, transcodeCodecH264,
+		)
+		if ok {
+			return accel, device
 		}
 		return "none", ""
 	}
@@ -2093,6 +2091,8 @@ func transcodeVideoSettingsForCodecAndUpscaler(
 		scaleFilter = taterAIUpscaleFilter(outputWidth, outputHeight, aiShaderPath)
 	} else if strings.EqualFold(strings.TrimSpace(scaler), "spline36") && outputWidth > 0 && outputHeight > 0 {
 		scaleFilter = "zscale=w=" + strconv.Itoa(outputWidth) + ":h=" + strconv.Itoa(outputHeight) + ":filter=spline36"
+	} else if strings.EqualFold(strings.TrimSpace(scaler), "spline") && outputWidth > 0 && outputHeight > 0 {
+		scaleFilter = "scale=w=" + strconv.Itoa(outputWidth) + ":h=" + strconv.Itoa(outputHeight) + ":flags=spline"
 	}
 
 	if normalizeTranscodeCodec(preferredCodec) == transcodeCodecHEVC {

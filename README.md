@@ -113,7 +113,10 @@ which may not keep up with higher resolutions.
 
 After changing container settings, recreate the container. Open
 `Configuration -> Hardware Transcoding`, select **Auto Detect**, confirm the
-encoder says **Ready**, and select **Save**.
+encoder says **Ready**, and select **Save**. Auto Detect uses a lightweight
+capability check; playback validates the actual requested resolution before it
+uses the encoder. New installations default to **Auto**; existing installations
+keep their saved selection.
 
 ### NVIDIA / NVENC
 
@@ -139,6 +142,9 @@ Confirm the GPU is visible with:
 docker exec tater-tube-server nvidia-smi
 ```
 
+If the probe reports an allocation failure, check `nvidia-smi` for other
+processes consuming GPU memory. Auto Detect itself does not run a 4K workload.
+
 ### AMD / VAAPI
 
 AMD GPUs use VAAPI on Linux. Add the device mapping below, then run Auto Detect
@@ -151,7 +157,8 @@ devices:
 
 On Unraid, add a **Device** with `/dev/dri` as both the host and container path.
 Leave **Hardware Device** blank unless you need a particular render node, such
-as `/dev/dri/renderD129`.
+as `/dev/dri/renderD129`. At startup, the image adds its service user to the
+numeric groups assigned to the mapped DRM devices.
 
 ### Intel / Quick Sync
 
@@ -166,7 +173,8 @@ recommend **Intel Quick Sync** or **VAAPI**, depending on the GPU and driver.
 - Direct play does not use the GPU; test with a stream that requires transcoding.
 - Check the server logs for the encoder-probe failure reason.
 
-The image already includes the server's supported FFmpeg build.
+The x86_64 image includes NVENC, VAAPI, zscale, libplacebo, and the bundled
+Intel/AMD VAAPI and Vulkan drivers used by the supported processing modes.
 
 ## Upscaling
 

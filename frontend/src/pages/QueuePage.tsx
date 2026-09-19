@@ -170,6 +170,9 @@ function hardwareLabel(stream: ActiveStream) {
 	if (stream.video_mode === "direct" && stream.audio_mode === "transcode") {
 		return "Audio Transcode";
 	}
+	if (stream.video_mode === "direct") {
+		return stream.transcoded ? "Remux" : "Direct Play";
+	}
 	if (!stream.transcoded) return "Direct Play";
 	if (!stream.hardware_active) return "Software Transcode";
 	switch (String(stream.hardware_acceleration || "").toLowerCase()) {

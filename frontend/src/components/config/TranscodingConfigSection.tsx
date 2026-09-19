@@ -151,6 +151,9 @@ export function TranscodingConfigSection({
 										? ` - Device: ${hardwareDetection.recommended_device}`
 										: ""}
 								</div>
+								<div className="mt-2 text-[11px] font-semibold text-primary/80">
+									Selected in the form. Use Save Settings below to apply this recommendation.
+								</div>
 							</div>
 
 							<div className="grid gap-2 md:grid-cols-2">
@@ -183,6 +186,11 @@ export function TranscodingConfigSection({
 									</div>
 								))}
 							</div>
+							{hardwareDetection.notes?.map((note) => (
+								<div key={note} className="text-[11px] text-base-content/50">
+									{note}
+								</div>
+							))}
 						</div>
 					)}
 				</div>

@@ -87,6 +87,8 @@ ARG PGID=1000
 # Set up environment variables for PUID and PGID
 ENV PUID=${PUID}
 ENV PGID=${PGID}
+ENV LIBVA_DRIVERS_PATH=/usr/lib/jellyfin-ffmpeg/lib/dri
+ENV XDG_DATA_DIRS=/usr/lib/jellyfin-ffmpeg/share:/usr/local/share:/usr/share
 
 # Set the working directory inside the container
 WORKDIR /app
@@ -120,6 +122,13 @@ RUN apt-get update && \
     ln -sf "/usr/lib/${media_ffmpeg_vendor}-ffmpeg/ffprobe" /usr/local/bin/tater-ffprobe && \
     ln -sf "/usr/lib/${media_ffmpeg_vendor}-ffmpeg/ffmpeg" /usr/local/bin/ffmpeg && \
     ln -sf "/usr/lib/${media_ffmpeg_vendor}-ffmpeg/ffprobe" /usr/local/bin/ffprobe && \
+    install -d -m 0755 /usr/share/vulkan/icd.d && \
+    if [ -d "/usr/lib/${media_ffmpeg_vendor}-ffmpeg/share/vulkan/icd.d" ]; then \
+        for vulkan_icd in /usr/lib/${media_ffmpeg_vendor}-ffmpeg/share/vulkan/icd.d/*.json; do \
+            [ -f "${vulkan_icd}" ] || continue; \
+            ln -sf "${vulkan_icd}" "/usr/share/vulkan/icd.d/$(basename "${vulkan_icd}")"; \
+        done; \
+    fi && \
     install -d -m 0755 /usr/share/tater-tube-server/ai-upscaling && \
     curl -fsSL --retry 3 \
         https://github.com/igv/FSRCNN-TensorFlow/releases/download/1.1/FSRCNNX_x2_8-0-4-1.glsl \
@@ -128,6 +137,15 @@ RUN apt-get update && \
     install -m 0644 /tmp/FSRCNNX_x2_8-0-4-1.glsl /usr/share/tater-tube-server/ai-upscaling/FSRCNNX_x2_8-0-4-1.glsl && \
     rm -f /tmp/FSRCNNX_x2_8-0-4-1.glsl && \
     rm -rf /var/lib/apt/lists/*
+
+# Fail image builds if the bundled FFmpeg loses a required portable filter or,
+# on x86_64, one of the advertised hardware backends.
+RUN ffmpeg -hide_banner -filters 2>&1 | grep -Eq '[[:space:]]zscale[[:space:]]' && \
+    if [ "${TARGETARCH}" = "amd64" ]; then \
+        ffmpeg -hide_banner -filters 2>&1 | grep -Eq '[[:space:]]libplacebo[[:space:]]' && \
+        ffmpeg -hide_banner -encoders 2>&1 | grep -Eq '[[:space:]]h264_nvenc[[:space:]]' && \
+        ffmpeg -hide_banner -encoders 2>&1 | grep -Eq '[[:space:]]h264_vaapi[[:space:]]'; \
+    fi
 
 # Make binary executable
 RUN chmod +x /app/tater-tube-server

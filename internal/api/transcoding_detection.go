@@ -72,10 +72,11 @@ func detectTranscodingHardware(cfg config.TranscodingConfig) transcodeHardwareDe
 	hwaccels := ffmpegOutput(ffmpegPath, "-hide_banner", "-hwaccels")
 	gpus := detectDRMGPUVendors()
 	hasDRI := hasDRIRenderDevice()
-	profile := transcodeProfiles[cfg.Profile]
-	if profile.Name == "" {
-		profile = transcodeProfiles["crt_480p"]
-	}
+	// Hardware detection verifies encoder availability with a small, fixed
+	// profile. Playback separately probes the requested resolution before using
+	// an encoder, so selecting a 4K fallback profile cannot make a usable GPU
+	// appear unavailable merely because the capability check exhausts memory.
+	profile := transcodeHardwareDetectionProfile()
 
 	options := []transcodeHardwareOption{
 		softwareOption(encoders),
@@ -86,6 +87,7 @@ func detectTranscodingHardware(cfg config.TranscodingConfig) transcodeHardwareDe
 		v4l2m2mOption(ffmpegPath, cfg, profile, encoders),
 	}
 	result.Options = options
+	result.Notes = append(result.Notes, "Hardware readiness is checked with a lightweight 480p probe; playback validates the requested profile.")
 
 	if opt := firstAvailable(options, "videotoolbox"); runtime.GOOS == "darwin" && opt != nil {
 		result.Recommended = opt.ID
@@ -101,6 +103,10 @@ func detectTranscodingHardware(cfg config.TranscodingConfig) transcodeHardwareDe
 	}
 	result.Notes = append(result.Notes, "No usable H.264 encoder was detected.")
 	return result
+}
+
+func transcodeHardwareDetectionProfile() transcodeProfile {
+	return transcodeProfiles["crt_480p"]
 }
 
 func softwareOption(encoders string) transcodeHardwareOption {

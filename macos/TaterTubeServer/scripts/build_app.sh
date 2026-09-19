@@ -189,6 +189,18 @@ sign_payload "${MACOS_DIR}/TaterTubeServer"
 if [[ -x "${FFMPEG_BIN_DIR}/ffmpeg" ]]; then
   "${FFMPEG_BIN_DIR}/ffmpeg" -hide_banner -version >/dev/null
   "${FFMPEG_BIN_DIR}/ffprobe" -hide_banner -version >/dev/null
+  bundled_filters="$("${FFMPEG_BIN_DIR}/ffmpeg" -hide_banner -filters 2>&1)"
+  bundled_encoders="$("${FFMPEG_BIN_DIR}/ffmpeg" -hide_banner -encoders 2>&1)"
+  for required_filter in zscale libplacebo; do
+    if ! grep -Eq "[[:space:]]${required_filter}[[:space:]]" <<< "${bundled_filters}"; then
+      echo "Bundled FFmpeg is missing the required ${required_filter} filter. Use Homebrew ffmpeg-full." >&2
+      exit 1
+    fi
+  done
+  if ! grep -Eq '[[:space:]]h264_videotoolbox[[:space:]]' <<< "${bundled_encoders}"; then
+    echo "Bundled FFmpeg is missing the required h264_videotoolbox encoder." >&2
+    exit 1
+  fi
 fi
 if [[ "${CODESIGN_IDENTITY}" == "-" ]]; then
   codesign --force --sign - --entitlements "${ENTITLEMENTS}" "${APP_DIR}"
