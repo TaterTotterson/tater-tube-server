@@ -43,6 +43,7 @@ type Config struct {
 	Metadata        MetadataConfig     `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
 	Streaming       StreamingConfig    `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
 	Transcoding     TranscodingConfig  `yaml:"transcoding" mapstructure:"transcoding" json:"transcoding"`
+	Upscaling       UpscalingConfig    `yaml:"upscaling" mapstructure:"upscaling" json:"upscaling"`
 	Health          HealthConfig       `yaml:"health" mapstructure:"health" json:"health"`
 	RClone          RCloneConfig       `yaml:"rclone" mapstructure:"rclone" json:"-"`
 	Import          ImportConfig       `yaml:"import" mapstructure:"import" json:"import"`
@@ -308,6 +309,12 @@ type TranscodingConfig struct {
 	HardwareAcceleration string `yaml:"hardware_acceleration" mapstructure:"hardware_acceleration" json:"hardware_acceleration"`
 	FFmpegPath           string `yaml:"ffmpeg_path" mapstructure:"ffmpeg_path" json:"ffmpeg_path"`
 	HardwareDevice       string `yaml:"hardware_device" mapstructure:"hardware_device" json:"hardware_device,omitempty"`
+}
+
+// UpscalingConfig selects the server-side filter used when a Tater Tube TV
+// player reports a display resolution higher than the source video.
+type UpscalingConfig struct {
+	Mode string `yaml:"mode" mapstructure:"mode" json:"mode"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -860,6 +867,9 @@ func (c *Config) Validate() error {
 	if c.Transcoding.HardwareAcceleration == "" {
 		c.Transcoding.HardwareAcceleration = "none"
 	}
+	if c.Upscaling.Mode == "" {
+		c.Upscaling.Mode = "standard"
+	}
 	if c.Newznab.Enabled == nil {
 		enabled := false
 		c.Newznab.Enabled = &enabled
@@ -1087,6 +1097,15 @@ func (c *Config) Validate() error {
 	}
 	if !validHardwareAcceleration[c.Transcoding.HardwareAcceleration] {
 		return fmt.Errorf("transcoding hardware_acceleration must be one of: none, auto, vaapi, qsv, nvenc, videotoolbox, v4l2m2m")
+	}
+	validUpscalingModes := map[string]bool{
+		"off":      true,
+		"standard": true,
+		"auto":     true,
+		"ai":       true,
+	}
+	if !validUpscalingModes[c.Upscaling.Mode] {
+		return fmt.Errorf("upscaling mode must be one of: off, standard, auto, ai")
 	}
 
 	// Validate health configuration (always active)
@@ -2022,6 +2041,9 @@ func DefaultConfig(configDir ...string) *Config {
 			HardwareAcceleration: "none",
 			FFmpegPath:           "ffmpeg",
 			HardwareDevice:       "",
+		},
+		Upscaling: UpscalingConfig{
+			Mode: "standard",
 		},
 		SegmentCache: SegmentCacheConfig{
 			Enabled:     &segmentCacheEnabled,
