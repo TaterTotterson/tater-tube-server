@@ -182,19 +182,27 @@ Open `Configuration -> Upscaling` to choose how the server enlarges video for
 Tater Tube TV players. Upscaling only runs when the connected TV resolution is
 higher than the media resolution; other playback is left unchanged.
 
-- **Auto AI** uses AI when the server passes its compatibility check and falls
-  back to Standard when it does not.
-- **AI Upscaling** prefers the experimental FSRCNNX AI model with the same safe
-  fallback.
+- **Auto AI** uses the selected AI model when the server passes its
+  compatibility check and automatically steps down through lighter models.
+- **AI Upscaling** prioritizes the selected experimental neural model with the
+  same safe fallback behavior.
 - **Standard** uses Spline36 and remains the default for broad compatibility.
 - **Off** sends the original resolution and leaves enlargement to the player or
   display.
 
+AI model choices:
+
+- **FSRCNNX Fast** is the default 8-feature model for responsive general video.
+- **FSRCNNX Quality** uses the larger 16-feature model for finer general-video
+  detail.
+- **ArtCNN Balanced** uses C4F16 for animation, line art, and CG.
+- **ArtCNN Quality** uses the heavier C4F32 animation model on faster GPUs.
+
 AI currently targets compatible SDR upscales up to 2×. It needs an FFmpeg build
 with libplacebo plus a working Vulkan device. Docker images include the pinned
-AI shader; the macOS app also includes MoltenVK so Apple Silicon can run the
-same shader through Metal. Unsupported systems continue with Standard upscaling
-automatically.
+AI shaders; the macOS app also includes MoltenVK so Apple Silicon can run the
+same models through Metal. If a selected model cannot initialize, Tater Tube
+tries its lighter fallback chain before continuing with Standard upscaling.
 
 ## Unraid
 

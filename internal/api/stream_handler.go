@@ -422,7 +422,7 @@ func applyTaterRequestedResolutionInfo(tracker *StreamTracker, streamID string, 
 	)
 }
 
-func applyTaterResolvedUpscalingInfo(tracker *StreamTracker, streamID string, r *http.Request, method string) {
+func applyTaterResolvedUpscalingInfo(tracker *StreamTracker, streamID string, r *http.Request, method, model string) {
 	if tracker == nil || strings.TrimSpace(streamID) == "" || r == nil {
 		return
 	}
@@ -435,9 +435,10 @@ func applyTaterResolvedUpscalingInfo(tracker *StreamTracker, streamID string, r 
 	outputWidth := requestedTaterVideoDimension(r, "tater_output_width")
 	outputHeight := requestedTaterVideoDimension(r, "tater_output_height")
 	method = strings.ToLower(strings.TrimSpace(method))
+	model = strings.ToLower(strings.TrimSpace(model))
 	active := method != "" && sourceWidth > 0 && sourceHeight > 0 &&
 		outputWidth > sourceWidth && outputHeight > sourceHeight
-	tracker.SetUpscalingInfo(streamID, requested, method, active)
+	tracker.SetUpscalingInfo(streamID, requested, method, model, active)
 }
 
 func isTaterInternalTranscodeInputRequest(r *http.Request) bool {
@@ -779,7 +780,7 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 		http.Error(w, "Tone mapping unavailable in the configured FFmpeg build", http.StatusServiceUnavailable)
 		return
 	}
-	scaler, aiShaderPath := resolveTaterUpscalerForRequest(r.Context(), ffmpegPath, r)
+	scaler, aiShaderPath, aiModel := resolveTaterUpscalerForRequest(r.Context(), ffmpegPath, r)
 	args := buildFFmpegTranscodeArgsWithOptions(
 		transcodeCfg, profile, accel, videoCodecPreference, transcodeOutputOptions{
 			InputPath: inputPath, StartSeconds: startSeconds,
@@ -804,7 +805,7 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	}
 	applyTaterRequestedDynamicRangeInfo(h.streamTracker, streamID, r)
 	applyTaterRequestedResolutionInfo(h.streamTracker, streamID, r)
-	applyTaterResolvedUpscalingInfo(h.streamTracker, streamID, r, scaler)
+	applyTaterResolvedUpscalingInfo(h.streamTracker, streamID, r, scaler, aiModel)
 
 	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
 	if inputPath == "" {

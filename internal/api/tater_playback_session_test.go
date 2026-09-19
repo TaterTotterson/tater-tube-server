@@ -464,12 +464,14 @@ func TestBuildTaterPlaybackPlanUsesConfiguredAIUpscaling(t *testing.T) {
 		AudioCodec: "aac", AudioChannels: 2,
 	}
 
-	plan := buildTaterPlaybackPlanWithUpscaling(req, source, "ai")
+	plan := buildTaterPlaybackPlanWithUpscaling(req, source, "ai", "artcnn-c4f32")
 	require.Equal(t, "full_transcode", plan.Mode)
 	require.Equal(t, "ai", playbackPlanQuery(t, plan.StreamURL).Get("tater_scaler"))
+	require.Equal(t, "artcnn-c4f32", playbackPlanQuery(t, plan.StreamURL).Get("tater_ai_model"))
 
-	plan = buildTaterPlaybackPlanWithUpscaling(req, source, "auto")
+	plan = buildTaterPlaybackPlanWithUpscaling(req, source, "auto", "fsrcnnx-16")
 	require.Equal(t, "auto", playbackPlanQuery(t, plan.StreamURL).Get("tater_scaler"))
+	require.Equal(t, "fsrcnnx-16", playbackPlanQuery(t, plan.StreamURL).Get("tater_ai_model"))
 }
 
 func TestBuildTaterPlaybackPlanCanDisableUpscaling(t *testing.T) {
@@ -488,13 +490,14 @@ func TestBuildTaterPlaybackPlanCanDisableUpscaling(t *testing.T) {
 	}, taterPlaybackMediaInfo{
 		Container: "mp4", VideoCodec: "h264", Width: 1920, Height: 1080,
 		AudioCodec: "aac", AudioChannels: 2,
-	}, "off")
+	}, "off", "artcnn-c4f16")
 
 	require.Equal(t, "direct", plan.Mode)
 	require.Equal(t, "direct", plan.VideoMode)
 	require.Equal(t, 1920, plan.OutputWidth)
 	require.Equal(t, 1080, plan.OutputHeight)
 	require.Empty(t, playbackPlanQuery(t, plan.StreamURL).Get("tater_scaler"))
+	require.Empty(t, playbackPlanQuery(t, plan.StreamURL).Get("tater_ai_model"))
 }
 
 func TestBuildTaterPlaybackPlanTVOSUpscalesWithoutNewCapabilityField(t *testing.T) {

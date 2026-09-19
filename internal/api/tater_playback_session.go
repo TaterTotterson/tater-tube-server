@@ -271,7 +271,7 @@ func (s *Server) handleTaterPlayerPlaybackSession(c *fiber.Ctx) error {
 		}
 	}
 
-	plan := buildTaterPlaybackPlanWithUpscaling(req, source, cfg.Upscaling.Mode)
+	plan := buildTaterPlaybackPlanWithUpscaling(req, source, cfg.Upscaling.Mode, cfg.Upscaling.Model)
 	if isTubeTV {
 		plan = buildTaterTVPlaybackPlan(req, source)
 	}
@@ -870,13 +870,14 @@ func annotateTaterTVFixedOutput(rawURL, videoRange, frameRate string) string {
 }
 
 func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybackMediaInfo) taterPlaybackSessionResponse {
-	return buildTaterPlaybackPlanWithUpscaling(req, source, "standard")
+	return buildTaterPlaybackPlanWithUpscaling(req, source, "standard", defaultTaterAIUpscalerModel)
 }
 
 func buildTaterPlaybackPlanWithUpscaling(
 	req taterPlaybackSessionRequest,
 	source taterPlaybackMediaInfo,
 	upscalingMode string,
+	upscalingModel string,
 ) taterPlaybackSessionResponse {
 	caps := req.Capabilities
 	selectedAudioTrack := selectTaterPlaybackAudioTrack(&source, req.AudioTrack, &caps)
@@ -1125,7 +1126,7 @@ func buildTaterPlaybackPlanWithUpscaling(
 		plan.OutputAudioChannels, annotatedOutputContainer,
 	)
 	if serverUpscale {
-		plan.StreamURL = annotateTaterPlaybackScaler(plan.StreamURL, upscalingMode)
+		plan.StreamURL = annotateTaterPlaybackScaler(plan.StreamURL, upscalingMode, upscalingModel)
 	}
 	return plan
 }
@@ -1139,7 +1140,7 @@ func cleanTaterUpscalingMode(mode string) string {
 	}
 }
 
-func annotateTaterPlaybackScaler(rawURL, scaler string) string {
+func annotateTaterPlaybackScaler(rawURL, scaler, model string) string {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return rawURL
@@ -1148,12 +1149,16 @@ func annotateTaterPlaybackScaler(rawURL, scaler string) string {
 	switch strings.ToLower(strings.TrimSpace(scaler)) {
 	case "auto":
 		query.Set("tater_scaler", "auto")
+		query.Set("tater_ai_model", cleanTaterAIUpscalerModel(model))
 	case "ai":
 		query.Set("tater_scaler", "ai")
+		query.Set("tater_ai_model", cleanTaterAIUpscalerModel(model))
 	case "standard", "spline36":
 		query.Set("tater_scaler", "spline36")
+		query.Del("tater_ai_model")
 	default:
 		query.Del("tater_scaler")
+		query.Del("tater_ai_model")
 	}
 	u.RawQuery = query.Encode()
 	return u.String()
@@ -1303,7 +1308,7 @@ func taterPlaybackPlannedURL(rawURL, mode, profile, videoCodec, audioCodec strin
 		return rawURL
 	}
 	query := u.Query()
-	for _, key := range []string{"direct", "transcode", "profile", "codec", "audio_codec", "start", "tater_audio_track", "tater_audio_channels", "tater_tone_map", "tater_strip_dolby_vision", "tater_video_codec", "tater_source_video_range", "tater_output_video_range", "tater_output_container", "tater_source_width", "tater_source_height", "tater_output_width", "tater_output_height", "tater_scaler", "tater_hdr_formats", "tater_tv_output_range", "tater_tv_output_fps"} {
+	for _, key := range []string{"direct", "transcode", "profile", "codec", "audio_codec", "start", "tater_audio_track", "tater_audio_channels", "tater_tone_map", "tater_strip_dolby_vision", "tater_video_codec", "tater_source_video_range", "tater_output_video_range", "tater_output_container", "tater_source_width", "tater_source_height", "tater_output_width", "tater_output_height", "tater_scaler", "tater_ai_model", "tater_hdr_formats", "tater_tv_output_range", "tater_tv_output_fps"} {
 		query.Del(key)
 	}
 	switch mode {

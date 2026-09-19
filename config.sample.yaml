@@ -36,6 +36,11 @@ transcoding:
   ffmpeg_path: 'ffmpeg'
   hardware_device: ''
 
+upscaling:
+  mode: 'standard'
+  # fsrcnnx-8, fsrcnnx-16, artcnn-c4f16, or artcnn-c4f32
+  model: 'fsrcnnx-8'
+
 newznab:
   enabled: false
   url: ''

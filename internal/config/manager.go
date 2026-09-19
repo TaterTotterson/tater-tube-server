@@ -314,7 +314,8 @@ type TranscodingConfig struct {
 // UpscalingConfig selects the server-side filter used when a Tater Tube TV
 // player reports a display resolution higher than the source video.
 type UpscalingConfig struct {
-	Mode string `yaml:"mode" mapstructure:"mode" json:"mode"`
+	Mode  string `yaml:"mode" mapstructure:"mode" json:"mode"`
+	Model string `yaml:"model" mapstructure:"model" json:"model"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -870,6 +871,9 @@ func (c *Config) Validate() error {
 	if c.Upscaling.Mode == "" {
 		c.Upscaling.Mode = "standard"
 	}
+	if c.Upscaling.Model == "" {
+		c.Upscaling.Model = "fsrcnnx-8"
+	}
 	if c.Newznab.Enabled == nil {
 		enabled := false
 		c.Newznab.Enabled = &enabled
@@ -1106,6 +1110,15 @@ func (c *Config) Validate() error {
 	}
 	if !validUpscalingModes[c.Upscaling.Mode] {
 		return fmt.Errorf("upscaling mode must be one of: off, standard, auto, ai")
+	}
+	validUpscalingModels := map[string]bool{
+		"fsrcnnx-8":    true,
+		"fsrcnnx-16":   true,
+		"artcnn-c4f16": true,
+		"artcnn-c4f32": true,
+	}
+	if !validUpscalingModels[c.Upscaling.Model] {
+		return fmt.Errorf("upscaling model must be one of: fsrcnnx-8, fsrcnnx-16, artcnn-c4f16, artcnn-c4f32")
 	}
 
 	// Validate health configuration (always active)
@@ -2043,7 +2056,8 @@ func DefaultConfig(configDir ...string) *Config {
 			HardwareDevice:       "",
 		},
 		Upscaling: UpscalingConfig{
-			Mode: "standard",
+			Mode:  "standard",
+			Model: "fsrcnnx-8",
 		},
 		SegmentCache: SegmentCacheConfig{
 			Enabled:     &segmentCacheEnabled,

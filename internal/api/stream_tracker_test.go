@@ -125,7 +125,7 @@ func TestStreamTracker_GetAll_IncludesTranscodingInfo(t *testing.T) {
 	stream := tracker.AddStream("/movies/movie.mkv", "Local", "Living Room", "127.0.0.1", "TestAgent", 1000)
 	tracker.SetTranscodingInfo(stream.ID, "hdmi_1080p", "HDMI 1080p", "vaapi", "/dev/dri/renderD128", "h264_vaapi", true)
 	tracker.SetVideoResolutionInfo(stream.ID, 1920, 1080, 3840, 2160)
-	tracker.SetUpscalingInfo(stream.ID, "auto", "ai", true)
+	tracker.SetUpscalingInfo(stream.ID, "auto", "ai", "artcnn-c4f16", true)
 
 	streams := tracker.GetAll()
 
@@ -146,6 +146,7 @@ func TestStreamTracker_GetAll_IncludesTranscodingInfo(t *testing.T) {
 	assert.Equal(t, 2160, streams[0].OutputHeight)
 	assert.Equal(t, "auto", streams[0].UpscalingRequested)
 	assert.Equal(t, "ai", streams[0].UpscalingMethod)
+	assert.Equal(t, "artcnn-c4f16", streams[0].UpscalingModel)
 	assert.True(t, streams[0].UpscalingActive)
 }
 

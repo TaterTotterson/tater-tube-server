@@ -366,18 +366,20 @@ func TestAIUpscalerFallsBackBeforeHardwareProbeForUnsupportedMedia(t *testing.T)
 		"http://tube.local/stream?tater_scaler=ai&tater_source_video_range=hdr10&tater_source_width=1920&tater_source_height=1080&tater_output_width=3840&tater_output_height=2160",
 		nil,
 	)
-	scaler, shaderPath := resolveTaterUpscalerForRequest(t.Context(), "missing-ffmpeg", hdrRequest)
+	scaler, shaderPath, model := resolveTaterUpscalerForRequest(t.Context(), "missing-ffmpeg", hdrRequest)
 	require.Equal(t, "spline", scaler)
 	require.Empty(t, shaderPath)
+	require.Empty(t, model)
 
 	largeScaleRequest := httptest.NewRequest(
 		"GET",
 		"http://tube.local/stream?tater_scaler=auto&tater_source_video_range=sdr&tater_source_width=1280&tater_source_height=720&tater_output_width=3840&tater_output_height=2160",
 		nil,
 	)
-	scaler, shaderPath = resolveTaterUpscalerForRequest(t.Context(), "missing-ffmpeg", largeScaleRequest)
+	scaler, shaderPath, model = resolveTaterUpscalerForRequest(t.Context(), "missing-ffmpeg", largeScaleRequest)
 	require.Equal(t, "spline", scaler)
 	require.Empty(t, shaderPath)
+	require.Empty(t, model)
 }
 
 func TestApplyTaterResolvedUpscalingInfoReportsFallback(t *testing.T) {
@@ -390,13 +392,49 @@ func TestApplyTaterResolvedUpscalingInfoReportsFallback(t *testing.T) {
 		nil,
 	)
 
-	applyTaterResolvedUpscalingInfo(tracker, stream.ID, request, "spline36")
+	applyTaterResolvedUpscalingInfo(tracker, stream.ID, request, "spline36", "")
 
 	recorded := tracker.GetStream(stream.ID)
 	require.NotNil(t, recorded)
 	require.Equal(t, "ai", recorded.UpscalingRequested)
 	require.Equal(t, "spline36", recorded.UpscalingMethod)
+	require.Empty(t, recorded.UpscalingModel)
 	require.True(t, recorded.UpscalingActive)
+}
+
+func TestApplyTaterResolvedUpscalingInfoReportsResolvedAIModel(t *testing.T) {
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+	stream := tracker.AddStream("/shows/episode.mkv", "Local", "Living Room", "127.0.0.1", "TestAgent", 1000)
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"http://tube.local/stream?tater_scaler=ai&tater_ai_model=artcnn-c4f32&tater_source_width=1920&tater_source_height=1080&tater_output_width=3840&tater_output_height=2160",
+		nil,
+	)
+
+	applyTaterResolvedUpscalingInfo(tracker, stream.ID, request, "ai", "artcnn-c4f16")
+
+	recorded := tracker.GetStream(stream.ID)
+	require.NotNil(t, recorded)
+	require.Equal(t, "ai", recorded.UpscalingRequested)
+	require.Equal(t, "ai", recorded.UpscalingMethod)
+	require.Equal(t, "artcnn-c4f16", recorded.UpscalingModel)
+	require.True(t, recorded.UpscalingActive)
+}
+
+func TestAIUpscalerFallbackChainsPreferLighterMatchingModels(t *testing.T) {
+	require.Equal(t,
+		[]string{"artcnn-c4f32", "artcnn-c4f16", "fsrcnnx-8"},
+		taterAIUpscalerFallbackChain("artcnn-c4f32"),
+	)
+	require.Equal(t,
+		[]string{"fsrcnnx-16", "fsrcnnx-8"},
+		taterAIUpscalerFallbackChain("fsrcnnx-16"),
+	)
+	require.Equal(t,
+		[]string{"fsrcnnx-8"},
+		taterAIUpscalerFallbackChain("unknown"),
+	)
 }
 
 func TestHardwareDetectionUsesLightweightProbeProfile(t *testing.T) {

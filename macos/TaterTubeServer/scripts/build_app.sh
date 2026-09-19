@@ -215,12 +215,35 @@ else
   rm -rf "${RESOURCES_DIR}/FFmpeg" "${RESOURCES_DIR}/Vulkan"
 fi
 
-AI_UPSCALER_SHADER="${AI_UPSCALING_DIR}/FSRCNNX_x2_8-0-4-1.glsl"
-curl --fail --location --silent --show-error --retry 3 \
+download_ai_upscaler() {
+  local filename="$1"
+  local url="$2"
+  local checksum="$3"
+  local destination="${AI_UPSCALING_DIR}/${filename}"
+
+  curl --fail --location --silent --show-error --retry 3 \
+    "${url}" \
+    --output "${destination}"
+  echo "${checksum}  ${destination}" | shasum -a 256 -c -
+  chmod 644 "${destination}"
+}
+
+download_ai_upscaler \
+  "FSRCNNX_x2_8-0-4-1.glsl" \
   "https://github.com/igv/FSRCNN-TensorFlow/releases/download/1.1/FSRCNNX_x2_8-0-4-1.glsl" \
-  --output "${AI_UPSCALER_SHADER}"
-echo "e800dbc5c1c95185cc82216c597724533ff5f2880179f256eef600f03e8dc2ae  ${AI_UPSCALER_SHADER}" | shasum -a 256 -c -
-chmod 644 "${AI_UPSCALER_SHADER}"
+  "e800dbc5c1c95185cc82216c597724533ff5f2880179f256eef600f03e8dc2ae"
+download_ai_upscaler \
+  "FSRCNNX_x2_16-0-4-1.glsl" \
+  "https://github.com/igv/FSRCNN-TensorFlow/releases/download/1.1/FSRCNNX_x2_16-0-4-1.glsl" \
+  "d5a24a271e5d9a3f7f7a053b150c460a44c25b3cf7f770857d57cc3a2e1c9965"
+download_ai_upscaler \
+  "ArtCNN_C4F16.glsl" \
+  "https://github.com/Artoriuz/ArtCNN/releases/download/v1.6.2/ArtCNN_C4F16.glsl" \
+  "03d0b3d31cb82c898a94a46663021a3e8f02c5a21d69c5cfdf0208de4bfd453e"
+download_ai_upscaler \
+  "ArtCNN_C4F32.glsl" \
+  "https://github.com/Artoriuz/ArtCNN/releases/download/v1.6.2/ArtCNN_C4F32.glsl" \
+  "f773bce6cf5fe7e5e5d599a695edd40df5cd7a20c3d08c4d164d07591d5bead3"
 
 sign_payload() {
   local payload="$1"

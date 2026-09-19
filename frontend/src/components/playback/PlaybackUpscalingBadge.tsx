@@ -7,18 +7,42 @@ interface UpscalingPresentation {
 	className: string;
 }
 
+const AI_MODEL_PRESENTATION: Record<string, { label: string; detail: string }> = {
+	"fsrcnnx-8": {
+		label: "FSRCNNX Fast",
+		detail: "FSRCNNX 8-feature model",
+	},
+	"fsrcnnx-16": {
+		label: "FSRCNNX Quality",
+		detail: "FSRCNNX 16-feature model",
+	},
+	"artcnn-c4f16": {
+		label: "ArtCNN Balanced",
+		detail: "ArtCNN C4F16 animation model",
+	},
+	"artcnn-c4f32": {
+		label: "ArtCNN Quality",
+		detail: "ArtCNN C4F32 animation model",
+	},
+};
+
 export function playbackUpscalingPresentation(stream?: ActiveStream): UpscalingPresentation | null {
 	if (!stream?.upscaling_active) return null;
 
 	const requested = String(stream.upscaling_requested || "").toLowerCase();
 	const method = String(stream.upscaling_method || "").toLowerCase();
+	const model = String(stream.upscaling_model || "fsrcnnx-8").toLowerCase();
+	const modelPresentation = AI_MODEL_PRESENTATION[model] || {
+		label: model || "AI",
+		detail: model || "AI model",
+	};
 	const fellBack = (requested === "auto" || requested === "ai") && method !== "ai";
 
 	switch (method) {
 		case "ai":
 			return {
-				label: "AI · FSRCNNX",
-				detail: "AI upscaling with the FSRCNNX model",
+				label: `AI · ${modelPresentation.label}`,
+				detail: `AI upscaling with the ${modelPresentation.detail}`,
 				className: "border-secondary/45 bg-secondary/10 text-secondary",
 			};
 		case "spline36":
