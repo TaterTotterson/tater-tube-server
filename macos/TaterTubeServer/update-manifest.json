@@ -1,7 +1,7 @@
 {
   "version": "1.6.0",
-  "build": 1,
+  "build": 134,
   "url": "https://github.com/TaterTotterson/tater-tube-server/releases/download/v1.6.0/Tater-Tube-Server-v1.6.0.zip",
-  "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-  "notes": "The first macOS app release will replace this placeholder manifest."
+  "sha256": "e4a11933c32398c11af09569e77183ac2b97055ad0d6da076e5c4d085cdc565c",
+  "notes": "Tater Tube Server macOS update v1.6.0."
 }
