@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleExecutable</key>
+  <string>TaterTubeServer</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.tatertotterson.tatertubeserver</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>Tater Tube Server</string>
+  <key>CFBundleDisplayName</key>
+  <string>Tater Tube Server</string>
+  <key>CFBundleIconFile</key>
+  <string>TaterTubeServerIcon</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.6.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>14.0</string>
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Tater Tube Server shares your configured libraries and channels with Tater Tube players on your local network.</string>
+  <key>TaterTubeServerUpdateManifestURL</key>
+  <string>https://raw.githubusercontent.com/TaterTotterson/tater-tube-server/main/macos/TaterTubeServer/update-manifest.json</string>
+</dict>
+</plist>

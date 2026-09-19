@@ -45,3 +45,8 @@ build-test-image.sh
 .claude/worktrees/
 # CocoIndex Code (ccc)
 /.cocoindex_code/
+
+# Native macOS app build products
+/macos/TaterTubeServer/.build/
+/macos/TaterTubeServer/build/
+/macos/TaterTubeServer/releases/

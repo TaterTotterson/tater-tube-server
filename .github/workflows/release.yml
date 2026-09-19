@@ -248,3 +248,124 @@ jobs:
           printf 'Publishing %s:latest from digests:\n' "$image"
           printf '  %s\n' "${refs[@]}"
           docker buildx imagetools create -t "${image}:latest" "${refs[@]}"
+
+  build-macos-app:
+    name: Build macOS App
+    runs-on: [self-hosted, macOS, tater-tube-server]
+    needs: [prepare-release, build-frontend]
+    timeout-minutes: 75
+    permissions:
+      contents: write
+    env:
+      TATER_TUBE_VERSION: ${{ needs.prepare-release.outputs.version }}
+      TATER_TUBE_BUILD: ${{ github.run_number }}
+      TATER_TUBE_COMMIT: ${{ needs.prepare-release.outputs.commit }}
+      TATER_CODESIGN_IDENTITY: "${{ vars.TATER_CODESIGN_IDENTITY || 'Developer ID Application: Tater Totterson AI LLC (8BHV7Y2D9D)' }}"
+      TATER_NOTARIZE: "${{ vars.TATER_NOTARIZE || '1' }}"
+      TATER_NOTARY_PROFILE: "${{ vars.TATER_NOTARY_PROFILE || 'tater-notary' }}"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.26.0
+
+      - name: Download frontend build
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-build
+          path: frontend/dist/
+
+      - name: Configure bundled FFmpeg
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew_prefix="$(brew --prefix)"
+          echo "${brew_prefix}/bin" >> "${GITHUB_PATH}"
+          echo "TATER_FFMPEG_PATH=${brew_prefix}/bin/ffmpeg" >> "${GITHUB_ENV}"
+          echo "TATER_FFPROBE_PATH=${brew_prefix}/bin/ffprobe" >> "${GITHUB_ENV}"
+          test -x "${brew_prefix}/bin/ffmpeg"
+          test -x "${brew_prefix}/bin/ffprobe"
+
+      - name: Build signed updater package
+        shell: bash
+        run: macos/TaterTubeServer/scripts/package_update.sh
+
+      - name: Build signed installer DMG
+        shell: bash
+        run: macos/TaterTubeServer/scripts/build_dmg.sh
+
+      - name: Verify release artifacts
+        id: macos-meta
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          zip_path="macos/TaterTubeServer/releases/Tater-Tube-Server-${RELEASE_TAG}.zip"
+          dmg_path="macos/TaterTubeServer/releases/Tater-Tube-Server-${RELEASE_TAG}.dmg"
+          manifest_path="macos/TaterTubeServer/update-manifest.json"
+          test -f "${zip_path}"
+          test -f "${dmg_path}"
+          test -f "${manifest_path}"
+          codesign --verify --deep --strict --verbose=2 "macos/TaterTubeServer/build/Tater Tube Server.app"
+          shasum -a 256 "${zip_path}" "${dmg_path}" "${manifest_path}"
+          echo "zip_path=${zip_path}" >> "${GITHUB_OUTPUT}"
+          echo "dmg_path=${dmg_path}" >> "${GITHUB_OUTPUT}"
+          echo "manifest_path=${manifest_path}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: Tater-Tube-Server-macOS-${{ needs.prepare-release.outputs.release_tag }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+          path: |
+            ${{ steps.macos-meta.outputs.zip_path }}
+            ${{ steps.macos-meta.outputs.dmg_path }}
+            ${{ steps.macos-meta.outputs.manifest_path }}
+
+      - name: Publish macOS release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "${RELEASE_TAG}" \
+            "${{ steps.macos-meta.outputs.zip_path }}" \
+            "${{ steps.macos-meta.outputs.dmg_path }}" \
+            "${{ steps.macos-meta.outputs.manifest_path }}" \
+            --clobber
+
+      - name: Commit updater manifest to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
+            echo "Release commit is not current origin/main; skipping updater manifest commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add macos/TaterTubeServer/update-manifest.json
+          if git diff --cached --quiet; then
+            echo "Updater manifest is already current."
+            exit 0
+          fi
+          git commit -m "Update macOS release manifest for ${{ needs.prepare-release.outputs.release_tag }}"
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Manifest push failed on attempt ${attempt}; retrying..." >&2
+            sleep 10
+          done
+          echo "::warning::The macOS artifacts were published, but the updater manifest could not be pushed to main."

@@ -32,7 +32,29 @@ playback compatibility.
 
 ## Quick Start
 
-The recommended installation is Docker Compose:
+Choose the installation that matches the server computer.
+
+### macOS App
+
+On an Apple Silicon Mac running macOS 14 or newer, download the latest
+`Tater-Tube-Server-vX.Y.Z.dmg` from
+[GitHub Releases](https://github.com/TaterTotterson/tater-tube-server/releases),
+drag **Tater Tube Server** to Applications, and open it. The server starts from
+its own menu bar icon and opens the dashboard automatically the first time.
+
+The app includes FFmpeg with Apple VideoToolbox support. Use the menu bar icon
+to open the dashboard, restart the server, view logs, open its data folder,
+enable **Start at Login**, or check for updates. Configuration, libraries,
+metadata, logs, and playback data remain in:
+
+```text
+~/Library/Application Support/Tater Tube Server
+```
+
+### Docker or Unraid
+
+Docker Compose is the recommended installation for Linux servers and NAS
+systems:
 
 ```yaml
 services:
@@ -57,7 +79,7 @@ Tube TV and for players that cannot direct-play a source format or resolution.
 docker compose up -d
 ```
 
-Then:
+After the macOS app or container is running:
 
 1. Open `http://SERVER-IP:8080`.
 2. Open `Configuration -> Hardware Transcoding`, run **Auto Detect**, confirm the
@@ -70,9 +92,10 @@ Then:
 5. Open `Configuration -> Tater Tube Players` and create a pairing code.
 6. Enter the server address and pairing code in the Tater Tube Player.
 
-The `/config` volume stores the configuration, database, logs, metadata,
-pairing information, and segment cache. Login is disabled by default; enable
-authentication before exposing the dashboard outside your trusted network.
+The Docker `/config` volume, or the macOS Application Support folder, stores the
+configuration, database, logs, metadata, pairing information, and segment
+cache. Login is disabled by default; enable authentication before exposing the
+dashboard outside your trusted network.
 
 ## Hardware Transcoding
 
