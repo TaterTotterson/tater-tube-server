@@ -192,7 +192,9 @@ higher than the media resolution; other playback is left unchanged.
 
 AI currently targets compatible SDR upscales up to 2×. It needs an FFmpeg build
 with libplacebo plus a working Vulkan device. Docker images include the pinned
-AI shader; unsupported systems continue with Standard upscaling automatically.
+AI shader; the macOS app also includes MoltenVK so Apple Silicon can run the
+same shader through Metal. Unsupported systems continue with Standard upscaling
+automatically.
 
 ## Unraid
 

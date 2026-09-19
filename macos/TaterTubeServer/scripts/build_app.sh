@@ -13,6 +13,8 @@ SERVER_DIR="${RESOURCES_DIR}/Server"
 FFMPEG_BIN_DIR="${RESOURCES_DIR}/FFmpeg/bin"
 FFMPEG_LIB_DIR="${RESOURCES_DIR}/FFmpeg/lib"
 AI_UPSCALING_DIR="${RESOURCES_DIR}/AI Upscaling"
+VULKAN_LIB_DIR="${RESOURCES_DIR}/Vulkan/lib"
+VULKAN_ICD_DIR="${RESOURCES_DIR}/Vulkan/icd.d"
 INFO_PLIST_SOURCE="${PROJECT_DIR}/Resources/Info.plist"
 ENTITLEMENTS="${TATER_TUBE_SERVER_ENTITLEMENTS:-${PROJECT_DIR}/Resources/TaterTubeServer.entitlements}"
 CODESIGN_IDENTITY="${TATER_CODESIGN_IDENTITY:--}"
@@ -35,7 +37,8 @@ SWIFT_BIN_DIR="$(swift build -c release --package-path "${PROJECT_DIR}" --show-b
 "${SCRIPT_DIR}/generate_app_icon.sh"
 
 rm -rf "${APP_DIR}"
-mkdir -p "${MACOS_DIR}" "${SERVER_DIR}" "${FFMPEG_BIN_DIR}" "${FFMPEG_LIB_DIR}" "${AI_UPSCALING_DIR}"
+mkdir -p "${MACOS_DIR}" "${SERVER_DIR}" "${FFMPEG_BIN_DIR}" "${FFMPEG_LIB_DIR}" \
+  "${AI_UPSCALING_DIR}" "${VULKAN_LIB_DIR}" "${VULKAN_ICD_DIR}"
 
 cp "${SWIFT_BIN_DIR}/TaterTubeServer" "${MACOS_DIR}/TaterTubeServer"
 cp "${INFO_PLIST_SOURCE}" "${CONTENTS_DIR}/Info.plist"
@@ -175,10 +178,41 @@ bundle_ffmpeg() {
   done
 }
 
+bundle_moltenvk() {
+  local moltenvk_prefix="${TATER_MOLTENVK_PREFIX:-}"
+  if [[ -z "${moltenvk_prefix}" ]] && command -v brew >/dev/null 2>&1; then
+    moltenvk_prefix="$(brew --prefix molten-vk 2>/dev/null || true)"
+  fi
+  if [[ -z "${moltenvk_prefix}" ]]; then
+    echo "MoltenVK is required for macOS AI upscaling. Install it with: brew install molten-vk" >&2
+    exit 1
+  fi
+
+  local library_source="${moltenvk_prefix}/lib/libMoltenVK.dylib"
+  local manifest_source="${moltenvk_prefix}/etc/vulkan/icd.d/MoltenVK_icd.json"
+  local library_destination="${VULKAN_LIB_DIR}/libMoltenVK.dylib"
+  local manifest_destination="${VULKAN_ICD_DIR}/MoltenVK_icd.json"
+  if [[ ! -f "${library_source}" || ! -f "${manifest_source}" ]]; then
+    echo "MoltenVK is incomplete under ${moltenvk_prefix}. Reinstall it with Homebrew." >&2
+    exit 1
+  fi
+
+  cp -L "${library_source}" "${library_destination}"
+  chmod 755 "${library_destination}"
+  sed -E \
+    's#("library_path"[[:space:]]*:[[:space:]]*)"[^"]+"#\1"../lib/libMoltenVK.dylib"#' \
+    "${manifest_source}" > "${manifest_destination}"
+  grep -Eq '"library_path"[[:space:]]*:[[:space:]]*"\.\./lib/libMoltenVK\.dylib"' "${manifest_destination}" || {
+    echo "Unable to make the bundled MoltenVK manifest relocatable." >&2
+    exit 1
+  }
+}
+
 if [[ "${TATER_BUNDLE_FFMPEG:-1}" == "1" ]]; then
   bundle_ffmpeg
+  bundle_moltenvk
 else
-  rmdir "${FFMPEG_BIN_DIR}" "${FFMPEG_LIB_DIR}" "${RESOURCES_DIR}/FFmpeg" 2>/dev/null || true
+  rm -rf "${RESOURCES_DIR}/FFmpeg" "${RESOURCES_DIR}/Vulkan"
 fi
 
 AI_UPSCALER_SHADER="${AI_UPSCALING_DIR}/FSRCNNX_x2_8-0-4-1.glsl"
@@ -217,6 +251,18 @@ if [[ -x "${FFMPEG_BIN_DIR}/ffmpeg" ]]; then
   done
   if ! grep -Eq '[[:space:]]h264_videotoolbox[[:space:]]' <<< "${bundled_encoders}"; then
     echo "Bundled FFmpeg is missing the required h264_videotoolbox encoder." >&2
+    exit 1
+  fi
+  VULKAN_MANIFEST="${VULKAN_ICD_DIR}/MoltenVK_icd.json"
+  if ! env \
+    VK_DRIVER_FILES="${VULKAN_MANIFEST}" \
+    VK_ICD_FILENAMES="${VULKAN_MANIFEST}" \
+    "${FFMPEG_BIN_DIR}/ffmpeg" \
+      -hide_banner -loglevel error -nostdin \
+      -f lavfi -i "color=size=64x36:rate=1:duration=1" \
+      -vf "libplacebo=w=128:h=72:format=yuv420p:upscaler=spline36:custom_shader_path='${AI_UPSCALER_SHADER}'" \
+      -frames:v 1 -an -f null -; then
+    echo "Bundled FFmpeg could not run FSRCNNX through the packaged MoltenVK driver." >&2
     exit 1
   fi
 fi

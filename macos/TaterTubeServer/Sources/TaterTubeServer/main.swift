@@ -223,6 +223,12 @@ private final class ServerManager {
                FileManager.default.fileExists(atPath: aiShader.path) {
                 environment["TATER_AI_UPSCALER_SHADER"] = aiShader.path
             }
+            if let moltenVKManifest = Bundle.main.resourceURL?
+                .appendingPathComponent("Vulkan/icd.d/MoltenVK_icd.json"),
+               FileManager.default.fileExists(atPath: moltenVKManifest.path) {
+                environment["VK_DRIVER_FILES"] = moltenVKManifest.path
+                environment["VK_ICD_FILENAMES"] = moltenVKManifest.path
+            }
 
             let task = Process()
             task.executableURL = executable

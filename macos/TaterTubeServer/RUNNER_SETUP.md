@@ -12,7 +12,7 @@ dependencies:
 
 ```bash
 xcode-select --install
-brew install ffmpeg-full go
+brew install ffmpeg-full molten-vk go
 ```
 
 The runner needs:
@@ -20,8 +20,9 @@ The runner needs:
 - macOS 14 or newer.
 - Xcode/Swift and the Xcode Command Line Tools.
 - Go 1.26 or newer.
-- Homebrew `ffmpeg-full` and ffprobe. The release build requires VideoToolbox,
-  zscale, and libplacebo support.
+- Homebrew `ffmpeg-full`, ffprobe, and `molten-vk`. The release build requires
+  VideoToolbox, zscale, and libplacebo support and bundles MoltenVK so FSRCNNX
+  works without Homebrew on the installed Mac.
 - The **Developer ID Application** certificate and private key in the runner
   user's login keychain.
 

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -377,6 +378,25 @@ func TestAIUpscalerFallsBackBeforeHardwareProbeForUnsupportedMedia(t *testing.T)
 	scaler, shaderPath = resolveTaterUpscalerForRequest(t.Context(), "missing-ffmpeg", largeScaleRequest)
 	require.Equal(t, "spline", scaler)
 	require.Empty(t, shaderPath)
+}
+
+func TestApplyTaterResolvedUpscalingInfoReportsFallback(t *testing.T) {
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+	stream := tracker.AddStream("/movies/movie.mkv", "Local", "Living Room", "127.0.0.1", "TestAgent", 1000)
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"http://tube.local/stream?tater_scaler=ai&tater_source_width=1920&tater_source_height=1080&tater_output_width=3840&tater_output_height=2160",
+		nil,
+	)
+
+	applyTaterResolvedUpscalingInfo(tracker, stream.ID, request, "spline36")
+
+	recorded := tracker.GetStream(stream.ID)
+	require.NotNil(t, recorded)
+	require.Equal(t, "ai", recorded.UpscalingRequested)
+	require.Equal(t, "spline36", recorded.UpscalingMethod)
+	require.True(t, recorded.UpscalingActive)
 }
 
 func TestHardwareDetectionUsesLightweightProbeProfile(t *testing.T) {

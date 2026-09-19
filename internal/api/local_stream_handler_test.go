@@ -239,6 +239,9 @@ func TestBuildTaterLocalHLSCommandUsesPortableSplineWhenZscaleIsUnavailable(t *t
 	if !strings.Contains(joined, "-vf scale=w=3840:h=1600:flags=spline") {
 		t.Fatalf("expected portable Spline in local HLS transcode args: %s", joined)
 	}
+	if command.upscalingMethod != "spline" {
+		t.Fatalf("expected actual upscaling method to be reported, got %q", command.upscalingMethod)
+	}
 }
 
 func TestBuildTaterLocalHLSCommandStripsDolbyVisionForHDRBaseFallback(t *testing.T) {

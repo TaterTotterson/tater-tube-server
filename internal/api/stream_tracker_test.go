@@ -124,7 +124,8 @@ func TestStreamTracker_GetAll_IncludesTranscodingInfo(t *testing.T) {
 
 	stream := tracker.AddStream("/movies/movie.mkv", "Local", "Living Room", "127.0.0.1", "TestAgent", 1000)
 	tracker.SetTranscodingInfo(stream.ID, "hdmi_1080p", "HDMI 1080p", "vaapi", "/dev/dri/renderD128", "h264_vaapi", true)
-	tracker.SetVideoResolutionInfo(stream.ID, 3840, 2160, 1920, 1080)
+	tracker.SetVideoResolutionInfo(stream.ID, 1920, 1080, 3840, 2160)
+	tracker.SetUpscalingInfo(stream.ID, "auto", "ai", true)
 
 	streams := tracker.GetAll()
 
@@ -139,10 +140,13 @@ func TestStreamTracker_GetAll_IncludesTranscodingInfo(t *testing.T) {
 	assert.Equal(t, "transcode", streams[0].VideoMode)
 	assert.Equal(t, "transcode", streams[0].AudioMode)
 	assert.Equal(t, "aac", streams[0].AudioCodec)
-	assert.Equal(t, 3840, streams[0].SourceWidth)
-	assert.Equal(t, 2160, streams[0].SourceHeight)
-	assert.Equal(t, 1920, streams[0].OutputWidth)
-	assert.Equal(t, 1080, streams[0].OutputHeight)
+	assert.Equal(t, 1920, streams[0].SourceWidth)
+	assert.Equal(t, 1080, streams[0].SourceHeight)
+	assert.Equal(t, 3840, streams[0].OutputWidth)
+	assert.Equal(t, 2160, streams[0].OutputHeight)
+	assert.Equal(t, "auto", streams[0].UpscalingRequested)
+	assert.Equal(t, "ai", streams[0].UpscalingMethod)
+	assert.True(t, streams[0].UpscalingActive)
 }
 
 func TestStreamTracker_GetAll_ReportsAudioOnlyTranscoding(t *testing.T) {
