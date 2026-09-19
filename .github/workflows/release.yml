@@ -267,8 +267,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        timeout-minutes: 10
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -348,7 +349,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git fetch origin main
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
           if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
             echo "Release commit is not current origin/main; skipping updater manifest commit."
             exit 0
