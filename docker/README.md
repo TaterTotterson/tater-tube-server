@@ -1,11 +1,13 @@
-# Tater Tube Server Docker
+# Tater Tube Server Docker Image
 
-This directory contains container builds for the Tater Tube Server backend.
+This directory contains the files used to build the Tater Tube Server container.
+For installation, Unraid, local-media, and troubleshooting instructions, see
+the [main README](../README.md).
 
-## Files
+## Image Files
 
-- `Dockerfile` builds the frontend and backend in one image.
-- `Dockerfile.ci` expects `frontend/dist` to already exist.
+- `Dockerfile` builds the frontend and backend from source.
+- `Dockerfile.ci` uses frontend assets produced by the release workflow.
 - `root/` contains the s6-overlay service definition.
 
 ## Basic Run
@@ -19,43 +21,43 @@ docker run -d \
   ghcr.io/tatertotterson/tater-tube-server:latest
 ```
 
-The server UI is available at `http://localhost:8080`.
-Configure NNTP providers and the Newznab Stream catalog from the web UI, then
-enter the server URL and download key in Tater Tube's Usenet module.
+Open `http://SERVER-IP:8080`. The `/config` volume stores configuration, the
+database, logs, metadata, pairing information, imports, and the segment cache.
+
+## GPU Access
+
+The image includes the supported FFmpeg build. Software transcoding needs no
+extra container options.
+
+For NVIDIA NVENC:
+
+```bash
+docker run ... \
+  --gpus all \
+  -e NVIDIA_DRIVER_CAPABILITIES=all \
+  ghcr.io/tatertotterson/tater-tube-server:latest
+```
+
+For AMD VAAPI or Intel Quick Sync/VAAPI:
+
+```bash
+docker run ... \
+  --device /dev/dri:/dev/dri \
+  ghcr.io/tatertotterson/tater-tube-server:latest
+```
+
+After the container starts, open `Configuration -> Hardware Transcoding`, run
+**Auto Detect**, confirm the encoder is **Ready**, and select **Save**.
 
 ## Date and Time
 
-The running container uses the Docker host's system clock; the image does not
-store or maintain its own clock. Keep automatic time synchronization/NTP
-enabled on the Docker host. If the host clock is corrected, restart Tater Tube
-Server so its in-memory guide and scheduled work restart from the corrected
-time. A `TZ` container setting changes the displayed local timezone only and
-does not repair an inaccurate host clock.
+The container uses the Docker host's clock. Keep time synchronization enabled
+on the host. The optional `TZ` environment variable changes the displayed time
+zone but cannot correct an inaccurate host clock.
 
-## Volume
+## Build Locally
 
-`/config` stores `config.yaml`, the database, logs, metadata, imports, and
-segment cache data. Login is disabled by default; enable it from the web UI only
-if you need it.
-
-Streaming does not persist full media downloads by default. The persistent
-stream cache stores decoded Usenet segments in `/config/segment-cache`; adjust
-its size, expiry, or path from the web UI under `Configuration -> Streaming`.
-
-A bundled FFmpeg build is installed in the image for optional playback
-transcoding. Software x264 works without extra Docker flags. For VAAPI/QSV on
-Linux, pass `/dev/dri` through as a device:
-
-```bash
-docker run ... --device /dev/dri:/dev/dri ...
-```
-
-Then select the hardware mode in `Configuration -> Hardware Transcoding`.
-Tater Tube players decide per playback request whether to direct play or
-transcode. Intel QSV uses a QSV device derived from Intel VAAPI, and the
-hardware device field can select a specific render node when needed.
-
-## Build
+From the repository root:
 
 ```bash
 docker build -f docker/Dockerfile -t tater-tube-server:dev .
