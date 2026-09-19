@@ -7,6 +7,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestDefaultConfigUsesStandardUpscaling(t *testing.T) {
+	assert.Equal(t, "standard", DefaultConfig().Upscaling.Mode)
+}
+
 func TestConfig_Validate_MountPaths(t *testing.T) {
 	tests := []struct {
 		name        string

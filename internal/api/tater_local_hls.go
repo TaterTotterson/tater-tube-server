@@ -365,6 +365,9 @@ func buildTaterLocalHLSCommand(
 				toneMapSource, toneMapTarget, toneMapFilter, audioTrack, "mpegts", outputVideoRange,
 			)
 		} else {
+			scaler, aiShaderPath := resolveTaterUpscalerForRequest(
+				r.Context(), effectiveFFmpegPath(cfg.Transcoding.FFmpegPath), r,
+			)
 			command.videoMode = "transcode"
 			command.audioMode = "transcode"
 			command.audioCodec = "aac"
@@ -374,7 +377,8 @@ func buildTaterLocalHLSCommand(
 					AudioChannels: command.audioChannels,
 					ToneMapSource: toneMapSource, ToneMapTarget: toneMapTarget, ToneMapFilter: toneMapFilter,
 					SourceVideoRange: sourceVideoRange, OutputVideoRange: outputVideoRange,
-					Scaler:       requestedTaterScaler(r),
+					Scaler:       scaler,
+					AIShaderPath: aiShaderPath,
 					OutputWidth:  requestedTaterVideoDimension(r, "tater_output_width"),
 					OutputHeight: requestedTaterVideoDimension(r, "tater_output_height"),
 				},

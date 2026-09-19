@@ -30,6 +30,9 @@ transcoding:
     ffmpeg_path: ffmpeg
     hardware_device: ''
 
+upscaling:
+    mode: standard
+
 stremio:
     enabled: true
     nzb_ttl_hours: 24

@@ -9,6 +9,7 @@ export interface ConfigResponse {
 	metadata: MetadataConfig;
 	streaming: StreamingConfig;
 	transcoding: TranscodingConfig;
+	upscaling: UpscalingConfig;
 	health: HealthConfig;
 	segment_cache: SegmentCacheConfig;
 	import: ImportConfig;
@@ -91,6 +92,10 @@ export interface TranscodingConfig {
 		| string;
 	ffmpeg_path: string;
 	hardware_device?: string;
+}
+
+export interface UpscalingConfig {
+	mode: "off" | "standard" | "auto" | "ai" | string;
 }
 
 export interface TranscodingHardwareOption {
@@ -268,6 +273,7 @@ export interface ConfigUpdateRequest {
 	metadata?: MetadataUpdateRequest;
 	streaming?: StreamingUpdateRequest;
 	transcoding?: Partial<TranscodingConfig>;
+	upscaling?: Partial<UpscalingConfig>;
 	segment_cache?: Partial<SegmentCacheConfig>;
 	health?: HealthUpdateRequest;
 	import?: ImportUpdateRequest;
@@ -406,6 +412,7 @@ export type ConfigSection =
 	| "metadata"
 	| "streaming"
 	| "transcoding"
+	| "upscaling"
 	| "segment_cache"
 	| "health"
 	| "import"
@@ -1007,6 +1014,13 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		description:
 			"FFmpeg playback conversion profiles and hardware acceleration for Stream and Local media.",
 		icon: "Cpu",
+		canEdit: true,
+	},
+	upscaling: {
+		title: "Upscaling",
+		description:
+			"Choose how lower-resolution video is enlarged when a Tater Tube TV display has a higher resolution.",
+		icon: "Sparkles",
 		canEdit: true,
 	},
 	segment_cache: {

@@ -168,6 +168,24 @@ recommend **Intel Quick Sync** or **VAAPI**, depending on the GPU and driver.
 
 The image already includes the server's supported FFmpeg build.
 
+## Upscaling
+
+Open `Configuration -> Upscaling` to choose how the server enlarges video for
+Tater Tube TV players. Upscaling only runs when the connected TV resolution is
+higher than the media resolution; other playback is left unchanged.
+
+- **Auto AI** uses AI when the server passes its compatibility check and falls
+  back to Standard when it does not.
+- **AI Upscaling** prefers the experimental FSRCNNX AI model with the same safe
+  fallback.
+- **Standard** uses Spline36 and remains the default for broad compatibility.
+- **Off** sends the original resolution and leaves enlargement to the player or
+  display.
+
+AI currently targets compatible SDR upscales up to 2×. It needs an FFmpeg build
+with libplacebo plus a working Vulkan device. Docker images include the pinned
+AI shader; unsupported systems continue with Standard upscaling automatically.
+
 ## Unraid
 
 | Setting | Value |

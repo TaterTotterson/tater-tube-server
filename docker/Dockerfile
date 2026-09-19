@@ -120,6 +120,13 @@ RUN apt-get update && \
     ln -sf "/usr/lib/${media_ffmpeg_vendor}-ffmpeg/ffprobe" /usr/local/bin/tater-ffprobe && \
     ln -sf "/usr/lib/${media_ffmpeg_vendor}-ffmpeg/ffmpeg" /usr/local/bin/ffmpeg && \
     ln -sf "/usr/lib/${media_ffmpeg_vendor}-ffmpeg/ffprobe" /usr/local/bin/ffprobe && \
+    install -d -m 0755 /usr/share/tater-tube-server/ai-upscaling && \
+    curl -fsSL --retry 3 \
+        https://github.com/igv/FSRCNN-TensorFlow/releases/download/1.1/FSRCNNX_x2_8-0-4-1.glsl \
+        -o /tmp/FSRCNNX_x2_8-0-4-1.glsl && \
+    echo "e800dbc5c1c95185cc82216c597724533ff5f2880179f256eef600f03e8dc2ae  /tmp/FSRCNNX_x2_8-0-4-1.glsl" | sha256sum -c - && \
+    install -m 0644 /tmp/FSRCNNX_x2_8-0-4-1.glsl /usr/share/tater-tube-server/ai-upscaling/FSRCNNX_x2_8-0-4-1.glsl && \
+    rm -f /tmp/FSRCNNX_x2_8-0-4-1.glsl && \
     rm -rf /var/lib/apt/lists/*
 
 # Make binary executable

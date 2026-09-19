@@ -218,6 +218,11 @@ private final class ServerManager {
                 pathParts.append(existing)
             }
             environment["PATH"] = pathParts.joined(separator: ":")
+            if let aiShader = Bundle.main.resourceURL?
+                .appendingPathComponent("AI Upscaling/FSRCNNX_x2_8-0-4-1.glsl"),
+               FileManager.default.fileExists(atPath: aiShader.path) {
+                environment["TATER_AI_UPSCALER_SHADER"] = aiShader.path
+            }
 
             let task = Process()
             task.executableURL = executable

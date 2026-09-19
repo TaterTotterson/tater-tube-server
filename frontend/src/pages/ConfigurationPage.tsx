@@ -35,6 +35,7 @@ import { TaterConfigSection } from "../components/config/TaterConfigSection";
 import { TaterPlayersConfigSection } from "../components/config/TaterPlayersConfigSection";
 import { TranscodingConfigSection } from "../components/config/TranscodingConfigSection";
 import { TubeTVConfigSection } from "../components/config/TubeTVConfigSection";
+import { UpscalingConfigSection } from "../components/config/UpscalingConfigSection";
 import { ImportConfigSection } from "../components/config/WorkersConfigSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
@@ -64,6 +65,7 @@ import type {
 	TaterBumpersConfig,
 	TranscodingConfig,
 	TubeTVConfig,
+	UpscalingConfig,
 } from "../types/config";
 import { CONFIG_SECTIONS } from "../types/config";
 
@@ -100,7 +102,7 @@ const SECTION_GROUPS = [
 	},
 	{
 		title: "Processing",
-		sections: ["transcoding", "import", "streaming", "metadata"],
+		sections: ["transcoding", "upscaling", "import", "streaming", "metadata"],
 	},
 	{
 		title: "Access",
@@ -223,6 +225,11 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "transcoding",
 					config: { transcoding: data as unknown as TranscodingConfig },
+				});
+			} else if (section === "upscaling") {
+				await updateConfigSection.mutateAsync({
+					section: "upscaling",
+					config: { upscaling: data as unknown as UpscalingConfig },
 				});
 			} else if (section === "segment_cache") {
 				await updateConfigSection.mutateAsync({
@@ -489,6 +496,13 @@ export function ConfigurationPage() {
 								)}
 								{activeSection === "transcoding" && (
 									<TranscodingConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
+								{activeSection === "upscaling" && (
+									<UpscalingConfigSection
 										config={config}
 										onUpdate={handleConfigUpdate}
 										isUpdating={updateConfigSection.isPending}

@@ -271,7 +271,7 @@ func (s *Server) handleTaterPlayerPlaybackSession(c *fiber.Ctx) error {
 		}
 	}
 
-	plan := buildTaterPlaybackPlan(req, source)
+	plan := buildTaterPlaybackPlanWithUpscaling(req, source, cfg.Upscaling.Mode)
 	if isTubeTV {
 		plan = buildTaterTVPlaybackPlan(req, source)
 	}
@@ -870,6 +870,14 @@ func annotateTaterTVFixedOutput(rawURL, videoRange, frameRate string) string {
 }
 
 func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybackMediaInfo) taterPlaybackSessionResponse {
+	return buildTaterPlaybackPlanWithUpscaling(req, source, "standard")
+}
+
+func buildTaterPlaybackPlanWithUpscaling(
+	req taterPlaybackSessionRequest,
+	source taterPlaybackMediaInfo,
+	upscalingMode string,
+) taterPlaybackSessionResponse {
 	caps := req.Capabilities
 	selectedAudioTrack := selectTaterPlaybackAudioTrack(&source, req.AudioTrack, &caps)
 	profile := strings.TrimSpace(req.Profile)
@@ -899,7 +907,9 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 	upscaleWidth, upscaleHeight := taterPlaybackOutputDimensions(
 		source.Width, source.Height, selectedProfile.MaxWidth, selectedProfile.MaxHeight,
 	)
-	serverUpscale := (platform == "tvos" || platform == "android_tv") &&
+	upscalingMode = cleanTaterUpscalingMode(upscalingMode)
+	serverUpscale := upscalingMode != "off" &&
+		(platform == "tvos" || platform == "android_tv") &&
 		upscaleWidth > source.Width && upscaleHeight > source.Height
 	if serverUpscale {
 		videoCompatible = false
@@ -1115,9 +1125,18 @@ func buildTaterPlaybackPlan(req taterPlaybackSessionRequest, source taterPlaybac
 		plan.OutputAudioChannels, annotatedOutputContainer,
 	)
 	if serverUpscale {
-		plan.StreamURL = annotateTaterPlaybackScaler(plan.StreamURL, "spline36")
+		plan.StreamURL = annotateTaterPlaybackScaler(plan.StreamURL, upscalingMode)
 	}
 	return plan
+}
+
+func cleanTaterUpscalingMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "off", "auto", "ai":
+		return strings.ToLower(strings.TrimSpace(mode))
+	default:
+		return "standard"
+	}
 }
 
 func annotateTaterPlaybackScaler(rawURL, scaler string) string {
@@ -1126,9 +1145,14 @@ func annotateTaterPlaybackScaler(rawURL, scaler string) string {
 		return rawURL
 	}
 	query := u.Query()
-	if strings.EqualFold(strings.TrimSpace(scaler), "spline36") {
+	switch strings.ToLower(strings.TrimSpace(scaler)) {
+	case "auto":
+		query.Set("tater_scaler", "auto")
+	case "ai":
+		query.Set("tater_scaler", "ai")
+	case "standard", "spline36":
 		query.Set("tater_scaler", "spline36")
-	} else {
+	default:
 		query.Del("tater_scaler")
 	}
 	u.RawQuery = query.Encode()

@@ -40,7 +40,10 @@ func TestTaterPairPlayerUsesPairingCodeName(t *testing.T) {
 	require.NotEmpty(t, codeEnvelope.Data.Code)
 	require.Equal(t, "Living Room", codeEnvelope.Data.Name)
 
-	pairBody, err := json.Marshal(map[string]string{"pin": codeEnvelope.Data.Code})
+	pairBody, err := json.Marshal(map[string]string{
+		"pin":  codeEnvelope.Data.Code,
+		"name": "Tater Tube Player",
+	})
 	require.NoError(t, err)
 	pairReq := httptest.NewRequest(http.MethodPost, "/pair", bytes.NewReader(pairBody))
 	pairReq.Header.Set("Content-Type", "application/json")

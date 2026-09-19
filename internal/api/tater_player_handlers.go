@@ -166,9 +166,12 @@ func (s *Server) handleTaterPairPlayer(c *fiber.Ctx) error {
 	if err != nil {
 		return RespondInternalError(c, "Failed to create player", err.Error())
 	}
-	name := cleanTaterText(req.Name)
+	// The administrator names the player when creating the pairing PIN. Prefer
+	// that name over the player's generic self-reported device name so it is not
+	// replaced by values such as "Tater Tube Player" during registration.
+	name := cleanTaterText(pairingCodeName)
 	if name == "" {
-		name = cleanTaterText(pairingCodeName)
+		name = cleanTaterText(req.Name)
 	}
 	if name == "" {
 		name = "Tater Tube Player"

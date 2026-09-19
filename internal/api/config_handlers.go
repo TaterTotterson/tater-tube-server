@@ -230,7 +230,7 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 				newConfig.LocalMedia.TMDBAPIKey = currentConfig.LocalMedia.TMDBAPIKey
 			}
 		}
-	case "server", "api", "auth", "database", "metadata", "streaming", "transcoding", "health", "import", "log", "sabnzbd", "arrs", "segment_cache", "system", "stremio", "tube_tv", "tater_bumpers":
+	case "server", "api", "auth", "database", "metadata", "streaming", "transcoding", "upscaling", "health", "import", "log", "sabnzbd", "arrs", "segment_cache", "system", "stremio", "tube_tv", "tater_bumpers":
 		err = c.BodyParser(newConfig)
 		// BodyParser will map fields like "profiler_enabled" from JSON to the root of newConfig
 		// because Config struct has it with `json:"profiler_enabled"`.

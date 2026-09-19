@@ -12,6 +12,7 @@ RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 SERVER_DIR="${RESOURCES_DIR}/Server"
 FFMPEG_BIN_DIR="${RESOURCES_DIR}/FFmpeg/bin"
 FFMPEG_LIB_DIR="${RESOURCES_DIR}/FFmpeg/lib"
+AI_UPSCALING_DIR="${RESOURCES_DIR}/AI Upscaling"
 INFO_PLIST_SOURCE="${PROJECT_DIR}/Resources/Info.plist"
 ENTITLEMENTS="${TATER_TUBE_SERVER_ENTITLEMENTS:-${PROJECT_DIR}/Resources/TaterTubeServer.entitlements}"
 CODESIGN_IDENTITY="${TATER_CODESIGN_IDENTITY:--}"
@@ -34,7 +35,7 @@ SWIFT_BIN_DIR="$(swift build -c release --package-path "${PROJECT_DIR}" --show-b
 "${SCRIPT_DIR}/generate_app_icon.sh"
 
 rm -rf "${APP_DIR}"
-mkdir -p "${MACOS_DIR}" "${SERVER_DIR}" "${FFMPEG_BIN_DIR}" "${FFMPEG_LIB_DIR}"
+mkdir -p "${MACOS_DIR}" "${SERVER_DIR}" "${FFMPEG_BIN_DIR}" "${FFMPEG_LIB_DIR}" "${AI_UPSCALING_DIR}"
 
 cp "${SWIFT_BIN_DIR}/TaterTubeServer" "${MACOS_DIR}/TaterTubeServer"
 cp "${INFO_PLIST_SOURCE}" "${CONTENTS_DIR}/Info.plist"
@@ -161,6 +162,13 @@ if [[ "${TATER_BUNDLE_FFMPEG:-1}" == "1" ]]; then
 else
   rmdir "${FFMPEG_BIN_DIR}" "${FFMPEG_LIB_DIR}" "${RESOURCES_DIR}/FFmpeg" 2>/dev/null || true
 fi
+
+AI_UPSCALER_SHADER="${AI_UPSCALING_DIR}/FSRCNNX_x2_8-0-4-1.glsl"
+curl --fail --location --silent --show-error --retry 3 \
+  "https://github.com/igv/FSRCNN-TensorFlow/releases/download/1.1/FSRCNNX_x2_8-0-4-1.glsl" \
+  --output "${AI_UPSCALER_SHADER}"
+echo "e800dbc5c1c95185cc82216c597724533ff5f2880179f256eef600f03e8dc2ae  ${AI_UPSCALER_SHADER}" | shasum -a 256 -c -
+chmod 644 "${AI_UPSCALER_SHADER}"
 
 sign_payload() {
   local payload="$1"

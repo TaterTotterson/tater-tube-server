@@ -297,6 +297,41 @@ func TestBuildFFmpegTranscodeArgsUsesSpline36ForRequestedUpscale(t *testing.T) {
 	require.NotContains(t, joined, "force_original_aspect_ratio")
 }
 
+func TestBuildFFmpegTranscodeArgsUsesAIUpscalerForRequestedUpscale(t *testing.T) {
+	args := buildFFmpegTranscodeArgsWithOptions(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_4k"], "nvenc", transcodeCodecH264,
+		transcodeOutputOptions{
+			Scaler: "ai", AIShaderPath: "/tmp/tater-ai/FSRCNNX.glsl",
+			OutputWidth: 3840, OutputHeight: 2160,
+		},
+	)
+	joined := strings.Join(args, " ")
+	require.Contains(t, joined, "libplacebo=w=3840:h=2160")
+	require.Contains(t, joined, "custom_shader_path='/tmp/tater-ai/FSRCNNX.glsl'")
+	require.Contains(t, joined, "-c:v h264_nvenc")
+	require.NotContains(t, joined, "zscale=w=3840:h=2160:filter=spline36")
+}
+
+func TestAIUpscalerFallsBackBeforeHardwareProbeForUnsupportedMedia(t *testing.T) {
+	hdrRequest := httptest.NewRequest(
+		"GET",
+		"http://tube.local/stream?tater_scaler=ai&tater_source_video_range=hdr10&tater_source_width=1920&tater_source_height=1080&tater_output_width=3840&tater_output_height=2160",
+		nil,
+	)
+	scaler, shaderPath := resolveTaterUpscalerForRequest(t.Context(), "missing-ffmpeg", hdrRequest)
+	require.Equal(t, "spline36", scaler)
+	require.Empty(t, shaderPath)
+
+	largeScaleRequest := httptest.NewRequest(
+		"GET",
+		"http://tube.local/stream?tater_scaler=auto&tater_source_video_range=sdr&tater_source_width=1280&tater_source_height=720&tater_output_width=3840&tater_output_height=2160",
+		nil,
+	)
+	scaler, shaderPath = resolveTaterUpscalerForRequest(t.Context(), "missing-ffmpeg", largeScaleRequest)
+	require.Equal(t, "spline36", scaler)
+	require.Empty(t, shaderPath)
+}
+
 func TestFirstDRIRenderDeviceForVendor(t *testing.T) {
 	dir := t.TempDir()
 	intelRender := filepath.Join(dir, "renderD129")
