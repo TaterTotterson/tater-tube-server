@@ -607,6 +607,11 @@ func (s *taterLocalHLSSession) run(ctx context.Context, ffmpegPath string, args 
 	s.mu.Unlock()
 	if err != nil && ctx.Err() == nil {
 		slog.Error("Local HLS FFmpeg failed", "session", s.id, "error", err, "stderr", stderr.String())
+		// A failed transcoder cannot serve this session. Remove it immediately
+		// instead of leaving a zero-byte Buffering stream on the dashboard until
+		// the normal five-minute HLS idle timeout expires.
+		globalTaterLocalHLS.removeIfSame(s.id, s)
+		s.stopAndCleanup()
 	}
 }
 

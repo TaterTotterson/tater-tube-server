@@ -412,9 +412,11 @@ private enum UpdateState: Equatable {
 
 private final class UpdateManager {
     var onStateChange: ((UpdateState) -> Void)?
+    var onInstallReady: (() -> Void)?
 
     private let updatesRoot: URL
     private var availableManifest: UpdateManifest?
+    private var installerProcess: Process?
 
     private(set) var state: UpdateState = .idle {
         didSet {
@@ -465,7 +467,7 @@ private final class UpdateManager {
                 let app = try self.prepareUpdate(manifest)
                 self.state = .installing(manifest)
                 try self.launchInstaller(newApp: app)
-                DispatchQueue.main.async { NSApp.terminate(nil) }
+                DispatchQueue.main.async { [weak self] in self?.onInstallReady?() }
             } catch {
                 self.state = .failed(error.localizedDescription)
             }
@@ -567,41 +569,39 @@ private final class UpdateManager {
     private func launchInstaller(newApp: URL) throws {
         let target = Bundle.main.bundleURL.standardizedFileURL
         guard target.pathExtension == "app" else { throw LauncherError("The server is not running from an app bundle.") }
+        guard let installerTemplate = Bundle.main.url(forResource: "install-update", withExtension: "sh") else {
+            throw LauncherError("The update installer is missing from the application bundle.")
+        }
         try FileManager.default.createDirectory(at: updatesRoot, withIntermediateDirectories: true)
         let scriptURL = updatesRoot.appendingPathComponent("install-update-\(UUID().uuidString).sh")
-        let script = """
-        #!/bin/sh
-        set -eu
-        APP_PID="$1"
-        NEW_APP="$2"
-        TARGET_APP="$3"
-        SCRIPT_PATH="$0"
-        WAIT_COUNT=0
-        while kill -0 "$APP_PID" 2>/dev/null && [ "$WAIT_COUNT" -lt 300 ]; do
-          sleep 0.2
-          WAIT_COUNT=$((WAIT_COUNT + 1))
-        done
-        if kill -0 "$APP_PID" 2>/dev/null; then exit 1; fi
-        TARGET_PARENT="$(dirname "$TARGET_APP")"
-        TARGET_NAME="$(basename "$TARGET_APP")"
-        STAGED="${TARGET_PARENT}/.${TARGET_NAME}.updating"
-        BACKUP="${TARGET_PARENT}/.${TARGET_NAME}.previous"
-        NEW_PARENT="$(dirname "$NEW_APP")"
-        rm -rf "$STAGED" "$BACKUP"
-        ditto "$NEW_APP" "$STAGED"
-        if [ -d "$TARGET_APP" ]; then mv "$TARGET_APP" "$BACKUP"; fi
-        mv "$STAGED" "$TARGET_APP"
-        xattr -dr com.apple.quarantine "$TARGET_APP" 2>/dev/null || true
-        open "$TARGET_APP"
-        rm -rf "$NEW_PARENT" "$BACKUP"
-        rm -f "$SCRIPT_PATH"
-        """
-        try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+        if FileManager.default.fileExists(atPath: scriptURL.path) {
+            try FileManager.default.removeItem(at: scriptURL)
+        }
+        try FileManager.default.copyItem(at: installerTemplate, to: scriptURL)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+        let logURL = updatesRoot.appendingPathComponent("install-update.log")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = [scriptURL.path, "\(getpid())", newApp.path, target.path]
-        try process.run()
+        process.arguments = [scriptURL.path, "\(getpid())", newApp.path, target.path, logURL.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        process.terminationHandler = { [weak self] process in
+            guard process.terminationStatus != 0 else { return }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.installerProcess = nil
+                if case .installing = self.state {
+                    self.state = .failed("The update installer stopped before completion. See \(logURL.path).")
+                }
+            }
+        }
+        installerProcess = process
+        do {
+            try process.run()
+        } catch {
+            installerProcess = nil
+            throw error
+        }
     }
 
     private func loadData(from request: URLRequest) throws -> Data {
@@ -675,6 +675,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var updateTimer: Timer?
     private var menuResetTimer: Timer?
     private var terminationInProgress = false
+    private var updateShutdownStarted = false
+    private var updateExitReady = false
+    private var updateTerminationFallback: DispatchWorkItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -682,18 +685,40 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         server.onStateChange = { [weak self] state in self?.serverStateChanged(state) }
         server.onActiveStreamCountChange = { [weak self] _ in self?.refreshServerPresentation() }
         updater.onStateChange = { [weak self] state in self?.updateStateChanged(state) }
+        updater.onInstallReady = { [weak self] in self?.finishUpdateInstallation() }
         refreshLaunchAtLogin()
         server.start()
         scheduleAutomaticUpdates()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if updateExitReady { return .terminateNow }
         if terminationInProgress { return .terminateLater }
         terminationInProgress = true
         updateTimer?.invalidate()
         menuResetTimer?.invalidate()
-        server.stop { [weak sender] in sender?.reply(toApplicationShouldTerminate: true) }
+        server.stop { NSApp.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
+    }
+
+    private func finishUpdateInstallation() {
+        guard !updateShutdownStarted else { return }
+        updateShutdownStarted = true
+        let fallback = DispatchWorkItem { [weak self] in self?.terminateForUpdate() }
+        updateTerminationFallback = fallback
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: fallback)
+        server.stop { [weak self] in
+            guard let self else { return }
+            self.updateTerminationFallback?.cancel()
+            self.updateTerminationFallback = nil
+            self.terminateForUpdate()
+        }
+    }
+
+    private func terminateForUpdate() {
+        guard !updateExitReady else { return }
+        updateExitReady = true
+        NSApp.terminate(nil)
     }
 
     private func configureMenuBar() {
@@ -896,11 +921,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             showBusyUpdate("Installing \(manifest.version)...")
         case .failed(let message):
             hideUpdateItem()
-            checkUpdatesMenuItem?.title = "Update Check Failed"
+            checkUpdatesMenuItem?.title = "Update Failed"
             resetUpdateTitleSoon()
-            if NSApp.isActive {
-                showAlert(title: "Update Check Failed", message: message)
-            }
+            NSApp.activate(ignoringOtherApps: true)
+            showAlert(title: "Update Failed", message: message)
         }
     }
 

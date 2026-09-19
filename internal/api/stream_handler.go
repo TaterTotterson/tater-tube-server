@@ -2004,7 +2004,9 @@ func taterVideoFiltersForHEVCMain10(filters, videoCodec string) string {
 	case "hevc_qsv":
 		filters = strings.Replace(filters, "format=nv12", "format=p010le", 1)
 	case "hevc_nvenc", "hevc_videotoolbox", "hevc_v4l2m2m":
-		if !strings.Contains(filters, "format=p010le") {
+		if strings.Contains(filters, "format=nv12") {
+			filters = strings.Replace(filters, "format=nv12", "format=p010le", 1)
+		} else if !strings.Contains(filters, "format=p010le") {
 			if strings.TrimSpace(filters) == "" {
 				filters = "format=p010le"
 			} else {
@@ -2109,7 +2111,7 @@ func transcodeVideoSettingsForCodecAndUpscaler(
 		case "nvenc":
 			return "hevc_nvenc", scaleFilter
 		case "videotoolbox":
-			return "hevc_videotoolbox", scaleFilter
+			return "hevc_videotoolbox", scaleFilter + ",format=nv12"
 		case "v4l2m2m":
 			return "hevc_v4l2m2m", scaleFilter
 		default:
@@ -2130,7 +2132,12 @@ func transcodeVideoSettingsForCodecAndUpscaler(
 	case "nvenc":
 		return "h264_nvenc", scaleFilter
 	case "videotoolbox":
-		return "h264_videotoolbox", scaleFilter
+		// VideoToolbox consumes NV12 for ordinary 8-bit video. Make that
+		// conversion explicit before handing frames to the encoder. Besides
+		// avoiding an implicit filter, this keeps zscale from trying to infer a
+		// color conversion when a source (notably some AV1 encodes) omits its
+		// color-space metadata.
+		return "h264_videotoolbox", scaleFilter + ",format=nv12"
 	case "v4l2m2m":
 		return "h264_v4l2m2m", scaleFilter
 	default:

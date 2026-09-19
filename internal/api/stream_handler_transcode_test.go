@@ -305,8 +305,36 @@ func TestBuildFFmpegTranscodeArgsUsesPortableSplineForRequestedUpscale(t *testin
 		},
 	)
 	joined := strings.Join(args, " ")
-	require.Contains(t, joined, "-vf scale=w=3840:h=1600:flags=spline")
+	require.Contains(t, joined, "-vf scale=w=3840:h=1600:flags=spline,format=nv12")
 	require.NotContains(t, joined, "zscale")
+}
+
+func TestBuildFFmpegTranscodeArgsUsesNV12ForVideoToolboxSpline36(t *testing.T) {
+	args := buildFFmpegTranscodeArgsWithOptions(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_4k"], "videotoolbox", transcodeCodecH264,
+		transcodeOutputOptions{
+			Scaler: "spline36", OutputWidth: 3840, OutputHeight: 2160,
+		},
+	)
+	joined := strings.Join(args, " ")
+	require.Contains(t, joined, "-vf zscale=w=3840:h=2160:filter=spline36,format=nv12")
+	require.Contains(t, joined, "-c:v h264_videotoolbox")
+}
+
+func TestBuildFFmpegTranscodeArgsUsesP010ForVideoToolboxHDR(t *testing.T) {
+	args := buildFFmpegTranscodeArgsWithOptions(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_4k"], "videotoolbox", transcodeCodecHEVC,
+		transcodeOutputOptions{
+			OutputVideoRange: "hdr10",
+			Scaler:           "spline36",
+			OutputWidth:      3840,
+			OutputHeight:     2160,
+		},
+	)
+	joined := strings.Join(args, " ")
+	require.Contains(t, joined, "-vf zscale=w=3840:h=2160:filter=spline36,format=p010le")
+	require.NotContains(t, joined, "format=nv12,format=p010le")
+	require.Contains(t, joined, "-c:v hevc_videotoolbox")
 }
 
 func TestResolveTaterStandardUpscalerPrefersZscaleWhenAvailable(t *testing.T) {
