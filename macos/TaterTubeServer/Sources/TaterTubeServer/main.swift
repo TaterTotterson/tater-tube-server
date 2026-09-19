@@ -16,6 +16,7 @@ private struct LauncherError: LocalizedError {
 private enum ServerState: Equatable {
     case stopped
     case starting
+    case stopping
     case running
     case external
     case failed(String)
@@ -26,6 +27,8 @@ private enum ServerState: Equatable {
             return "Stopped"
         case .starting:
             return "Starting..."
+        case .stopping:
+            return "Stopping..."
         case .running:
             return "Running"
         case .external:
@@ -34,10 +37,27 @@ private enum ServerState: Equatable {
             return "Needs attention: \(message)"
         }
     }
+
+    var isRunning: Bool {
+        self == .running || self == .external
+    }
+}
+
+private struct ServerInfoEnvelope: Decodable {
+    let data: ServerInfo
+
+    struct ServerInfo: Decodable {
+        let activeStreams: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case activeStreams = "active_streams"
+        }
+    }
 }
 
 private final class ServerManager {
     var onStateChange: ((ServerState) -> Void)?
+    var onActiveStreamCountChange: ((Int) -> Void)?
 
     let supportRoot: URL
     let configURL: URL
@@ -47,6 +67,8 @@ private final class ServerManager {
     private var process: Process?
     private var logHandle: FileHandle?
     private var healthTimer: Timer?
+    private var activityTimer: Timer?
+    private var activityRequestInFlight = false
     private var stopCompletions: [() -> Void] = []
     private var stopRequested = false
     private var startupDeadline = Date()
@@ -55,8 +77,17 @@ private final class ServerManager {
         didSet {
             guard oldValue != state else { return }
             DispatchQueue.main.async { [weak self, state] in
-                self?.onStateChange?(state)
+                guard let self, self.state == state else { return }
+                self.updateActivityPolling(for: state)
+                self.onStateChange?(state)
             }
+        }
+    }
+
+    private(set) var activeStreamCount = 0 {
+        didSet {
+            guard oldValue != activeStreamCount else { return }
+            onActiveStreamCountChange?(activeStreamCount)
         }
     }
 
@@ -132,6 +163,7 @@ private final class ServerManager {
             return
         }
 
+        state = .stopping
         if process.isRunning {
             process.terminate()
             let pid = process.processIdentifier
@@ -243,6 +275,49 @@ private final class ServerManager {
         URLSession.shared.dataTask(with: request) { _, response, _ in
             let healthy = (response as? HTTPURLResponse).map { (200..<500).contains($0.statusCode) } ?? false
             DispatchQueue.main.async { completion(healthy) }
+        }.resume()
+    }
+
+    private func updateActivityPolling(for state: ServerState) {
+        activityTimer?.invalidate()
+        activityTimer = nil
+        activityRequestInFlight = false
+
+        guard state.isRunning else {
+            activeStreamCount = 0
+            return
+        }
+
+        refreshActiveStreamCount()
+        activityTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
+            self?.refreshActiveStreamCount()
+        }
+    }
+
+    private func refreshActiveStreamCount() {
+        guard state.isRunning, !activityRequestInFlight else { return }
+        activityRequestInFlight = true
+
+        let url = dashboardURL.appendingPathComponent("api/tater/server")
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 2
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
+            let count: Int
+            if let http = response as? HTTPURLResponse,
+               (200..<300).contains(http.statusCode),
+               let data,
+               let envelope = try? JSONDecoder().decode(ServerInfoEnvelope.self, from: data) {
+                count = max(0, envelope.data.activeStreams ?? 0)
+            } else {
+                count = 0
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.activityRequestInFlight = false
+                guard self.state.isRunning else { return }
+                self.activeStreamCount = count
+            }
         }.resume()
     }
 
@@ -600,6 +675,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         configureMenuBar()
         server.onStateChange = { [weak self] state in self?.serverStateChanged(state) }
+        server.onActiveStreamCountChange = { [weak self] _ in self?.refreshServerPresentation() }
         updater.onStateChange = { [weak self] state in self?.updateStateChanged(state) }
         refreshLaunchAtLogin()
         server.start()
@@ -616,15 +692,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureMenuBar() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        if let url = Bundle.main.url(forResource: "TaterTubeServerMenuBar", withExtension: "png"),
-           let image = NSImage(contentsOf: url) {
-            image.isTemplate = false
-            image.size = NSSize(width: 21, height: 21)
-            item.button?.image = image
-            item.button?.imagePosition = .imageOnly
-        } else {
-            item.button?.title = "🥔"
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = item.button {
+            button.image = makeMenuBarImage()
+            button.imagePosition = .imageOnly
+            button.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
         }
         item.button?.toolTip = "Tater Tube Server"
 
@@ -693,31 +765,102 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         updateStateChanged(updater.state)
     }
 
+    private func makeMenuBarImage() -> NSImage {
+        let configuration = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
+        if let symbol = NSImage(
+            systemSymbolName: "play.rectangle.on.rectangle",
+            accessibilityDescription: "Tater Tube Server"
+        )?.withSymbolConfiguration(configuration) {
+            symbol.isTemplate = true
+            return symbol
+        }
+
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
+            NSColor.black.setStroke()
+            NSColor.black.setFill()
+
+            let rear = NSBezierPath(roundedRect: NSRect(x: 5, y: 6, width: 11, height: 8), xRadius: 2, yRadius: 2)
+            rear.lineWidth = 1.4
+            rear.stroke()
+
+            let front = NSBezierPath(roundedRect: NSRect(x: 2, y: 3, width: 11, height: 8), xRadius: 2, yRadius: 2)
+            front.lineWidth = 1.4
+            front.stroke()
+
+            let play = NSBezierPath()
+            play.move(to: NSPoint(x: 6, y: 5))
+            play.line(to: NSPoint(x: 6, y: 9))
+            play.line(to: NSPoint(x: 9.5, y: 7))
+            play.close()
+            play.fill()
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
     private func serverStateChanged(_ state: ServerState) {
-        statusMenuItem?.title = "Status: \(state.label)"
         switch state {
         case .stopped, .failed:
             openMenuItem?.isEnabled = false
+            startMenuItem?.title = "Start Server"
             startMenuItem?.isEnabled = true
             restartMenuItem?.isEnabled = false
+            stopMenuItem?.title = "Server Stopped"
             stopMenuItem?.isEnabled = false
         case .starting:
             openMenuItem?.isEnabled = false
+            startMenuItem?.title = "Starting..."
             startMenuItem?.isEnabled = false
             restartMenuItem?.isEnabled = false
+            stopMenuItem?.title = "Stop Server"
             stopMenuItem?.isEnabled = true
+        case .stopping:
+            openMenuItem?.isEnabled = false
+            startMenuItem?.title = "Stopping..."
+            startMenuItem?.isEnabled = false
+            restartMenuItem?.isEnabled = false
+            stopMenuItem?.title = "Stopping..."
+            stopMenuItem?.isEnabled = false
         case .running:
             openMenuItem?.isEnabled = true
+            startMenuItem?.title = "Server Running"
             startMenuItem?.isEnabled = false
             restartMenuItem?.isEnabled = true
+            stopMenuItem?.title = "Stop Server"
             stopMenuItem?.isEnabled = true
             openDashboardOnFirstRun()
         case .external:
             openMenuItem?.isEnabled = true
+            startMenuItem?.title = "Server Running"
             startMenuItem?.isEnabled = false
             restartMenuItem?.isEnabled = false
+            stopMenuItem?.title = "Managed Outside App"
             stopMenuItem?.isEnabled = false
         }
+        refreshServerPresentation()
+    }
+
+    private func refreshServerPresentation() {
+        let state = server.state
+        let count = state.isRunning ? server.activeStreamCount : 0
+        let streamLabel: String
+        if count == 1 {
+            streamLabel = "1 active stream"
+        } else {
+            streamLabel = "\(count) active streams"
+        }
+
+        statusMenuItem?.title = count > 0
+            ? "Status: \(state.label) • \(streamLabel)"
+            : "Status: \(state.label)"
+
+        guard let button = statusItem?.button else { return }
+        button.title = count > 0 ? (count > 99 ? "99+" : "\(count)") : ""
+        button.imagePosition = count > 0 ? .imageLeading : .imageOnly
+        button.toolTip = state.isRunning
+            ? "Tater Tube Server — \(count > 0 ? streamLabel : state.label)"
+            : "Tater Tube Server — \(state.label)"
     }
 
     private func updateStateChanged(_ state: UpdateState) {

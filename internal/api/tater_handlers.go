@@ -7,21 +7,26 @@ import (
 
 func (s *Server) handleTaterServerInfo(c *fiber.Ctx) error {
 	providerCount := 0
+	activeStreamCount := 0
 	if s.configManager != nil {
 		if cfg := s.configManager.GetConfig(); cfg != nil {
 			providerCount = len(cfg.Providers)
 		}
 	}
+	if s.streamTracker != nil {
+		activeStreamCount = len(s.streamTracker.GetActive())
+	}
 
 	return RespondSuccess(c, map[string]any{
-		"name":        "Tater Tube Server",
-		"version":     version.Version,
-		"git_commit":  version.GitCommit,
-		"ready":       s.IsReady(),
-		"started_at":  s.startTime,
-		"providers":   providerCount,
-		"modules":     []string{"usenet_streaming"},
-		"stream_path": "/api/files/stream",
+		"name":           "Tater Tube Server",
+		"version":        version.Version,
+		"git_commit":     version.GitCommit,
+		"ready":          s.IsReady(),
+		"started_at":     s.startTime,
+		"providers":      providerCount,
+		"active_streams": activeStreamCount,
+		"modules":        []string{"usenet_streaming"},
+		"stream_path":    "/api/files/stream",
 		"endpoints": map[string]string{
 			"player_home":          "/api/v1/player/home",
 			"player_local_artwork": "/api/v1/player/artwork/local",

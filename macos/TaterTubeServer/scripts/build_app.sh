@@ -42,7 +42,6 @@ cp "${INFO_PLIST_SOURCE}" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_NUMBER}" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion ${MACOS_DEPLOYMENT_TARGET}" "${CONTENTS_DIR}/Info.plist"
 cp "${PROJECT_DIR}/build/TaterTubeServerIcon.icns" "${RESOURCES_DIR}/TaterTubeServerIcon.icns"
-cp "${REPO_ROOT}/frontend/public/tater-tube-server-icon.png" "${RESOURCES_DIR}/TaterTubeServerMenuBar.png"
 
 if [[ -n "${TATER_TUBE_SERVER_BINARY:-}" ]]; then
   if [[ ! -x "${TATER_TUBE_SERVER_BINARY}" ]]; then
