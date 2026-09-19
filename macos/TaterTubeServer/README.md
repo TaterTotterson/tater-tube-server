@@ -8,7 +8,8 @@ keeps server data separate from the app so updates do not replace it.
 
 - The Tater Tube Server backend and web dashboard.
 - A private FFmpeg and ffprobe runtime with Apple VideoToolbox support.
-- Start, stop, restart, dashboard, data-folder, and log controls in the menu bar.
+- A native template-style menu bar icon with a compact active-stream count.
+- State-aware start, stop, restart, dashboard, data-folder, and log controls.
 - An optional **Start at Login** setting.
 - Signed ZIP updates with SHA-256 verification and in-app installation.
 

@@ -116,3 +116,27 @@ func TestTaterActiveStreamsUsesPlayerIDWhenNamesMatch(t *testing.T) {
 	require.Equal(t, "player-1", envelope.Data[0].PlayerID)
 	require.Equal(t, "/movies/owned.mkv", envelope.Data[0].FilePath)
 }
+
+func TestTaterServerInfoIncludesActiveStreamCount(t *testing.T) {
+	app := fiber.New()
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+	tracker.AddStream("/movies/playing.mkv", "Local", "Living Room", "127.0.0.1", "TestAgent", 1000)
+
+	server := &Server{streamTracker: tracker, startTime: time.Now()}
+	server.SetReady(true)
+	app.Get("/server", server.handleTaterServerInfo)
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/server", nil))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var envelope testAPIResponse[struct {
+		ActiveStreams int  `json:"active_streams"`
+		Ready         bool `json:"ready"`
+	}]
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope))
+	require.True(t, envelope.Success)
+	require.True(t, envelope.Data.Ready)
+	require.Equal(t, 1, envelope.Data.ActiveStreams)
+}
