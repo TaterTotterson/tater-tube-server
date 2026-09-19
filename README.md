@@ -18,7 +18,8 @@
 
 Tater Tube Server is the self-hosted backend for Tater Tube players. It brings
 your local libraries and configured streaming sources together, serves paired
-players, builds Tube TV channels, and provides optional video transcoding.
+players, builds Tube TV channels, and provides automatic video transcoding for
+playback compatibility.
 
 ## Features
 
@@ -48,6 +49,10 @@ services:
     restart: unless-stopped
 ```
 
+Before starting the container, add the appropriate GPU access from
+[Hardware Transcoding](#hardware-transcoding). This is strongly recommended for
+Tube TV and for players that cannot direct-play a source format or resolution.
+
 ```bash
 docker compose up -d
 ```
@@ -55,82 +60,26 @@ docker compose up -d
 Then:
 
 1. Open `http://SERVER-IP:8080`.
-2. For a local library, open `Configuration -> Local Media`, select the library
+2. Open `Configuration -> Hardware Transcoding`, run **Auto Detect**, confirm the
+   encoder says **Ready**, and select **Save**.
+3. For a local library, open `Configuration -> Local Media`, select the library
    type, add its container path (such as `/media/movies`), select **Save Local
    Media**, and then select **Scan Libraries**.
-3. Optionally configure an NNTP provider and Newznab service to add the Stream
+4. Optionally configure an NNTP provider and Newznab service to add the Stream
    discovery catalog. These are not required for local-library playback.
-4. Open `Configuration -> Tater Tube Players` and create a pairing code.
-5. Enter the server address and pairing code in the Tater Tube Player.
+5. Open `Configuration -> Tater Tube Players` and create a pairing code.
+6. Enter the server address and pairing code in the Tater Tube Player.
 
 The `/config` volume stores the configuration, database, logs, metadata,
 pairing information, and segment cache. Login is disabled by default; enable
 authentication before exposing the dashboard outside your trusted network.
 
-## Unraid
-
-| Setting | Value |
-| --- | --- |
-| Repository | `ghcr.io/tatertotterson/tater-tube-server:latest` |
-| Web UI port | `8080` |
-| Config path | Your appdata folder mapped to `/config` |
-| Local libraries | Host media folders mapped beneath `/media` |
-
-Template icon:
-
-```text
-https://raw.githubusercontent.com/TaterTotterson/tater-tube-server/main/frontend/public/unraid-icon.png
-```
-
-GPU-specific Unraid settings are listed under
-[Hardware Transcoding](#hardware-transcoding).
-
-## Local Media
-
-Add media folders to the Compose `volumes` list or as Unraid path mappings:
-
-```yaml
-volumes:
-  - /mnt/user/media/movies:/media/movies:ro
-  - /mnt/user/media/tv:/media/tv:ro
-  - /mnt/user/media/music:/media/music:ro
-  - /mnt/user/media/home-videos:/media/home-videos:ro
-```
-
-Use the **container path** in the server dashboard:
-
-| Library type | Example path | Player layout |
-| --- | --- | --- |
-| Movies | `/media/movies` | Movie titles |
-| TV Shows | `/media/tv` | Show, season, and episode |
-| Music | `/media/music` | Artist, album, and track |
-| Folders | `/media/home-videos` | Original folder structure |
-
-Finish the library setup in the dashboard:
-
-1. Open `Configuration -> Local Media`.
-2. Choose **Movies**, **TV Shows**, **Music**, or **Folders**, then select
-   **Add Library** for that type.
-3. Select **Add Folder** and choose its mapped container path.
-4. Select **Save Local Media**, then **Scan Libraries**.
-
-The scanned library will appear on every paired Tater Tube Player.
-
-Read-only (`:ro`) mounts support scanning and playback. Use a writable mount if
-you want the server to save artwork or NFO metadata beside the media. Optional
-TMDB matching uses the API key you provide.
-
-## Tube TV
-
-Tube TV turns server libraries into shared live-style channels. Paired players
-receive the same schedule, channel numbers, commercial breaks, bumpers, and
-optional logos. Configure it under `Configuration -> Tube TV`, then view the
-result on the **TV Guide** page.
-
 ## Hardware Transcoding
 
-Direct play is preferred. A GPU is used only when a player requests video
-transcoding.
+Configure hardware transcoding during the initial installation. Direct-play
+titles do not use it, but Tube TV and incompatible media need a working
+transcoder. Without GPU acceleration, the server falls back to CPU encoding,
+which may not keep up with higher resolutions.
 
 | Hardware | Mode | Container access |
 | --- | --- | --- |
@@ -195,6 +144,66 @@ recommend **Intel Quick Sync** or **VAAPI**, depending on the GPU and driver.
 - Check the server logs for the encoder-probe failure reason.
 
 The image already includes the server's supported FFmpeg build.
+
+## Unraid
+
+| Setting | Value |
+| --- | --- |
+| Repository | `ghcr.io/tatertotterson/tater-tube-server:latest` |
+| Web UI port | `8080` |
+| Config path | Your appdata folder mapped to `/config` |
+| Local libraries | Host media folders mapped beneath `/media` |
+
+Template icon:
+
+```text
+https://raw.githubusercontent.com/TaterTotterson/tater-tube-server/main/frontend/public/unraid-icon.png
+```
+
+GPU-specific Unraid settings are listed in
+[Hardware Transcoding](#hardware-transcoding).
+
+## Local Media
+
+Add media folders to the Compose `volumes` list or as Unraid path mappings:
+
+```yaml
+volumes:
+  - /mnt/user/media/movies:/media/movies:ro
+  - /mnt/user/media/tv:/media/tv:ro
+  - /mnt/user/media/music:/media/music:ro
+  - /mnt/user/media/home-videos:/media/home-videos:ro
+```
+
+Use the **container path** in the server dashboard:
+
+| Library type | Example path | Player layout |
+| --- | --- | --- |
+| Movies | `/media/movies` | Movie titles |
+| TV Shows | `/media/tv` | Show, season, and episode |
+| Music | `/media/music` | Artist, album, and track |
+| Folders | `/media/home-videos` | Original folder structure |
+
+Finish the library setup in the dashboard:
+
+1. Open `Configuration -> Local Media`.
+2. Choose **Movies**, **TV Shows**, **Music**, or **Folders**, then select
+   **Add Library** for that type.
+3. Select **Add Folder** and choose its mapped container path.
+4. Select **Save Local Media**, then **Scan Libraries**.
+
+The scanned library will appear on every paired Tater Tube Player.
+
+Read-only (`:ro`) mounts support scanning and playback. Use a writable mount if
+you want the server to save artwork or NFO metadata beside the media. Optional
+TMDB matching uses the API key you provide.
+
+## Tube TV
+
+Tube TV turns server libraries into shared live-style channels. Paired players
+receive the same schedule, channel numbers, commercial breaks, bumpers, and
+optional logos. Configure it under `Configuration -> Tube TV`, then view the
+result on the **TV Guide** page.
 
 ## Updating
 
