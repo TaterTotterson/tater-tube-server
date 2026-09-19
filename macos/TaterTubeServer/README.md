@@ -8,7 +8,8 @@ keeps server data separate from the app so updates do not replace it.
 
 - The Tater Tube Server backend and web dashboard.
 - A private FFmpeg and ffprobe runtime with Apple VideoToolbox, zscale, and
-  libplacebo support.
+  libplacebo support, plus a bundled MoltenVK driver for FSRCNNX AI upscaling
+  on Apple Silicon.
 - A native template-style menu bar icon with a compact active-stream count.
 - State-aware start, stop, restart, dashboard, data-folder, and log controls.
 - An optional **Start at Login** setting.
@@ -29,7 +30,7 @@ Install Xcode Command Line Tools, Go 1.26, and the full FFmpeg formula, then
 build the app:
 
 ```bash
-brew install ffmpeg-full go
+brew install ffmpeg-full molten-vk go
 macos/TaterTubeServer/scripts/build_app.sh
 ```
 

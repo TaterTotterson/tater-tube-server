@@ -422,6 +422,24 @@ func applyTaterRequestedResolutionInfo(tracker *StreamTracker, streamID string, 
 	)
 }
 
+func applyTaterResolvedUpscalingInfo(tracker *StreamTracker, streamID string, r *http.Request, method string) {
+	if tracker == nil || strings.TrimSpace(streamID) == "" || r == nil {
+		return
+	}
+	requested := requestedTaterScaler(r)
+	if requested == "" {
+		return
+	}
+	sourceWidth := requestedTaterVideoDimension(r, "tater_source_width")
+	sourceHeight := requestedTaterVideoDimension(r, "tater_source_height")
+	outputWidth := requestedTaterVideoDimension(r, "tater_output_width")
+	outputHeight := requestedTaterVideoDimension(r, "tater_output_height")
+	method = strings.ToLower(strings.TrimSpace(method))
+	active := method != "" && sourceWidth > 0 && sourceHeight > 0 &&
+		outputWidth > sourceWidth && outputHeight > sourceHeight
+	tracker.SetUpscalingInfo(streamID, requested, method, active)
+}
+
 func isTaterInternalTranscodeInputRequest(r *http.Request) bool {
 	if r == nil || r.URL == nil || r.URL.Query().Get(taterInternalTranscodeInputQuery) != "1" {
 		return false
@@ -786,6 +804,7 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 	}
 	applyTaterRequestedDynamicRangeInfo(h.streamTracker, streamID, r)
 	applyTaterRequestedResolutionInfo(h.streamTracker, streamID, r)
+	applyTaterResolvedUpscalingInfo(h.streamTracker, streamID, r, scaler)
 
 	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
 	if inputPath == "" {

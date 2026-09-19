@@ -540,6 +540,16 @@ func (t *StreamTracker) SetVideoResolutionInfo(id string, sourceWidth, sourceHei
 	}
 }
 
+func (t *StreamTracker) SetUpscalingInfo(id, requested, method string, active bool) {
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*streamInternal)
+		stream.UpscalingRequested = strings.ToLower(strings.TrimSpace(requested))
+		stream.UpscalingMethod = strings.ToLower(strings.TrimSpace(method))
+		stream.UpscalingActive = active && stream.UpscalingMethod != ""
+		stream.lastReadAt = time.Now()
+	}
+}
+
 func (t *StreamTracker) SetMediaInfo(id string, durationSeconds, playbackStartSeconds float64) {
 	if val, ok := t.streams.Load(id); ok {
 		stream := val.(*streamInternal)
@@ -774,6 +784,9 @@ func mergePlaybackRecord(existing *nzbfilesystem.ActiveStream, next nzbfilesyste
 		existing.AudioCodec = next.AudioCodec
 		existing.AudioChannels = next.AudioChannels
 		existing.HardwareActive = next.HardwareActive
+		existing.UpscalingRequested = next.UpscalingRequested
+		existing.UpscalingMethod = next.UpscalingMethod
+		existing.UpscalingActive = next.UpscalingActive
 	}
 	if next.SourceVideoRange != "" {
 		existing.SourceVideoRange = next.SourceVideoRange
@@ -935,6 +948,9 @@ func copyStreamPresentation(dst *nzbfilesystem.ActiveStream, src nzbfilesystem.A
 	dst.SourceHeight = src.SourceHeight
 	dst.OutputWidth = src.OutputWidth
 	dst.OutputHeight = src.OutputHeight
+	dst.UpscalingRequested = src.UpscalingRequested
+	dst.UpscalingMethod = src.UpscalingMethod
+	dst.UpscalingActive = src.UpscalingActive
 	dst.SourceVideoRange = src.SourceVideoRange
 	dst.OutputVideoRange = src.OutputVideoRange
 	dst.ToneMapped = src.ToneMapped
@@ -1048,6 +1064,9 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 				existing.SourceHeight = s.SourceHeight
 				existing.OutputWidth = s.OutputWidth
 				existing.OutputHeight = s.OutputHeight
+				existing.UpscalingRequested = s.UpscalingRequested
+				existing.UpscalingMethod = s.UpscalingMethod
+				existing.UpscalingActive = s.UpscalingActive
 				if existing.Status != "Streaming" {
 					existing.Status = s.Status
 				}

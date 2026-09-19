@@ -330,7 +330,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ffmpeg_prefix="$(brew --prefix ffmpeg-full)"
+          ffmpeg_prefix="$(brew --prefix ffmpeg-full 2>/dev/null || true)"
           if [[ ! -x "${ffmpeg_prefix}/bin/ffmpeg" || ! -x "${ffmpeg_prefix}/bin/ffprobe" ]]; then
             # This is a persistent self-hosted runner. Install only when the
             # required keg is absent so a release cannot disturb a working
@@ -340,12 +340,20 @@ jobs:
               echo "Initial ffmpeg-full install failed; retrying once."
               HOMEBREW_NO_AUTO_UPDATE=1 brew install --overwrite ffmpeg-full
             fi
+            ffmpeg_prefix="$(brew --prefix ffmpeg-full)"
           fi
+          if ! brew list --versions molten-vk >/dev/null 2>&1; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install molten-vk
+          fi
+          moltenvk_prefix="$(brew --prefix molten-vk)"
           echo "${ffmpeg_prefix}/bin" >> "${GITHUB_PATH}"
           echo "TATER_FFMPEG_PATH=${ffmpeg_prefix}/bin/ffmpeg" >> "${GITHUB_ENV}"
           echo "TATER_FFPROBE_PATH=${ffmpeg_prefix}/bin/ffprobe" >> "${GITHUB_ENV}"
+          echo "TATER_MOLTENVK_PREFIX=${moltenvk_prefix}" >> "${GITHUB_ENV}"
           test -x "${ffmpeg_prefix}/bin/ffmpeg"
           test -x "${ffmpeg_prefix}/bin/ffprobe"
+          test -f "${moltenvk_prefix}/lib/libMoltenVK.dylib"
+          test -f "${moltenvk_prefix}/etc/vulkan/icd.d/MoltenVK_icd.json"
 
       - name: Build signed updater package
         shell: bash

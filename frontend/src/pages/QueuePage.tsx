@@ -13,6 +13,7 @@ import {
 	Zap,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { PlaybackUpscalingBadge } from "../components/playback/PlaybackUpscalingBadge";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
 import { Pagination } from "../components/ui/Pagination";
@@ -577,11 +578,14 @@ export function QueuePage() {
 														)}
 														<span className="truncate font-semibold text-sm">{hardware}</span>
 													</div>
-													{resolution && (
-														<div className="mt-2 flex md:justify-end">
-															<span className="badge badge-primary badge-outline font-semibold">
-																{resolution}
-															</span>
+													{(resolution || stream.upscaling_active) && (
+														<div className="mt-2 flex flex-wrap gap-1.5 md:justify-end">
+															{resolution && (
+																<span className="badge badge-primary badge-outline font-semibold">
+																	{resolution}
+																</span>
+															)}
+															<PlaybackUpscalingBadge stream={stream} compact />
 														</div>
 													)}
 													{detail && (

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 import { apiClient } from "../api/client";
+import { PlaybackUpscalingBadge } from "../components/playback/PlaybackUpscalingBadge";
 import { LocalMediaScanProgress } from "../components/system/LocalMediaScanProgress";
 import {
 	useActiveStreams,
@@ -426,6 +427,7 @@ export function Dashboard() {
 													</span>
 												)}
 												{mode && <span className={`badge ${mode.className}`}>{mode.label}</span>}
+												<PlaybackUpscalingBadge stream={stream} />
 												<span className="badge badge-primary">{stream.status || "Streaming"}</span>
 											</div>
 										</div>
@@ -712,6 +714,7 @@ export function Dashboard() {
 													{mode && (
 														<span className={`badge badge-sm ${mode.className}`}>{mode.label}</span>
 													)}
+													<PlaybackUpscalingBadge stream={stream} compact />
 												</div>
 											) : lastStream ? (
 												<div className="min-w-0">

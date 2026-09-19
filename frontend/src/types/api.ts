@@ -437,6 +437,9 @@ export interface ActiveStream {
 	source_height?: number;
 	output_width?: number;
 	output_height?: number;
+	upscaling_requested?: "auto" | "ai" | "spline36" | string;
+	upscaling_method?: "ai" | "spline36" | "spline" | string;
+	upscaling_active?: boolean;
 	source_video_range?: string;
 	output_video_range?: string;
 	tone_mapped?: boolean;

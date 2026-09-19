@@ -61,16 +61,17 @@ type taterLocalHLSSession struct {
 }
 
 type taterLocalHLSCommand struct {
-	args           []string
-	profileID      string
-	profileName    string
-	effectiveAccel string
-	hardwareDevice string
-	videoCodec     string
-	videoMode      string
-	audioMode      string
-	audioCodec     string
-	audioChannels  int
+	args            []string
+	profileID       string
+	profileName     string
+	effectiveAccel  string
+	hardwareDevice  string
+	videoCodec      string
+	videoMode       string
+	audioMode       string
+	audioCodec      string
+	audioChannels   int
+	upscalingMethod string
 }
 
 var globalTaterLocalHLS = &taterLocalHLSManager{sessions: map[string]*taterLocalHLSSession{}}
@@ -242,6 +243,7 @@ func (h *LocalStreamHandler) prepareLocalHLSSession(
 		h.streamTracker.SetAudioChannelInfo(session.stream.ID, command.audioChannels)
 		applyTaterRequestedDynamicRangeInfo(h.streamTracker, session.stream.ID, r)
 		applyTaterRequestedResolutionInfo(h.streamTracker, session.stream.ID, r)
+		applyTaterResolvedUpscalingInfo(h.streamTracker, session.stream.ID, r, command.upscalingMethod)
 		transcoder := &StreamHandler{configGetter: h.configGetter, streamTracker: h.streamTracker}
 		duration := transcoder.probeMediaDuration(r.Context(), path)
 		h.streamTracker.SetMediaInfo(session.stream.ID, duration, parseTranscodeStartSeconds(r.URL.Query().Get("start")))
@@ -368,6 +370,7 @@ func buildTaterLocalHLSCommand(
 			scaler, aiShaderPath := resolveTaterUpscalerForRequest(
 				r.Context(), effectiveFFmpegPath(cfg.Transcoding.FFmpegPath), r,
 			)
+			command.upscalingMethod = scaler
 			command.videoMode = "transcode"
 			command.audioMode = "transcode"
 			command.audioCodec = "aac"

@@ -47,6 +47,9 @@ type ActiveStream struct {
 	SourceHeight       int       `json:"source_height,omitempty"`
 	OutputWidth        int       `json:"output_width,omitempty"`
 	OutputHeight       int       `json:"output_height,omitempty"`
+	UpscalingRequested string    `json:"upscaling_requested,omitempty"`
+	UpscalingMethod    string    `json:"upscaling_method,omitempty"`
+	UpscalingActive    bool      `json:"upscaling_active"`
 	SourceVideoRange   string    `json:"source_video_range,omitempty"`
 	OutputVideoRange   string    `json:"output_video_range,omitempty"`
 	ToneMapped         bool      `json:"tone_mapped"`
