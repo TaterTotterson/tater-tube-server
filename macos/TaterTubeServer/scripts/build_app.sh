@@ -43,6 +43,8 @@ cp "${INFO_PLIST_SOURCE}" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_NUMBER}" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion ${MACOS_DEPLOYMENT_TARGET}" "${CONTENTS_DIR}/Info.plist"
 cp "${PROJECT_DIR}/build/TaterTubeServerIcon.icns" "${RESOURCES_DIR}/TaterTubeServerIcon.icns"
+cp "${PROJECT_DIR}/Resources/install-update.sh" "${RESOURCES_DIR}/install-update.sh"
+chmod 755 "${RESOURCES_DIR}/install-update.sh"
 
 if [[ -n "${TATER_TUBE_SERVER_BINARY:-}" ]]; then
   if [[ ! -x "${TATER_TUBE_SERVER_BINARY}" ]]; then

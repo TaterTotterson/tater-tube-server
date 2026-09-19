@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -71,6 +72,39 @@ func TestTaterLocalHLSStartupSegmentsUsesShorterSeekRunway(t *testing.T) {
 	seek := httptest.NewRequest(http.MethodGet, "/api/tater/local/stream?start=1800.250", nil)
 	if got := taterLocalHLSStartupSegments(seek); got != taterLocalHLSSeekSegments {
 		t.Fatalf("seek playback segments = %d, want %d", got, taterLocalHLSSeekSegments)
+	}
+}
+
+func TestTaterLocalHLSFailedProcessRemovesTrackedSession(t *testing.T) {
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+
+	root := t.TempDir()
+	ffmpegPath := filepath.Join(root, "ffmpeg")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stream := tracker.AddStream("/media/movie.mkv", "Local", "Player", "", "", 1)
+	session := &taterLocalHLSSession{
+		id:      "failed-process-session",
+		root:    root,
+		tracker: tracker,
+		stream:  stream,
+	}
+	if got, created := globalTaterLocalHLS.addOrReplace(session.id, session); !created || got != session {
+		t.Fatal("failed HLS session was not registered")
+	}
+
+	session.run(context.Background(), ffmpegPath, nil)
+
+	if !session.finished() || session.failure() == nil {
+		t.Fatal("failed HLS process did not retain its failure")
+	}
+	if globalTaterLocalHLS.get(session.id) != nil {
+		t.Fatal("failed HLS session remains registered")
+	}
+	if tracker.ActiveStreams() != 0 {
+		t.Fatalf("failed HLS process left %d tracked streams", tracker.ActiveStreams())
 	}
 }
 
