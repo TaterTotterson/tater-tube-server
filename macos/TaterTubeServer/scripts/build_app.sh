@@ -277,17 +277,24 @@ if [[ -x "${FFMPEG_BIN_DIR}/ffmpeg" ]]; then
     exit 1
   fi
   VULKAN_MANIFEST="${VULKAN_ICD_DIR}/MoltenVK_icd.json"
-  if ! env \
-    VK_DRIVER_FILES="${VULKAN_MANIFEST}" \
-    VK_ICD_FILENAMES="${VULKAN_MANIFEST}" \
-    "${FFMPEG_BIN_DIR}/ffmpeg" \
-      -hide_banner -loglevel error -nostdin \
-      -f lavfi -i "color=size=64x36:rate=1:duration=1" \
-      -vf "libplacebo=w=128:h=72:format=yuv420p:upscaler=spline36:custom_shader_path='${AI_UPSCALER_SHADER}'" \
-      -frames:v 1 -an -f null -; then
-    echo "Bundled FFmpeg could not run FSRCNNX through the packaged MoltenVK driver." >&2
-    exit 1
-  fi
+  for shader_name in \
+    "FSRCNNX_x2_8-0-4-1.glsl" \
+    "FSRCNNX_x2_16-0-4-1.glsl" \
+    "ArtCNN_C4F16.glsl" \
+    "ArtCNN_C4F32.glsl"; do
+    shader_path="${AI_UPSCALING_DIR}/${shader_name}"
+    if ! env \
+      VK_DRIVER_FILES="${VULKAN_MANIFEST}" \
+      VK_ICD_FILENAMES="${VULKAN_MANIFEST}" \
+      "${FFMPEG_BIN_DIR}/ffmpeg" \
+        -hide_banner -loglevel error -nostdin \
+        -f lavfi -i "color=size=64x36:rate=1:duration=1" \
+        -vf "libplacebo=w=128:h=72:format=yuv420p:upscaler=spline36:custom_shader_path='${shader_path}'" \
+        -frames:v 1 -an -f null -; then
+      echo "Bundled FFmpeg could not run ${shader_name} through the packaged MoltenVK driver." >&2
+      exit 1
+    fi
+  done
 fi
 if [[ "${CODESIGN_IDENTITY}" == "-" ]]; then
   codesign --force --sign - --entitlements "${ENTITLEMENTS}" "${APP_DIR}"
