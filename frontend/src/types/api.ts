@@ -439,7 +439,15 @@ export interface ActiveStream {
 	output_height?: number;
 	upscaling_requested?: "auto" | "ai" | "spline36" | string;
 	upscaling_method?: "ai" | "spline36" | "spline" | string;
-	upscaling_model?: "fsrcnnx-8" | "fsrcnnx-16" | "artcnn-c4f16" | "artcnn-c4f32" | string;
+	upscaling_model?:
+		| "fsrcnnx-8"
+		| "fsrcnnx-16"
+		| "anime4k-cnn-m"
+		| "anime4k-cnn-l"
+		| "artcnn-c4f16"
+		| "artcnn-c4f16-ds"
+		| "artcnn-c4f32"
+		| string;
 	upscaling_active?: boolean;
 	source_video_range?: string;
 	output_video_range?: string;

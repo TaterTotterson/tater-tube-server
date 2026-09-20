@@ -16,9 +16,21 @@ const AI_MODEL_PRESENTATION: Record<string, { label: string; detail: string }> =
 		label: "FSRCNNX Quality",
 		detail: "FSRCNNX 16-feature model",
 	},
+	"anime4k-cnn-m": {
+		label: "Anime4K Balanced",
+		detail: "Anime4K CNN M animation model",
+	},
+	"anime4k-cnn-l": {
+		label: "Anime4K Quality",
+		detail: "Anime4K CNN L high-end animation model",
+	},
 	"artcnn-c4f16": {
 		label: "ArtCNN Balanced",
 		detail: "ArtCNN C4F16 animation model",
+	},
+	"artcnn-c4f16-ds": {
+		label: "ArtCNN Restore",
+		detail: "ArtCNN C4F16 denoise and sharpen animation model",
 	},
 	"artcnn-c4f32": {
 		label: "ArtCNN Quality",

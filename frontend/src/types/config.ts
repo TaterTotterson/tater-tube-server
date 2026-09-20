@@ -96,7 +96,36 @@ export interface TranscodingConfig {
 
 export interface UpscalingConfig {
 	mode: "off" | "standard" | "auto" | "ai" | string;
-	model: "fsrcnnx-8" | "fsrcnnx-16" | "artcnn-c4f16" | "artcnn-c4f32" | string;
+	model:
+		| "fsrcnnx-8"
+		| "fsrcnnx-16"
+		| "anime4k-cnn-m"
+		| "anime4k-cnn-l"
+		| "artcnn-c4f16"
+		| "artcnn-c4f16-ds"
+		| "artcnn-c4f32"
+		| string;
+}
+
+export interface UpscalingCompatibilityOption {
+	id: string;
+	label: string;
+	available: boolean;
+	status: string;
+	details?: string;
+	method?: string;
+}
+
+export interface UpscalingCompatibilityDetection {
+	ffmpeg_path: string;
+	ffmpeg_available: boolean;
+	current_mode: string;
+	current_model: string;
+	recommended_mode: "off" | "standard" | "auto" | "ai" | string;
+	recommended_model?: string;
+	standard: UpscalingCompatibilityOption;
+	models: UpscalingCompatibilityOption[];
+	notes?: string[];
 }
 
 export interface TranscodingHardwareOption {

@@ -395,6 +395,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/system/provider-speed-history", s.handleGetProviderSpeedHistory)
 	api.Get("/system/indexer-stats", s.handleGetIndexerStats)
 	api.Get("/system/transcoding-detect", s.handleDetectTranscodingHardware)
+	api.Get("/system/upscaling-detect", s.handleDetectUpscalingCompatibility)
 	api.Delete("/system/indexer-stats/cleanup", s.handleCleanupIndexerStats)
 	api.Post("/system/stats/reset", s.handleResetSystemStats)
 	api.Post("/system/cleanup", s.handleSystemCleanup)

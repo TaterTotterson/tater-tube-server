@@ -1112,13 +1112,16 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("upscaling mode must be one of: off, standard, auto, ai")
 	}
 	validUpscalingModels := map[string]bool{
-		"fsrcnnx-8":    true,
-		"fsrcnnx-16":   true,
-		"artcnn-c4f16": true,
-		"artcnn-c4f32": true,
+		"fsrcnnx-8":       true,
+		"fsrcnnx-16":      true,
+		"anime4k-cnn-m":   true,
+		"anime4k-cnn-l":   true,
+		"artcnn-c4f16":    true,
+		"artcnn-c4f16-ds": true,
+		"artcnn-c4f32":    true,
 	}
 	if !validUpscalingModels[c.Upscaling.Model] {
-		return fmt.Errorf("upscaling model must be one of: fsrcnnx-8, fsrcnnx-16, artcnn-c4f16, artcnn-c4f32")
+		return fmt.Errorf("upscaling model must be one of: fsrcnnx-8, fsrcnnx-16, anime4k-cnn-m, anime4k-cnn-l, artcnn-c4f16, artcnn-c4f16-ds, artcnn-c4f32")
 	}
 
 	// Validate health configuration (always active)

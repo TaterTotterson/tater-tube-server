@@ -13,6 +13,24 @@ func TestDefaultConfigUsesStandardUpscaling(t *testing.T) {
 	assert.Equal(t, "auto", cfg.Transcoding.HardwareAcceleration)
 }
 
+func TestConfigValidateAcceptsSupportedUpscalingModels(t *testing.T) {
+	for _, model := range []string{
+		"fsrcnnx-8",
+		"fsrcnnx-16",
+		"anime4k-cnn-m",
+		"anime4k-cnn-l",
+		"artcnn-c4f16",
+		"artcnn-c4f16-ds",
+		"artcnn-c4f32",
+	} {
+		t.Run(model, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Upscaling.Model = model
+			assert.NoError(t, cfg.Validate())
+		})
+	}
+}
+
 func TestConfig_Validate_MountPaths(t *testing.T) {
 	tests := []struct {
 		name        string
