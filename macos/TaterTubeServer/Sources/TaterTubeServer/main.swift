@@ -218,6 +218,11 @@ private final class ServerManager {
                 pathParts.append(existing)
             }
             environment["PATH"] = pathParts.joined(separator: ":")
+            let aiShaderCacheDirectory = supportRoot
+                .appendingPathComponent("Cache", isDirectory: true)
+                .appendingPathComponent("Libplacebo", isDirectory: true)
+                .appendingPathComponent("v1", isDirectory: true)
+            environment["TATER_AI_SHADER_CACHE_DIR"] = aiShaderCacheDirectory.path
             if let aiShaderDirectory = Bundle.main.resourceURL?
                 .appendingPathComponent("AI Upscaling", isDirectory: true),
                FileManager.default.fileExists(atPath: aiShaderDirectory.path) {

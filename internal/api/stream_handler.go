@@ -780,18 +780,19 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 		http.Error(w, "Tone mapping unavailable in the configured FFmpeg build", http.StatusServiceUnavailable)
 		return
 	}
-	scaler, aiShaderPath, aiModel := resolveTaterUpscalerForRequest(r.Context(), ffmpegPath, r)
+	scaler, aiShaderPath, aiShaderCachePath, aiModel := resolveTaterUpscalerForRequest(r.Context(), ffmpegPath, r)
 	args := buildFFmpegTranscodeArgsWithOptions(
 		transcodeCfg, profile, accel, videoCodecPreference, transcodeOutputOptions{
 			InputPath: inputPath, StartSeconds: startSeconds,
 			AudioTrack:    requestedTaterAudioTrack(r),
 			AudioChannels: requestedTaterAudioChannels(r),
 			ToneMapSource: toneMapSource, ToneMapTarget: toneMapTarget,
-			ToneMapFilter: toneMapFilter,
-			Scaler:        scaler,
-			AIShaderPath:  aiShaderPath,
-			OutputWidth:   requestedTaterVideoDimension(r, "tater_output_width"),
-			OutputHeight:  requestedTaterVideoDimension(r, "tater_output_height"),
+			ToneMapFilter:     toneMapFilter,
+			Scaler:            scaler,
+			AIShaderPath:      aiShaderPath,
+			AIShaderCachePath: aiShaderCachePath,
+			OutputWidth:       requestedTaterVideoDimension(r, "tater_output_width"),
+			OutputHeight:      requestedTaterVideoDimension(r, "tater_output_height"),
 		},
 	)
 	videoCodec, _ := transcodeVideoSettingsForCodec(accel, transcodeCfg.HardwareDevice, profile, videoCodecPreference)
@@ -1639,22 +1640,23 @@ func buildFFmpegTranscodeArgsWithCodec(cfg config.TranscodingConfig, profile tra
 }
 
 type transcodeOutputOptions struct {
-	InputPath        string
-	StartSeconds     float64
-	DurationSeconds  float64
-	AudioTrack       int
-	AudioChannels    int
-	LogoFile         string
-	LogoPosition     string
-	ToneMapSource    string
-	ToneMapTarget    string
-	ToneMapFilter    string
-	SourceVideoRange string
-	OutputVideoRange string
-	Scaler           string
-	AIShaderPath     string
-	OutputWidth      int
-	OutputHeight     int
+	InputPath         string
+	StartSeconds      float64
+	DurationSeconds   float64
+	AudioTrack        int
+	AudioChannels     int
+	LogoFile          string
+	LogoPosition      string
+	ToneMapSource     string
+	ToneMapTarget     string
+	ToneMapFilter     string
+	SourceVideoRange  string
+	OutputVideoRange  string
+	Scaler            string
+	AIShaderPath      string
+	AIShaderCachePath string
+	OutputWidth       int
+	OutputHeight      int
 }
 
 func buildFFmpegTranscodeArgsWithOptions(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, options transcodeOutputOptions) []string {
@@ -1684,7 +1686,7 @@ func buildFFmpegTranscodeArgsWithOptions(cfg config.TranscodingConfig, profile t
 
 	videoCodec, filters := transcodeVideoSettingsForCodecAndUpscaler(
 		accel, cfg.HardwareDevice, profile, preferredCodec,
-		options.Scaler, options.AIShaderPath, options.OutputWidth, options.OutputHeight,
+		options.Scaler, options.AIShaderPath, options.AIShaderCachePath, options.OutputWidth, options.OutputHeight,
 	)
 	filters = appendTaterToneMapFilter(
 		filters, options.ToneMapSource, options.ToneMapTarget, options.ToneMapFilter,
@@ -2098,19 +2100,19 @@ func transcodeVideoSettingsForCodecAndScaler(
 	outputWidth, outputHeight int,
 ) (codec string, filters string) {
 	return transcodeVideoSettingsForCodecAndUpscaler(
-		accel, device, profile, preferredCodec, scaler, "", outputWidth, outputHeight,
+		accel, device, profile, preferredCodec, scaler, "", "", outputWidth, outputHeight,
 	)
 }
 
 func transcodeVideoSettingsForCodecAndUpscaler(
 	accel, device string,
 	profile transcodeProfile,
-	preferredCodec, scaler, aiShaderPath string,
+	preferredCodec, scaler, aiShaderPath, aiShaderCachePath string,
 	outputWidth, outputHeight int,
 ) (codec string, filters string) {
 	scaleFilter := "scale=w=" + strconv.Itoa(profile.MaxWidth) + ":h=" + strconv.Itoa(profile.MaxHeight) + ":force_original_aspect_ratio=decrease:force_divisible_by=2"
 	if strings.EqualFold(strings.TrimSpace(scaler), "ai") && strings.TrimSpace(aiShaderPath) != "" && outputWidth > 0 && outputHeight > 0 {
-		scaleFilter = taterAIUpscaleFilter(outputWidth, outputHeight, aiShaderPath)
+		scaleFilter = taterAIUpscaleFilter(outputWidth, outputHeight, aiShaderPath, aiShaderCachePath)
 	} else if strings.EqualFold(strings.TrimSpace(scaler), "spline36") && outputWidth > 0 && outputHeight > 0 {
 		scaleFilter = "zscale=w=" + strconv.Itoa(outputWidth) + ":h=" + strconv.Itoa(outputHeight) + ":filter=spline36"
 	} else if strings.EqualFold(strings.TrimSpace(scaler), "spline") {

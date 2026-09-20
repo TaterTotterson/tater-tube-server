@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,9 @@ const (
 	maxTaterAIUpscalerSize         = 2 * 1024 * 1024
 	taterUpscalingProbeTimeout     = 15 * time.Second
 	taterArtCNNQualityProbeTimeout = 60 * time.Second
+	taterAIShaderCacheNamespace    = "v1"
+	taterAIShaderCacheMaxSize      = 256 * 1024 * 1024
+	taterAIShaderCacheMaxAge       = 180 * 24 * time.Hour
 )
 
 type taterAIUpscalerModel struct {
@@ -105,9 +109,10 @@ var taterAIUpscalerModelOrder = []string{
 }
 
 type taterAIUpscalerProbe struct {
-	shaderPath string
-	err        error
-	checkedAt  time.Time
+	shaderPath      string
+	shaderCachePath string
+	err             error
+	checkedAt       time.Time
 }
 
 var taterAIUpscalerProbes = struct {
@@ -117,18 +122,20 @@ var taterAIUpscalerProbes = struct {
 
 var taterAIUpscalerWarnings sync.Map
 var taterStandardUpscalerWarnings sync.Map
+var taterAIShaderCacheSupport sync.Map
+var taterAIShaderCacheCleaned sync.Map
 
 // resolveTaterUpscaler keeps AI upscaling optional and fail-safe. Selected
 // models step through compatible AI fallbacks before playback continues with
 // the portable Standard path.
-func resolveTaterUpscaler(ctx context.Context, ffmpegPath, requested, requestedModel string) (scaler, shaderPath, resolvedModel string) {
+func resolveTaterUpscaler(ctx context.Context, ffmpegPath, requested, requestedModel string) (scaler, shaderPath, shaderCachePath, resolvedModel string) {
 	switch strings.ToLower(strings.TrimSpace(requested)) {
 	case "auto", "ai":
 		requestedModel = cleanTaterAIUpscalerModel(requestedModel)
 		var selectedErr error
 		for _, modelID := range taterAIUpscalerFallbackChain(requestedModel) {
 			model := taterAIUpscalerModels[modelID]
-			path, err := prepareTaterAIUpscaler(ctx, ffmpegPath, model)
+			path, cachePath, err := prepareTaterAIUpscaler(ctx, ffmpegPath, model)
 			if err == nil {
 				if modelID != requestedModel {
 					warningKey := ffmpegPath + "\x00" + requestedModel + "\x00" + modelID
@@ -139,7 +146,7 @@ func resolveTaterUpscaler(ctx context.Context, ffmpegPath, requested, requestedM
 							"reason", selectedErr)
 					}
 				}
-				return "ai", path, modelID
+				return "ai", path, cachePath, modelID
 			}
 			if selectedErr == nil {
 				selectedErr = err
@@ -155,11 +162,11 @@ func resolveTaterUpscaler(ctx context.Context, ffmpegPath, requested, requestedM
 				"requested_model", requestedModel,
 				"reason", selectedErr)
 		}
-		return resolveTaterStandardUpscaler(ctx, ffmpegPath), "", ""
+		return resolveTaterStandardUpscaler(ctx, ffmpegPath), "", "", ""
 	case "spline36", "standard":
-		return resolveTaterStandardUpscaler(ctx, ffmpegPath), "", ""
+		return resolveTaterStandardUpscaler(ctx, ffmpegPath), "", "", ""
 	default:
-		return "", "", ""
+		return "", "", "", ""
 	}
 }
 
@@ -205,7 +212,7 @@ func resolveTaterStandardUpscaler(ctx context.Context, ffmpegPath string) string
 	return "spline"
 }
 
-func resolveTaterUpscalerForRequest(ctx context.Context, ffmpegPath string, request *http.Request) (scaler, shaderPath, resolvedModel string) {
+func resolveTaterUpscalerForRequest(ctx context.Context, ffmpegPath string, request *http.Request) (scaler, shaderPath, shaderCachePath, resolvedModel string) {
 	requested := requestedTaterScaler(request)
 	requestedModel := requestedTaterAIUpscalerModel(request)
 	if requested != "auto" && requested != "ai" {
@@ -237,7 +244,7 @@ func requestedTaterAIUpscalerModel(request *http.Request) string {
 	return cleanTaterAIUpscalerModel(request.URL.Query().Get("tater_ai_model"))
 }
 
-func prepareTaterAIUpscaler(ctx context.Context, ffmpegPath string, model taterAIUpscalerModel) (string, error) {
+func prepareTaterAIUpscaler(ctx context.Context, ffmpegPath string, model taterAIUpscalerModel) (string, string, error) {
 	ffmpegPath = effectiveFFmpegPath(ffmpegPath)
 	cacheKey := ffmpegPath + "\x00" + model.id
 
@@ -245,11 +252,12 @@ func prepareTaterAIUpscaler(ctx context.Context, ffmpegPath string, model taterA
 	defer taterAIUpscalerProbes.Unlock()
 	if cached, ok := taterAIUpscalerProbes.byFFmpeg[cacheKey]; ok {
 		if cached.err == nil || time.Since(cached.checkedAt) < 5*time.Minute {
-			return cached.shaderPath, cached.err
+			return cached.shaderPath, cached.shaderCachePath, cached.err
 		}
 	}
 
 	var shaderPath string
+	var shaderCachePath string
 	var err error
 	if !taterTVFFmpegHasFilter(ctx, ffmpegPath, "libplacebo") {
 		err = fmt.Errorf("the configured FFmpeg build does not include libplacebo")
@@ -257,11 +265,115 @@ func prepareTaterAIUpscaler(ctx context.Context, ffmpegPath string, model taterA
 		shaderPath, err = findOrDownloadTaterAIUpscalerShader(ctx, model)
 	}
 	if err == nil {
-		err = probeTaterAIUpscaler(ctx, ffmpegPath, shaderPath, model)
+		shaderCachePath = prepareTaterAIShaderCache(ctx, ffmpegPath)
+		err = probeTaterAIUpscaler(ctx, ffmpegPath, shaderPath, shaderCachePath, model)
 	}
-	result := taterAIUpscalerProbe{shaderPath: shaderPath, err: err, checkedAt: time.Now()}
+	result := taterAIUpscalerProbe{
+		shaderPath: shaderPath, shaderCachePath: shaderCachePath, err: err, checkedAt: time.Now(),
+	}
 	taterAIUpscalerProbes.byFFmpeg[cacheKey] = result
-	return result.shaderPath, result.err
+	return result.shaderPath, result.shaderCachePath, result.err
+}
+
+func prepareTaterAIShaderCache(ctx context.Context, ffmpegPath string) string {
+	if !taterFFmpegSupportsAIShaderCache(ctx, ffmpegPath) {
+		return ""
+	}
+	directory, err := taterAIShaderCacheDirectory()
+	if err != nil {
+		slog.WarnContext(ctx, "Unable to prepare the persistent AI shader cache; continuing without it", "error", err)
+		return ""
+	}
+	if _, alreadyCleaned := taterAIShaderCacheCleaned.LoadOrStore(directory, struct{}{}); !alreadyCleaned {
+		if err := pruneTaterAIShaderCache(directory, taterAIShaderCacheMaxSize, taterAIShaderCacheMaxAge, time.Now()); err != nil {
+			taterAIShaderCacheCleaned.Delete(directory)
+			slog.WarnContext(ctx, "Unable to clean the persistent AI shader cache", "path", directory, "error", err)
+		}
+	}
+	return filepath.Clean(directory) + string(os.PathSeparator)
+}
+
+func taterFFmpegSupportsAIShaderCache(parent context.Context, ffmpegPath string) bool {
+	ffmpegPath = effectiveFFmpegPath(ffmpegPath)
+	if cached, ok := taterAIShaderCacheSupport.Load(ffmpegPath); ok {
+		return cached.(bool)
+	}
+	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, ffmpegPath, "-hide_banner", "-h", "filter=libplacebo").CombinedOutput()
+	supported := err == nil && strings.Contains(strings.ToLower(string(out)), "shader_cache")
+	// Do not permanently cache a false result caused only by a canceled request
+	// or a transient timeout. A completed unsupported probe is safe to cache.
+	if ctx.Err() == nil {
+		taterAIShaderCacheSupport.Store(ffmpegPath, supported)
+	}
+	return supported
+}
+
+func taterAIShaderCacheDirectory() (string, error) {
+	if configured := strings.TrimSpace(os.Getenv("TATER_AI_SHADER_CACHE_DIR")); configured != "" {
+		configured = filepath.Clean(configured)
+		if err := os.MkdirAll(configured, 0o755); err != nil {
+			return "", fmt.Errorf("create configured shader cache: %w", err)
+		}
+		return configured, nil
+	}
+	root, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("locate user cache directory: %w", err)
+	}
+	directory := filepath.Join(root, "tater-tube-server", "libplacebo", taterAIShaderCacheNamespace)
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return "", fmt.Errorf("create shader cache: %w", err)
+	}
+	return directory, nil
+}
+
+type taterAIShaderCacheFile struct {
+	path    string
+	size    int64
+	modTime time.Time
+}
+
+func pruneTaterAIShaderCache(directory string, maxSize int64, maxAge time.Duration, now time.Time) error {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return err
+	}
+	files := make([]taterAIShaderCacheFile, 0, len(entries))
+	var total int64
+	for _, entry := range entries {
+		if !entry.Type().IsRegular() {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			continue
+		}
+		path := filepath.Join(directory, entry.Name())
+		if maxAge > 0 && now.Sub(info.ModTime()) > maxAge {
+			if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				return removeErr
+			}
+			continue
+		}
+		files = append(files, taterAIShaderCacheFile{path: path, size: info.Size(), modTime: info.ModTime()})
+		total += info.Size()
+	}
+	if maxSize <= 0 || total <= maxSize {
+		return nil
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].modTime.Before(files[j].modTime) })
+	for _, file := range files {
+		if total <= maxSize {
+			break
+		}
+		if err := os.Remove(file.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		total -= file.size
+	}
+	return nil
 }
 
 func findOrDownloadTaterAIUpscalerShader(ctx context.Context, model taterAIUpscalerModel) (string, error) {
@@ -372,8 +484,8 @@ func downloadTaterAIUpscalerShader(ctx context.Context, destination string, mode
 	return nil
 }
 
-func probeTaterAIUpscaler(parent context.Context, ffmpegPath, shaderPath string, model taterAIUpscalerModel) error {
-	filter := taterAIUpscaleFilter(128, 72, shaderPath)
+func probeTaterAIUpscaler(parent context.Context, ffmpegPath, shaderPath, shaderCachePath string, model taterAIUpscalerModel) error {
+	filter := taterAIUpscaleFilter(128, 72, shaderPath, shaderCachePath)
 	timeout := model.probeTimeout
 	if timeout <= 0 {
 		timeout = taterUpscalingProbeTimeout
@@ -418,12 +530,19 @@ func probeTaterUpscalingFilterWithTimeout(parent context.Context, ffmpegPath, fi
 	return nil
 }
 
-func taterAIUpscaleFilter(outputWidth, outputHeight int, shaderPath string) string {
+func taterAIUpscaleFilter(outputWidth, outputHeight int, shaderPath, shaderCachePath string) string {
 	path := escapeTaterFilterValue(shaderPath)
-	return fmt.Sprintf(
-		"libplacebo=w=%d:h=%d:format=yuv420p:upscaler=spline36:custom_shader_path=%s",
-		outputWidth, outputHeight, path,
-	)
+	parts := []string{
+		fmt.Sprintf("libplacebo=w=%d", outputWidth),
+		fmt.Sprintf("h=%d", outputHeight),
+		"format=yuv420p",
+		"upscaler=spline36",
+	}
+	if shaderCachePath = strings.TrimSpace(shaderCachePath); shaderCachePath != "" {
+		parts = append(parts, "shader_cache="+escapeTaterFilterValue(shaderCachePath))
+	}
+	parts = append(parts, "custom_shader_path="+path)
+	return strings.Join(parts, ":")
 }
 
 func escapeTaterFilterValue(value string) string {

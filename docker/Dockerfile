@@ -115,7 +115,7 @@ RUN apt-get update && \
         > /etc/apt/sources.list.d/media-ffmpeg.sources && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        "${media_ffmpeg_vendor}-ffmpeg7" \
+        "${media_ffmpeg_vendor}-ffmpeg8" \
         v4l-utils \
         vainfo && \
     ln -sf "/usr/lib/${media_ffmpeg_vendor}-ffmpeg/ffmpeg" /usr/local/bin/tater-ffmpeg && \
@@ -173,6 +173,7 @@ RUN apt-get update && \
 RUN ffmpeg -hide_banner -filters 2>&1 | grep -Eq '[[:space:]]zscale[[:space:]]' && \
     if [ "${TARGETARCH}" = "amd64" ]; then \
         ffmpeg -hide_banner -filters 2>&1 | grep -Eq '[[:space:]]libplacebo[[:space:]]' && \
+        ffmpeg -hide_banner -h filter=libplacebo 2>&1 | grep -Eq '[[:space:]]shader_cache[[:space:]]' && \
         ffmpeg -hide_banner -encoders 2>&1 | grep -Eq '[[:space:]]h264_nvenc[[:space:]]' && \
         ffmpeg -hide_banner -encoders 2>&1 | grep -Eq '[[:space:]]h264_vaapi[[:space:]]'; \
     fi

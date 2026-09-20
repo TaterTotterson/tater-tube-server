@@ -46,7 +46,7 @@ func (s *Server) handleDetectUpscalingCompatibility(c *fiber.Ctx) error {
 	result := detectUpscalingCompatibility(
 		c.Context(), cfg.Transcoding, cfg.Upscaling,
 		func(ctx context.Context, path string, model taterAIUpscalerModel) error {
-			_, err := prepareTaterAIUpscaler(ctx, path, model)
+			_, _, err := prepareTaterAIUpscaler(ctx, path, model)
 			return err
 		},
 	)
@@ -88,7 +88,7 @@ func detectUpscalingCompatibility(
 
 	if probeAI == nil {
 		probeAI = func(ctx context.Context, path string, model taterAIUpscalerModel) error {
-			_, err := prepareTaterAIUpscaler(ctx, path, model)
+			_, _, err := prepareTaterAIUpscaler(ctx, path, model)
 			return err
 		}
 	}
