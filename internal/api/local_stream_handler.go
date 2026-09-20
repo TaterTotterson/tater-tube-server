@@ -61,7 +61,7 @@ func (h *LocalStreamHandler) GetHTTPHandler() http.Handler {
 
 		categoryID := strings.TrimSpace(r.URL.Query().Get("category_id"))
 		sourceIndex := parseTaterInt(r.URL.Query().Get("source"), 0)
-		relPath := cleanLocalRelativePath(r.URL.Query().Get("path"))
+		relPath := taterLocalPathFromQuery(r.URL.Query())
 		cat, ok := taterLocalMediaCategory(cfg, categoryID)
 		if !ok {
 			http.Error(w, "Local media category not found", http.StatusNotFound)

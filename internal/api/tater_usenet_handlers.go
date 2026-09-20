@@ -32,6 +32,8 @@ import (
 
 const taterUsenetMaxNzbFetchSize = 100 * 1024 * 1024
 
+const taterLocalPathRefQuery = "tater_path_ref"
+
 type taterUsenetCategory struct {
 	ID        string                `json:"id,omitempty"`
 	Title     string                `json:"title"`
@@ -2329,6 +2331,31 @@ func cleanLocalRelativePath(value string) string {
 	return strings.TrimPrefix(clean, "/")
 }
 
+// taterLocalPathRef carries the exact local-library path in a query-safe form.
+// Some URL implementations rewrite both literal plus signs and encoded spaces
+// as "+" when adding playback parameters, making the readable path ambiguous.
+func taterLocalPathRef(relPath string) string {
+	clean := cleanLocalRelativePath(relPath)
+	if clean == "" {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString([]byte(clean))
+}
+
+func taterLocalPathFromQuery(query url.Values) string {
+	if query == nil {
+		return ""
+	}
+	if ref := strings.TrimSpace(query.Get(taterLocalPathRefQuery)); ref != "" {
+		if decoded, err := base64.RawURLEncoding.DecodeString(ref); err == nil {
+			if clean := cleanLocalRelativePath(string(decoded)); clean != "" {
+				return clean
+			}
+		}
+	}
+	return cleanLocalRelativePath(query.Get("path"))
+}
+
 var (
 	localYearPattern        = regexp.MustCompile(`\b(19[0-9]{2}|20[0-9]{2})\b`)
 	localQualityTail        = regexp.MustCompile(`(?i)\b(2160p|1080p|720p|480p|bluray|blu-ray|brrip|webrip|web-dl|webdl|hdtv|x264|x265|h264|h265|hevc|aac|dts|truehd|atmos|proper|repack|extended|remux)\b.*$`)
@@ -2568,9 +2595,11 @@ func taterLocalStreamURL(baseURL, categoryID string, sourceIndex int, relPath, p
 		return ""
 	}
 	q := u.Query()
+	cleanPath := cleanLocalRelativePath(relPath)
 	q.Set("category_id", categoryID)
 	q.Set("source", strconv.Itoa(sourceIndex))
-	q.Set("path", cleanLocalRelativePath(relPath))
+	q.Set("path", cleanPath)
+	q.Set(taterLocalPathRefQuery, taterLocalPathRef(cleanPath))
 	q.Set("player_token", playerToken)
 	u.RawQuery = q.Encode()
 	return u.String()

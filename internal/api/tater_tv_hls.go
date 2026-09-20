@@ -42,8 +42,9 @@ var errTaterTVHLSIdle = errors.New("Tube TV HLS session idle")
 var taterTVFFmpegFilterCache sync.Map
 
 type taterTVHLSManager struct {
-	mu       sync.Mutex
-	sessions map[string]*taterTVHLSSession
+	mu             sync.Mutex
+	sessions       map[string]*taterTVHLSSession
+	playerSessions map[string]string
 }
 
 type taterTVHLSSession struct {
@@ -96,7 +97,10 @@ type taterTVParsedHLSSegment struct {
 	InitFile string
 }
 
-var globalTaterTVHLS = &taterTVHLSManager{sessions: map[string]*taterTVHLSSession{}}
+var globalTaterTVHLS = &taterTVHLSManager{
+	sessions:       map[string]*taterTVHLSSession{},
+	playerSessions: map[string]string{},
+}
 
 func taterTVResetHLS() {
 	globalTaterTVHLS.mu.Lock()
@@ -105,6 +109,7 @@ func taterTVResetHLS() {
 		session.stop()
 	}
 	globalTaterTVHLS.sessions = map[string]*taterTVHLSSession{}
+	globalTaterTVHLS.playerSessions = map[string]string{}
 }
 
 func (h *TaterTVStreamHandler) serveHLSPlaylist(w http.ResponseWriter, r *http.Request) {
@@ -159,6 +164,10 @@ func (h *TaterTVStreamHandler) serveHLSSegment(w http.ResponseWriter, r *http.Re
 		clientLogoOverlay, taterTVRequestedHDRFormats(r), audioChannels,
 		taterTVRequestedOutputVideoRange(r), taterTVRequestedOutputFrameRate(r),
 	)
+	if !globalTaterTVHLS.playerBoundTo(player.ID, key) {
+		http.Error(w, "HLS session not found", http.StatusNotFound)
+		return
+	}
 	session := globalTaterTVHLS.get(key)
 	if session == nil {
 		http.Error(w, "HLS session not found", http.StatusNotFound)
@@ -261,16 +270,17 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 		channel.Number, publicID, profileID, requestedAccel, videoCodecPreference,
 		clientLogoOverlay, hdrFormats, audioChannels, outputVideoRange, outputFrameRate,
 	)
+	// A Tube TV playlist becomes this player's active playback owner. Clear any
+	// stale file conversion immediately, but retain a shared channel encoder when
+	// another paired player is still watching it.
+	stopTaterFilePlaybackForPlayer(player.ID, taterPlayerDisplayName(player), h.streamTracker)
 	session := globalTaterTVHLS.get(key)
 	if session != nil {
 		if session.finished() {
 			globalTaterTVHLS.removeIfSame(key, session)
-		} else {
-			session.touch()
-			h.recordHLSPlayback(r, session, player, 0)
-			return session, playerToken, true
 		}
 	}
+	globalTaterTVHLS.bindPlayer(player.ID, key)
 
 	session = globalTaterTVHLS.get(key)
 	if session != nil {
@@ -427,10 +437,87 @@ func (m *taterTVHLSManager) addOrGet(key string, session *taterTVHLSSession) (*t
 
 func (m *taterTVHLSManager) removeIfSame(key string, session *taterTVHLSSession) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if existing := m.sessions[key]; existing == session {
-		session.stop()
 		delete(m.sessions, key)
+		m.removeBindingsLocked(key)
+		m.mu.Unlock()
+		session.stop()
+		return
+	}
+	m.mu.Unlock()
+}
+
+// bindPlayer assigns one Tube TV session to a paired player. When that player
+// changes channels, the previous encoder is stopped immediately unless another
+// player is still sharing it.
+func (m *taterTVHLSManager) bindPlayer(playerID, key string) {
+	playerID = strings.TrimSpace(playerID)
+	key = strings.TrimSpace(key)
+	if playerID == "" || key == "" {
+		return
+	}
+
+	var stopped *taterTVHLSSession
+	m.mu.Lock()
+	if m.playerSessions == nil {
+		m.playerSessions = map[string]string{}
+	}
+	oldKey := m.playerSessions[playerID]
+	if oldKey == key {
+		m.mu.Unlock()
+		return
+	}
+	m.playerSessions[playerID] = key
+	if oldKey != "" && !m.keyInUseLocked(oldKey) {
+		stopped = m.sessions[oldKey]
+		delete(m.sessions, oldKey)
+	}
+	m.mu.Unlock()
+	if stopped != nil {
+		stopped.stop()
+	}
+}
+
+func (m *taterTVHLSManager) unbindPlayer(playerID string) {
+	playerID = strings.TrimSpace(playerID)
+	if playerID == "" {
+		return
+	}
+
+	var stopped *taterTVHLSSession
+	m.mu.Lock()
+	oldKey := m.playerSessions[playerID]
+	delete(m.playerSessions, playerID)
+	if oldKey != "" && !m.keyInUseLocked(oldKey) {
+		stopped = m.sessions[oldKey]
+		delete(m.sessions, oldKey)
+	}
+	m.mu.Unlock()
+	if stopped != nil {
+		stopped.stop()
+	}
+}
+
+func (m *taterTVHLSManager) playerBoundTo(playerID, key string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return strings.TrimSpace(key) != "" && m.playerSessions[strings.TrimSpace(playerID)] == strings.TrimSpace(key)
+}
+
+func (m *taterTVHLSManager) keyInUseLocked(key string) bool {
+	for _, boundKey := range m.playerSessions {
+		if boundKey == key {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *taterTVHLSManager) removeBindingsLocked(key string) {
+	for playerID, boundKey := range m.playerSessions {
+		if boundKey == key {
+			delete(m.playerSessions, playerID)
+		}
 	}
 }
 
@@ -440,6 +527,7 @@ func (m *taterTVHLSManager) pruneLocked() {
 		if now.Sub(session.lastAccessed()) > taterTVHLSIdleTimeout || session.finishedAndIdle(now) {
 			session.stop()
 			delete(m.sessions, key)
+			m.removeBindingsLocked(key)
 		}
 	}
 }

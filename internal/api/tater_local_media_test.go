@@ -369,8 +369,17 @@ func TestTaterPlayStateHeartbeatTracksPlayerUntilStopped(t *testing.T) {
 
 	active = false
 	state.PlaybackActive = &active
+	streamCtx, cancelStream := context.WithCancel(context.Background())
+	stream := tracker.AddStream("Moonrise Manor.mkv", "Local", "Living Room", "127.0.0.1", "test", 100)
+	tracker.SetPlayerID(stream.ID, "living-room-player")
+	tracker.SetCancelFunc(stream.ID, cancelStream)
 	assert.Equal(t, http.StatusOK, post(state).StatusCode)
 	assert.Empty(t, tracker.GetActive())
+	select {
+	case <-streamCtx.Done():
+	default:
+		t.Fatal("playback stop did not cancel the player's active server stream")
+	}
 }
 
 func TestTaterPlayStateCompletedUsesCreditsThreshold(t *testing.T) {

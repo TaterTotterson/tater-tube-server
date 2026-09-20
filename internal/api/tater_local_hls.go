@@ -178,6 +178,7 @@ func (h *LocalStreamHandler) prepareLocalHLSSession(
 	if globalTaterLocalHLS.isSuperseded(key) {
 		return nil, fmt.Errorf("HLS playback generation was superseded")
 	}
+	globalTaterTVHLS.unbindPlayer(player.ID)
 	if existing := globalTaterLocalHLS.get(key); existing != nil {
 		if !existing.finished() || (existing.failure() == nil && existing.playlistReady()) {
 			existing.touch()
@@ -597,6 +598,38 @@ func (m *taterLocalHLSManager) removeIfSame(id string, session *taterLocalHLSSes
 	if m.sessions[id] == session {
 		delete(m.sessions, id)
 	}
+}
+
+// stopForPlayer releases every converted local or Discovery HLS session owned
+// by one paired player. A player can only consume one playback at a time, so a
+// new item or an explicit stop should not leave the previous FFmpeg job running
+// until the normal idle timeout.
+func (m *taterLocalHLSManager) stopForPlayer(playerID string) int {
+	playerID = strings.TrimSpace(playerID)
+	if playerID == "" {
+		return 0
+	}
+
+	now := time.Now()
+	m.mu.Lock()
+	if m.superseded == nil {
+		m.superseded = map[string]time.Time{}
+	}
+	var stopped []*taterLocalHLSSession
+	for id, session := range m.sessions {
+		if session == nil || !strings.EqualFold(strings.TrimSpace(session.playerID), playerID) {
+			continue
+		}
+		delete(m.sessions, id)
+		m.superseded[id] = now.Add(taterLocalHLSSupersededTTL)
+		stopped = append(stopped, session)
+	}
+	m.mu.Unlock()
+
+	for _, session := range stopped {
+		session.stopAndCleanup()
+	}
+	return len(stopped)
 }
 
 func (s *taterLocalHLSSession) run(ctx context.Context, ffmpegPath string, args []string) {

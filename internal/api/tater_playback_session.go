@@ -277,6 +277,9 @@ func (s *Server) handleTaterPlayerPlaybackSession(c *fiber.Ctx) error {
 	if isTubeTV {
 		plan = buildTaterTVPlaybackPlan(req, source)
 	}
+	if player, found := findTaterPlayerByToken(cfg, playerToken); found {
+		stopTaterPlaybackForPlayer(player.ID, taterPlayerDisplayName(player), s.streamTracker)
+	}
 	return RespondSuccess(c, plan)
 }
 
@@ -1358,7 +1361,7 @@ func taterPlaybackLocalSourcePath(cfg *config.Config, rawURL string) (string, bo
 	if err != nil || sourceIndex < 0 || sourceIndex >= len(paths) {
 		return "", true, fmt.Errorf("local media source not found")
 	}
-	relPath := cleanLocalRelativePath(u.Query().Get("path"))
+	relPath := taterLocalPathFromQuery(u.Query())
 	if relPath == "" {
 		return "", true, fmt.Errorf("local media path is empty")
 	}
@@ -1792,7 +1795,13 @@ func parsedPlaybackPath(rawURL string) string {
 	if err != nil {
 		return ""
 	}
-	if path := strings.TrimSpace(u.Query().Get("path")); path != "" {
+	query := u.Query()
+	if strings.TrimSpace(query.Get(taterLocalPathRefQuery)) != "" {
+		if path := taterLocalPathFromQuery(query); path != "" {
+			return path
+		}
+	}
+	if path := strings.TrimSpace(query.Get("path")); path != "" {
 		return path
 	}
 	return u.Path

@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
@@ -1406,6 +1408,37 @@ func TestTaterPlaybackProbeTargetIgnoresUnrelatedURLs(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, found)
 	require.Empty(t, target)
+}
+
+func TestTaterPlaybackLocalSourcePathUsesOpaquePathReference(t *testing.T) {
+	root := t.TempDir()
+	relPath := "Face+Off (1997)/Face+Off (1997) Remux-2160p.mkv"
+	expectedPath := filepath.Join(root, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(expectedPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(expectedPath, []byte("media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	enabled := true
+	cfg := &config.Config{LocalMedia: config.LocalMediaConfig{
+		Enabled: &enabled,
+		Categories: []config.LocalMediaCategory{{
+			ID: "movies", Paths: []string{root}, Enabled: &enabled,
+		}},
+	}}
+	streamURL := taterLocalStreamURL("http://tube.local", "movies", 0, relPath, "token")
+	parsed, err := url.Parse(streamURL)
+	require.NoError(t, err)
+	query := parsed.Query()
+	query.Set("path", "Face Off (1997)/Face Off (1997) Remux-2160p.mkv")
+	parsed.RawQuery = query.Encode()
+
+	resolved, found, err := taterPlaybackLocalSourcePath(cfg, parsed.String())
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, expectedPath, resolved)
 }
 
 func TestTaterPlaybackReleaseNameFallbackProtectsDeckFromUnknown4KDV(t *testing.T) {
