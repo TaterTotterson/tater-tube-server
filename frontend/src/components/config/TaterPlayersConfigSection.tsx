@@ -177,7 +177,6 @@ export function TaterPlayersConfigSection({ config, onRefresh }: TaterPlayersCon
 	};
 
 	const activePlayers = players.players.filter((player) => !player.revoked_at);
-	const revokedPlayers = players.players.filter((player) => player.revoked_at);
 
 	return (
 		<div className="min-w-0 space-y-8">
@@ -344,24 +343,6 @@ export function TaterPlayersConfigSection({ config, onRefresh }: TaterPlayersCon
 						</div>
 					))}
 				</div>
-
-				{revokedPlayers.length > 0 && (
-					<div className="mt-6">
-						<h5 className="mb-2 font-bold text-base-content/40 text-xs uppercase tracking-widest">
-							Revoked
-						</h5>
-						<div className="space-y-2">
-							{revokedPlayers.map((player) => (
-								<div
-									key={player.id}
-									className="rounded-xl border border-base-300 bg-base-100/40 p-3 text-base-content/50 text-sm"
-								>
-									{player.name || "Tater Tube Player"} · Revoked {formatDate(player.revoked_at)}
-								</div>
-							))}
-						</div>
-					</div>
-				)}
 			</div>
 		</div>
 	);

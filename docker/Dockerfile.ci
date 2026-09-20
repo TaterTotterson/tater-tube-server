@@ -131,11 +131,26 @@ RUN apt-get update && \
     echo "03d0b3d31cb82c898a94a46663021a3e8f02c5a21d69c5cfdf0208de4bfd453e  /tmp/ArtCNN_C4F16.glsl" | sha256sum -c - && \
     install -m 0644 /tmp/ArtCNN_C4F16.glsl /usr/share/tater-tube-server/ai-upscaling/ArtCNN_C4F16.glsl && \
     curl -fsSL --retry 3 \
+        https://github.com/Artoriuz/ArtCNN/releases/download/v1.6.2/ArtCNN_C4F16_DS.glsl \
+        -o /tmp/ArtCNN_C4F16_DS.glsl && \
+    echo "57df650fddec3969e17799f5522c9b03dd2d33b1aeace237fef216bf3858125a  /tmp/ArtCNN_C4F16_DS.glsl" | sha256sum -c - && \
+    install -m 0644 /tmp/ArtCNN_C4F16_DS.glsl /usr/share/tater-tube-server/ai-upscaling/ArtCNN_C4F16_DS.glsl && \
+    curl -fsSL --retry 3 \
         https://github.com/Artoriuz/ArtCNN/releases/download/v1.6.2/ArtCNN_C4F32.glsl \
         -o /tmp/ArtCNN_C4F32.glsl && \
     echo "f773bce6cf5fe7e5e5d599a695edd40df5cd7a20c3d08c4d164d07591d5bead3  /tmp/ArtCNN_C4F32.glsl" | sha256sum -c - && \
     install -m 0644 /tmp/ArtCNN_C4F32.glsl /usr/share/tater-tube-server/ai-upscaling/ArtCNN_C4F32.glsl && \
-    rm -f /tmp/FSRCNNX_x2_8-0-4-1.glsl /tmp/FSRCNNX_x2_16-0-4-1.glsl /tmp/ArtCNN_C4F16.glsl /tmp/ArtCNN_C4F32.glsl && \
+    curl -fsSL --retry 3 \
+        https://raw.githubusercontent.com/bloc97/Anime4K/v4.0.1/glsl/Upscale/Anime4K_Upscale_CNN_x2_M.glsl \
+        -o /tmp/Anime4K_Upscale_CNN_x2_M.glsl && \
+    echo "716e02098a68f0d648761f2b96b4dd139e1cb09b174bb369fca3aa34328fff7e  /tmp/Anime4K_Upscale_CNN_x2_M.glsl" | sha256sum -c - && \
+    install -m 0644 /tmp/Anime4K_Upscale_CNN_x2_M.glsl /usr/share/tater-tube-server/ai-upscaling/Anime4K_Upscale_CNN_x2_M.glsl && \
+    curl -fsSL --retry 3 \
+        https://raw.githubusercontent.com/bloc97/Anime4K/v4.0.1/glsl/Upscale/Anime4K_Upscale_CNN_x2_L.glsl \
+        -o /tmp/Anime4K_Upscale_CNN_x2_L.glsl && \
+    echo "db1fedf7be82f6fd9034e6bf39b64daf2b7576988bb584ec38f24f5236b1cd97  /tmp/Anime4K_Upscale_CNN_x2_L.glsl" | sha256sum -c - && \
+    install -m 0644 /tmp/Anime4K_Upscale_CNN_x2_L.glsl /usr/share/tater-tube-server/ai-upscaling/Anime4K_Upscale_CNN_x2_L.glsl && \
+    rm -f /tmp/FSRCNNX_x2_8-0-4-1.glsl /tmp/FSRCNNX_x2_16-0-4-1.glsl /tmp/ArtCNN_C4F16.glsl /tmp/ArtCNN_C4F16_DS.glsl /tmp/ArtCNN_C4F32.glsl /tmp/Anime4K_Upscale_CNN_x2_M.glsl /tmp/Anime4K_Upscale_CNN_x2_L.glsl && \
     rm -rf /var/lib/apt/lists/*
 
 # Fail image builds if the bundled FFmpeg loses a required portable filter or,

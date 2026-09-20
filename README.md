@@ -144,6 +144,8 @@ docker exec tater-tube-server nvidia-smi
 
 If the probe reports an allocation failure, check `nvidia-smi` for other
 processes consuming GPU memory. Auto Detect itself does not run a 4K workload.
+For AI upscaling in headless NVIDIA containers, the image automatically uses
+NVIDIA's EGL Vulkan ICD when the runtime-provided GLX ICD is not suitable.
 
 ### AMD / VAAPI
 
@@ -182,6 +184,11 @@ Open `Configuration -> Upscaling` to choose how the server enlarges video for
 Tater Tube TV players. Upscaling only runs when the connected TV resolution is
 higher than the media resolution; other playback is left unchanged.
 
+Use **Auto Detect** in this section to run lightweight checks against the
+server's real FFmpeg, Standard scaler, Vulkan path, and bundled AI shaders. It
+shows compatibility for every model and selects a safe recommendation in the
+form; choose **Save Changes** to apply it.
+
 - **Auto AI** uses the selected AI model when the server passes its
   compatibility check and automatically steps down through lighter models.
 - **AI Upscaling** prioritizes the selected experimental neural model with the
@@ -195,14 +202,21 @@ AI model choices:
 - **FSRCNNX Fast** is the default 8-feature model for responsive general video.
 - **FSRCNNX Quality** uses the larger 16-feature model for finer general-video
   detail.
+- **Anime4K Balanced** uses the lightweight CNN M model for responsive anime
+  and animated-video playback.
+- **Anime4K Quality** uses the larger CNN L model for higher-quality animation
+  on faster GPUs.
 - **ArtCNN Balanced** uses C4F16 for animation, line art, and CG.
+- **ArtCNN Restore** uses C4F16 DS to denoise compression artifacts and sharpen
+  animated lines without moving to the heavier C4F32 tier.
 - **ArtCNN Quality** uses the heavier C4F32 animation model on faster GPUs.
 
 AI currently targets compatible SDR upscales up to 2×. It needs an FFmpeg build
 with libplacebo plus a working Vulkan device. Docker images include the pinned
 AI shaders; the macOS app also includes MoltenVK so Apple Silicon can run the
 same models through Metal. If a selected model cannot initialize, Tater Tube
-tries its lighter fallback chain before continuing with Standard upscaling.
+tries its compatible AI fallback chain before continuing with Standard
+upscaling.
 
 ## Unraid
 

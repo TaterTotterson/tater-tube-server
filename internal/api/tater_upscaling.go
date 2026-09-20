@@ -55,6 +55,14 @@ var taterAIUpscalerModels = map[string]taterAIUpscalerModel{
 		shaderSHA256:   "03d0b3d31cb82c898a94a46663021a3e8f02c5a21d69c5cfdf0208de4bfd453e",
 		cacheNamespace: "artcnn-1.6.2",
 	},
+	"artcnn-c4f16-ds": {
+		id:             "artcnn-c4f16-ds",
+		name:           "ArtCNN Restore",
+		shaderName:     "ArtCNN_C4F16_DS.glsl",
+		shaderURL:      "https://github.com/Artoriuz/ArtCNN/releases/download/v1.6.2/ArtCNN_C4F16_DS.glsl",
+		shaderSHA256:   "57df650fddec3969e17799f5522c9b03dd2d33b1aeace237fef216bf3858125a",
+		cacheNamespace: "artcnn-1.6.2",
+	},
 	"artcnn-c4f32": {
 		id:             "artcnn-c4f32",
 		name:           "ArtCNN Quality",
@@ -63,6 +71,32 @@ var taterAIUpscalerModels = map[string]taterAIUpscalerModel{
 		shaderSHA256:   "f773bce6cf5fe7e5e5d599a695edd40df5cd7a20c3d08c4d164d07591d5bead3",
 		cacheNamespace: "artcnn-1.6.2",
 	},
+	"anime4k-cnn-m": {
+		id:             "anime4k-cnn-m",
+		name:           "Anime4K Balanced",
+		shaderName:     "Anime4K_Upscale_CNN_x2_M.glsl",
+		shaderURL:      "https://raw.githubusercontent.com/bloc97/Anime4K/v4.0.1/glsl/Upscale/Anime4K_Upscale_CNN_x2_M.glsl",
+		shaderSHA256:   "716e02098a68f0d648761f2b96b4dd139e1cb09b174bb369fca3aa34328fff7e",
+		cacheNamespace: "anime4k-4.0.1",
+	},
+	"anime4k-cnn-l": {
+		id:             "anime4k-cnn-l",
+		name:           "Anime4K Quality",
+		shaderName:     "Anime4K_Upscale_CNN_x2_L.glsl",
+		shaderURL:      "https://raw.githubusercontent.com/bloc97/Anime4K/v4.0.1/glsl/Upscale/Anime4K_Upscale_CNN_x2_L.glsl",
+		shaderSHA256:   "db1fedf7be82f6fd9034e6bf39b64daf2b7576988bb584ec38f24f5236b1cd97",
+		cacheNamespace: "anime4k-4.0.1",
+	},
+}
+
+var taterAIUpscalerModelOrder = []string{
+	"fsrcnnx-8",
+	"fsrcnnx-16",
+	"anime4k-cnn-m",
+	"anime4k-cnn-l",
+	"artcnn-c4f16",
+	"artcnn-c4f16-ds",
+	"artcnn-c4f32",
 }
 
 type taterAIUpscalerProbe struct {
@@ -79,9 +113,9 @@ var taterAIUpscalerProbes = struct {
 var taterAIUpscalerWarnings sync.Map
 var taterStandardUpscalerWarnings sync.Map
 
-// resolveTaterUpscaler keeps AI upscaling optional and fail-safe. Heavier
-// models step down through compatible lighter models before playback continues
-// with the portable Standard path.
+// resolveTaterUpscaler keeps AI upscaling optional and fail-safe. Selected
+// models step through compatible AI fallbacks before playback continues with
+// the portable Standard path.
 func resolveTaterUpscaler(ctx context.Context, ffmpegPath, requested, requestedModel string) (scaler, shaderPath, resolvedModel string) {
 	switch strings.ToLower(strings.TrimSpace(requested)) {
 	case "auto", "ai":
@@ -94,7 +128,7 @@ func resolveTaterUpscaler(ctx context.Context, ffmpegPath, requested, requestedM
 				if modelID != requestedModel {
 					warningKey := ffmpegPath + "\x00" + requestedModel + "\x00" + modelID
 					if _, alreadyLogged := taterAIUpscalerWarnings.LoadOrStore(warningKey, struct{}{}); !alreadyLogged {
-						slog.WarnContext(ctx, "Selected AI upscaling model is unavailable; using a lighter AI model",
+						slog.WarnContext(ctx, "Selected AI upscaling model is unavailable; using a fallback AI model",
 							"requested_model", requestedModel,
 							"resolved_model", modelID,
 							"reason", selectedErr)
@@ -136,8 +170,14 @@ func taterAIUpscalerFallbackChain(model string) []string {
 	switch cleanTaterAIUpscalerModel(model) {
 	case "artcnn-c4f32":
 		return []string{"artcnn-c4f32", "artcnn-c4f16", "fsrcnnx-8"}
+	case "artcnn-c4f16-ds":
+		return []string{"artcnn-c4f16-ds", "artcnn-c4f16", "fsrcnnx-8"}
 	case "artcnn-c4f16":
 		return []string{"artcnn-c4f16", "fsrcnnx-8"}
+	case "anime4k-cnn-m":
+		return []string{"anime4k-cnn-m", "fsrcnnx-8"}
+	case "anime4k-cnn-l":
+		return []string{"anime4k-cnn-l", "anime4k-cnn-m", "fsrcnnx-8"}
 	case "fsrcnnx-16":
 		return []string{"fsrcnnx-16", "fsrcnnx-8"}
 	default:
@@ -295,7 +335,7 @@ func downloadTaterAIUpscalerShader(ctx context.Context, destination string, mode
 		return fmt.Errorf("download AI upscaler: unexpected HTTP status %s", response.Status)
 	}
 
-	temp, err := os.CreateTemp(filepath.Dir(destination), ".fsrcnnx-*.tmp")
+	temp, err := os.CreateTemp(filepath.Dir(destination), ".ai-upscaler-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create AI upscaler download: %w", err)
 	}
@@ -328,12 +368,19 @@ func downloadTaterAIUpscalerShader(ctx context.Context, destination string, mode
 }
 
 func probeTaterAIUpscaler(parent context.Context, ffmpegPath, shaderPath string) error {
+	filter := taterAIUpscaleFilter(128, 72, shaderPath)
+	if err := probeTaterUpscalingFilter(parent, ffmpegPath, filter); err != nil {
+		return fmt.Errorf("FFmpeg libplacebo/Vulkan probe failed: %s", err)
+	}
+	return nil
+}
+
+func probeTaterUpscalingFilter(parent context.Context, ffmpegPath, filter string) error {
 	if _, err := exec.LookPath(ffmpegPath); err != nil {
 		return fmt.Errorf("ffmpeg was not found: %w", err)
 	}
 	probeCtx, cancel := context.WithTimeout(parent, 15*time.Second)
 	defer cancel()
-	filter := taterAIUpscaleFilter(128, 72, shaderPath)
 	cmd := exec.CommandContext(probeCtx, ffmpegPath,
 		"-hide_banner", "-loglevel", "error", "-nostdin",
 		"-f", "lavfi", "-i", "color=size=64x36:rate=1:duration=1",
@@ -347,7 +394,7 @@ func probeTaterAIUpscaler(parent context.Context, ffmpegPath, shaderPath string)
 		if reason == "" {
 			reason = err.Error()
 		}
-		return fmt.Errorf("FFmpeg libplacebo/Vulkan probe failed: %s", reason)
+		return fmt.Errorf("%s", reason)
 	}
 	return nil
 }

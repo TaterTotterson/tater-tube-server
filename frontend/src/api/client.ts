@@ -50,6 +50,7 @@ import type {
 	TubeTVGuideResponse,
 	TubeTVLocalLibraryResponse,
 	TubeTVLogoSearchResponse,
+	UpscalingCompatibilityDetection,
 } from "../types/config";
 import type { UpdateChannel, UpdateStatusResponse } from "../types/update";
 
@@ -996,6 +997,10 @@ class APIClient {
 
 	async detectTranscodingHardware() {
 		return this.request<TranscodingHardwareDetection>("/system/transcoding-detect");
+	}
+
+	async detectUpscalingCompatibility() {
+		return this.request<UpscalingCompatibilityDetection>("/system/upscaling-detect");
 	}
 
 	async getSystemStats() {

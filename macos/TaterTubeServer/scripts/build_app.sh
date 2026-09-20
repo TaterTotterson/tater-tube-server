@@ -241,9 +241,21 @@ download_ai_upscaler \
   "https://github.com/Artoriuz/ArtCNN/releases/download/v1.6.2/ArtCNN_C4F16.glsl" \
   "03d0b3d31cb82c898a94a46663021a3e8f02c5a21d69c5cfdf0208de4bfd453e"
 download_ai_upscaler \
+  "ArtCNN_C4F16_DS.glsl" \
+  "https://github.com/Artoriuz/ArtCNN/releases/download/v1.6.2/ArtCNN_C4F16_DS.glsl" \
+  "57df650fddec3969e17799f5522c9b03dd2d33b1aeace237fef216bf3858125a"
+download_ai_upscaler \
   "ArtCNN_C4F32.glsl" \
   "https://github.com/Artoriuz/ArtCNN/releases/download/v1.6.2/ArtCNN_C4F32.glsl" \
   "f773bce6cf5fe7e5e5d599a695edd40df5cd7a20c3d08c4d164d07591d5bead3"
+download_ai_upscaler \
+  "Anime4K_Upscale_CNN_x2_M.glsl" \
+  "https://raw.githubusercontent.com/bloc97/Anime4K/v4.0.1/glsl/Upscale/Anime4K_Upscale_CNN_x2_M.glsl" \
+  "716e02098a68f0d648761f2b96b4dd139e1cb09b174bb369fca3aa34328fff7e"
+download_ai_upscaler \
+  "Anime4K_Upscale_CNN_x2_L.glsl" \
+  "https://raw.githubusercontent.com/bloc97/Anime4K/v4.0.1/glsl/Upscale/Anime4K_Upscale_CNN_x2_L.glsl" \
+  "db1fedf7be82f6fd9034e6bf39b64daf2b7576988bb584ec38f24f5236b1cd97"
 
 sign_payload() {
   local payload="$1"
@@ -281,7 +293,10 @@ if [[ -x "${FFMPEG_BIN_DIR}/ffmpeg" ]]; then
     "FSRCNNX_x2_8-0-4-1.glsl" \
     "FSRCNNX_x2_16-0-4-1.glsl" \
     "ArtCNN_C4F16.glsl" \
-    "ArtCNN_C4F32.glsl"; do
+    "ArtCNN_C4F16_DS.glsl" \
+    "ArtCNN_C4F32.glsl" \
+    "Anime4K_Upscale_CNN_x2_M.glsl" \
+    "Anime4K_Upscale_CNN_x2_L.glsl"; do
     shader_path="${AI_UPSCALING_DIR}/${shader_name}"
     if ! env \
       VK_DRIVER_FILES="${VULKAN_MANIFEST}" \

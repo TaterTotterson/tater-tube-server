@@ -15,4 +15,26 @@ for gpu_device in /dev/dri/renderD* /dev/dri/card*; do
     usermod --append --groups "${gpu_group}" abc
 done
 
+# NVIDIA's injected Vulkan ICD normally points at the GLX implementation. That
+# implementation cannot expose Vulkan in some headless containers even though
+# NVENC and the rest of the driver are available. NVIDIA also supports its EGL
+# implementation as a Vulkan ICD for headless environments, so create a private
+# copy for the server when the runtime has injected that library. Keep explicit
+# user Vulkan driver selections untouched and leave Intel/AMD containers alone.
+nvidia_icd="/etc/vulkan/icd.d/nvidia_icd.json"
+if [[ -z "${VK_DRIVER_FILES:-}" && -z "${VK_ICD_FILENAMES:-}" && -r "${nvidia_icd}" ]] && \
+    ldconfig -p 2>/dev/null | grep -Fq 'libEGL_nvidia.so.0'; then
+    vulkan_runtime_dir="/run/tater-tube-server/vulkan"
+    nvidia_egl_icd="${vulkan_runtime_dir}/nvidia_egl_icd.json"
+    install -d -m 0755 "${vulkan_runtime_dir}"
+    sed 's/libGLX_nvidia\.so\.0/libEGL_nvidia.so.0/g' "${nvidia_icd}" > "${nvidia_egl_icd}"
+    if grep -Fq 'libEGL_nvidia.so.0' "${nvidia_egl_icd}"; then
+        export VK_DRIVER_FILES="${nvidia_egl_icd}"
+        export NODEVICE_SELECT=1
+        echo "Tater Tube: using the NVIDIA EGL Vulkan driver for headless processing"
+    else
+        rm -f "${nvidia_egl_icd}"
+    fi
+fi
+
 exec s6-setuidgid abc /app/tater-tube-server serve --config=/config/config.yaml

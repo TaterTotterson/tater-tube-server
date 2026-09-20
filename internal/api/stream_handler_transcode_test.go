@@ -432,6 +432,18 @@ func TestAIUpscalerFallbackChainsPreferLighterMatchingModels(t *testing.T) {
 		taterAIUpscalerFallbackChain("fsrcnnx-16"),
 	)
 	require.Equal(t,
+		[]string{"anime4k-cnn-m", "fsrcnnx-8"},
+		taterAIUpscalerFallbackChain("anime4k-cnn-m"),
+	)
+	require.Equal(t,
+		[]string{"anime4k-cnn-l", "anime4k-cnn-m", "fsrcnnx-8"},
+		taterAIUpscalerFallbackChain("anime4k-cnn-l"),
+	)
+	require.Equal(t,
+		[]string{"artcnn-c4f16-ds", "artcnn-c4f16", "fsrcnnx-8"},
+		taterAIUpscalerFallbackChain("artcnn-c4f16-ds"),
+	)
+	require.Equal(t,
 		[]string{"fsrcnnx-8"},
 		taterAIUpscalerFallbackChain("unknown"),
 	)
