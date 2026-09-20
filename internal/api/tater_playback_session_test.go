@@ -130,6 +130,78 @@ func TestBuildTaterPlaybackPlanPrefersBestEnglishAudioTrack(t *testing.T) {
 	require.Equal(t, "2", playbackPlanQuery(t, plan.StreamURL).Get("tater_audio_track"))
 }
 
+func TestBuildTaterPlaybackPlanNeverPrefersCompatibleCommentaryOverEnglishMain(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Capabilities: taterPlaybackCapabilities{
+			VideoCodecs:      []string{"h264"},
+			AudioCodecs:      []string{"aac", "ac3"},
+			MaxAudioChannels: 6,
+			AudioDownmix:     true,
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "h264",
+		AudioTracks: []taterPlaybackAudioTrack{
+			{Index: 0, Codec: "truehd", Channels: 8, Language: "eng", Default: true},
+			{Index: 1, Codec: "ac3", Channels: 2, Language: "eng", Commentary: true},
+		},
+	})
+
+	require.Equal(t, 0, plan.SelectedAudioTrack)
+	require.Equal(t, "truehd", plan.Source.AudioCodec)
+	require.Equal(t, "audio_transcode", plan.Mode)
+	require.Equal(t, "0", playbackPlanQuery(t, plan.StreamURL).Get("tater_audio_track"))
+}
+
+func TestBuildTaterPlaybackPlanPrefersMainAudioOverEnglishCommentary(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Capabilities: taterPlaybackCapabilities{
+			VideoCodecs: []string{"h264"},
+			AudioCodecs: []string{"aac"},
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "h264",
+		AudioTracks: []taterPlaybackAudioTrack{
+			{Index: 0, Codec: "aac", Channels: 2, Language: "jpn", Default: true},
+			{Index: 1, Codec: "aac", Channels: 2, Language: "eng", Commentary: true},
+		},
+	})
+
+	require.Equal(t, 0, plan.SelectedAudioTrack)
+	require.Equal(t, "jpn", plan.Source.AudioTracks[0].Language)
+}
+
+func TestBuildTaterPlaybackPlanHonorsExplicitCommentarySelection(t *testing.T) {
+	requested := 1
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL:  "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		AudioTrack: &requested,
+		Capabilities: taterPlaybackCapabilities{
+			VideoCodecs: []string{"h264"},
+			AudioCodecs: []string{"aac"},
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "h264",
+		AudioTracks: []taterPlaybackAudioTrack{
+			{Index: 0, Codec: "aac", Channels: 2, Language: "eng", Default: true},
+			{Index: 1, Codec: "aac", Channels: 2, Language: "eng", Commentary: true},
+		},
+	})
+
+	require.Equal(t, 1, plan.SelectedAudioTrack)
+	require.Equal(t, "1", playbackPlanQuery(t, plan.StreamURL).Get("tater_audio_track"))
+}
+
+func TestTaterPlaybackAudioTitleClassification(t *testing.T) {
+	require.True(t, taterPlaybackAudioTitleIsCommentary("Commentary with the director and cast"))
+	require.True(t, taterPlaybackAudioTitleIsCommentary("Audio Comments by the filmmakers"))
+	require.True(t, taterPlaybackAudioTitleIsDescriptive("English Audio Description"))
+	require.True(t, taterPlaybackAudioTitleIsDescriptive("English - Visually Impaired"))
+	require.False(t, taterPlaybackAudioTitleIsCommentary("English Dolby Atmos"))
+	require.False(t, taterPlaybackAudioTitleIsDescriptive("English Dolby Atmos"))
+}
+
 func TestBuildTaterPlaybackPlanPrefersCompatibleEnglishSurroundTrack(t *testing.T) {
 	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
 		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
