@@ -2678,9 +2678,12 @@ func TestTaterTVHLSArgsUseStableAAC51WhenRequested(t *testing.T) {
 	args := buildTaterTVChannelHLSArgsWithTimelineRangeAndAudio(
 		config.TranscodingConfig{}, transcodeProfiles["hdmi_4k"], "qsv", transcodeCodecHEVC,
 		"/media/movie.mkv", 0, 30, 0, "", "", "/tmp/hls/index.m3u8",
-		"/tmp/hls/seg-%05d.m4s", "hdr10", "hdr10", "", 6, "",
+		"/tmp/hls/seg-%05d.m4s", "hdr10", "hdr10", "", 2, 6, "",
 	)
 	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-map 0:a:2?") {
+		t.Fatalf("expected selected main audio track in HLS output: %s", joined)
+	}
 	if !strings.Contains(joined, "-c:a aac -b:a 320k -ac 6 -ar 48000") {
 		t.Fatalf("expected a stable AAC 5.1 HLS output: %s", joined)
 	}
@@ -2698,7 +2701,7 @@ func TestTaterTVHLSArgsUseFixed4KHDR10AndCadence(t *testing.T) {
 	args := buildTaterTVChannelHLSArgsWithTimelineRangeAndAudio(
 		config.TranscodingConfig{}, transcodeProfiles["hdmi_4k"], "qsv", transcodeCodecHEVC,
 		"/media/commercial.mp4", 0, 30, 0, "", "", "/tmp/hls/index.m3u8",
-		"/tmp/hls/seg-%05d.m4s", "sdr", "hdr10", "sdr_to_hdr10_zscale", 6,
+		"/tmp/hls/seg-%05d.m4s", "sdr", "hdr10", "sdr_to_hdr10_zscale", 0, 6,
 		"60000/1001",
 	)
 	joined := strings.Join(args, " ")

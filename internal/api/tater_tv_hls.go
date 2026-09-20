@@ -512,6 +512,7 @@ func (s *taterTVHLSSession) transcodeProgramSegments(ctx context.Context, items 
 				"error", rangeErr)
 			continue
 		}
+		audioTrack := s.itemAudioTrack(ctx, item)
 		// Every schedule item is encoded by a separate FFmpeg process. Keep the
 		// MPEG-TS clock continuous across those processes; resetting it to zero at
 		// an ad or bumper boundary can leave stricter TV players waiting forever
@@ -522,7 +523,7 @@ func (s *taterTVHLSSession) transcodeProgramSegments(ctx context.Context, items 
 			item.Path, item.StartSeconds, item.DurationSeconds,
 			timelineOffset, taterTVLogoForItem(item, logoFile),
 			s.channel.LogoPosition, playlistPath, segmentPattern,
-			sourceRange, outputRange, toneMapFilter, s.audioChannels,
+			sourceRange, outputRange, toneMapFilter, audioTrack, s.audioChannels,
 			s.outputFrameRate,
 		)
 		var stderr limitedBuffer
@@ -544,6 +545,7 @@ func (s *taterTVHLSSession) transcodeProgramSegments(ctx context.Context, items 
 			"hardware_acceleration", s.accel,
 			"video_codec", s.videoCodec,
 			"audio_codec", "aac",
+			"audio_track", audioTrack,
 			"audio_channels", s.audioChannels,
 			"output_frame_rate", s.outputFrameRate,
 			"source_video_range", sourceRange,
@@ -603,6 +605,18 @@ func (s *taterTVHLSSession) transcodeProgramSegments(ctx context.Context, items 
 		return fmt.Errorf("no Tube TV HLS items produced segments; failures=%d", failed)
 	}
 	return nil
+}
+
+func (s *taterTVHLSSession) itemAudioTrack(ctx context.Context, item taterTVStreamItem) int {
+	info, err := probeTaterPlaybackMediaCached(ctx, s.cfg, item.Path)
+	if err != nil {
+		return 0
+	}
+	selected := selectTaterPlaybackAudioTrack(&info, nil, nil)
+	if selected < 0 {
+		return 0
+	}
+	return selected
 }
 
 func (s *taterTVHLSSession) itemVideoRangePlan(ctx context.Context, item taterTVStreamItem) (string, string, string, error) {
@@ -1008,11 +1022,11 @@ func buildTaterTVChannelHLSArgsWithTimelineAndRange(cfg config.TranscodingConfig
 		cfg, profile, accel, preferredCodec, inputPath, startSeconds,
 		durationSeconds, timelineOffset, logoFile, logoPosition,
 		outputPlaylist, segmentPattern, sourceVideoRange, outputVideoRange,
-		toneMapFilter, 2, "",
+		toneMapFilter, 0, 2, "",
 	)
 }
 
-func buildTaterTVChannelHLSArgsWithTimelineRangeAndAudio(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, inputPath string, startSeconds, durationSeconds, timelineOffset float64, logoFile, logoPosition, outputPlaylist, segmentPattern, sourceVideoRange, outputVideoRange, toneMapFilter string, audioChannels int, outputFrameRate string) []string {
+func buildTaterTVChannelHLSArgsWithTimelineRangeAndAudio(cfg config.TranscodingConfig, profile transcodeProfile, accel, preferredCodec string, inputPath string, startSeconds, durationSeconds, timelineOffset float64, logoFile, logoPosition, outputPlaylist, segmentPattern, sourceVideoRange, outputVideoRange, toneMapFilter string, audioTrack, audioChannels int, outputFrameRate string) []string {
 	audioChannels = normalizeTaterTVHLSAudioChannels(audioChannels)
 	audioBitrate, audioChannels := taterAACTranscodeSettings(profile.AudioBitrate, audioChannels)
 	args := []string{
@@ -1056,13 +1070,13 @@ func buildTaterTVChannelHLSArgsWithTimelineRangeAndAudio(cfg config.TranscodingC
 		args = append(args,
 			"-filter_complex", taterTVChannelLogoFilter(filters, profile, logoPosition),
 			"-map", "[vout]",
-			"-map", "0:a:0?",
+			"-map", taterAudioMap(audioTrack, true),
 			"-sn",
 		)
 	} else {
 		args = append(args,
 			"-map", "0:v:0",
-			"-map", "0:a:0?",
+			"-map", taterAudioMap(audioTrack, true),
 			"-sn",
 		)
 		if filters != "" {

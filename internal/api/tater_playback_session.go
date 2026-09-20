@@ -184,9 +184,11 @@ type taterFFprobePlaybackResult struct {
 			Title    string `json:"title"`
 		} `json:"tags"`
 		Disposition struct {
-			Default        int `json:"default"`
-			Comment        int `json:"comment"`
-			VisualImpaired int `json:"visual_impaired"`
+			Default         int `json:"default"`
+			Comment         int `json:"comment"`
+			VisualImpaired  int `json:"visual_impaired"`
+			Descriptions    int `json:"descriptions"`
+			HearingImpaired int `json:"hearing_impaired"`
 		} `json:"disposition"`
 	} `json:"streams"`
 	Format struct {
@@ -1380,7 +1382,7 @@ func probeTaterPlaybackMedia(parent context.Context, cfg *config.Config, path st
 	defer cancel()
 	cmd := exec.CommandContext(ctx, ffprobePath,
 		"-v", "error",
-		"-show_entries", "format=format_name,duration:stream=index,codec_type,codec_name,profile,level,avg_frame_rate,width,height,channels,channel_layout,pix_fmt,color_space,color_transfer,color_primaries,bits_per_raw_sample,bit_rate:stream_tags=language,title:stream_disposition=default,comment,visual_impaired:stream_side_data=side_data_type,dv_profile,dv_level,rpu_present_flag,el_present_flag,bl_present_flag,dv_bl_signal_compatibility_id",
+		"-show_entries", "format=format_name,duration:stream=index,codec_type,codec_name,profile,level,avg_frame_rate,width,height,channels,channel_layout,pix_fmt,color_space,color_transfer,color_primaries,bits_per_raw_sample,bit_rate:stream_tags=language,title:stream_disposition=default,comment,visual_impaired,descriptions,hearing_impaired:stream_side_data=side_data_type,dv_profile,dv_level,rpu_present_flag,el_present_flag,bl_present_flag,dv_bl_signal_compatibility_id",
 		"-of", "json",
 		path,
 	)
@@ -1422,7 +1424,6 @@ func probeTaterPlaybackMedia(parent context.Context, cfg *config.Config, path st
 			}
 			bitRate, _ := strconv.ParseInt(strings.TrimSpace(stream.BitRate), 10, 64)
 			title := strings.TrimSpace(stream.Tags.Title)
-			titleLower := strings.ToLower(title)
 			info.AudioTracks = append(info.AudioTracks, taterPlaybackAudioTrack{
 				Index:         audioIndex,
 				StreamIndex:   stream.Index,
@@ -1435,10 +1436,11 @@ func probeTaterPlaybackMedia(parent context.Context, cfg *config.Config, path st
 				BitRate:       bitRate,
 				Default:       stream.Disposition.Default != 0,
 				Commentary: stream.Disposition.Comment != 0 ||
-					strings.Contains(titleLower, "commentary"),
+					taterPlaybackAudioTitleIsCommentary(title),
 				Descriptive: stream.Disposition.VisualImpaired != 0 ||
-					strings.Contains(titleLower, "descriptive") ||
-					strings.Contains(titleLower, "description"),
+					stream.Disposition.Descriptions != 0 ||
+					stream.Disposition.HearingImpaired != 0 ||
+					taterPlaybackAudioTitleIsDescriptive(title),
 			})
 			audioIndex++
 		}
@@ -1461,18 +1463,20 @@ func selectTaterPlaybackAudioTrack(info *taterPlaybackMediaInfo, requested *int,
 		}
 	}
 	if selected < 0 {
+		bestTier := -1
 		bestScore := int64(-1 << 62)
 		for index, track := range info.AudioTracks {
+			tier := taterPlaybackAudioTrackPreferenceTier(track)
 			score := taterPlaybackAudioTrackScore(track)
-			// Keep English and non-commentary preferences dominant, then prefer
-			// the best track this player can preserve. This avoids selecting an
-			// unsupported lossless track and downmixing it to AAC when the same
-			// file already contains a directly playable 5.1 track.
+			// Only compare compatibility and quality inside the same purpose and
+			// language tier. A directly playable commentary track must never beat
+			// main-program audio merely because the latter needs conversion.
 			if caps != nil && taterPlaybackAudioTrackCompatible(track, *caps) {
 				score += 500_000
 			}
-			if selected < 0 || score > bestScore {
+			if selected < 0 || tier > bestTier || (tier == bestTier && score > bestScore) {
 				selected = index
+				bestTier = tier
 				bestScore = score
 			}
 		}
@@ -1483,6 +1487,41 @@ func selectTaterPlaybackAudioTrack(info *taterPlaybackMediaInfo, requested *int,
 	info.AudioChannels = track.Channels
 	info.ChannelLayout = track.ChannelLayout
 	return track.Index
+}
+
+func taterPlaybackAudioTrackPreferenceTier(track taterPlaybackAudioTrack) int {
+	primary := !track.Commentary && !track.Descriptive
+	english := isTaterEnglishAudioLanguage(track.Language)
+	unknownLanguage := strings.TrimSpace(track.Language) == ""
+	switch {
+	case primary && english:
+		return 5
+	case primary && unknownLanguage:
+		return 4
+	case primary:
+		return 3
+	case english:
+		return 2
+	case unknownLanguage:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func taterPlaybackAudioTitleIsCommentary(title string) bool {
+	title = strings.ToLower(strings.TrimSpace(title))
+	return strings.Contains(title, "commentary") ||
+		strings.Contains(title, "audio comment") ||
+		strings.Contains(title, "director comment")
+}
+
+func taterPlaybackAudioTitleIsDescriptive(title string) bool {
+	title = strings.ToLower(strings.TrimSpace(title))
+	return strings.Contains(title, "descriptive") ||
+		strings.Contains(title, "description") ||
+		strings.Contains(title, "audio described") ||
+		strings.Contains(title, "visually impaired")
 }
 
 func taterPlaybackAudioTrackCompatible(track taterPlaybackAudioTrack, caps taterPlaybackCapabilities) bool {
