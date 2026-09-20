@@ -2113,8 +2113,14 @@ func transcodeVideoSettingsForCodecAndUpscaler(
 		scaleFilter = taterAIUpscaleFilter(outputWidth, outputHeight, aiShaderPath)
 	} else if strings.EqualFold(strings.TrimSpace(scaler), "spline36") && outputWidth > 0 && outputHeight > 0 {
 		scaleFilter = "zscale=w=" + strconv.Itoa(outputWidth) + ":h=" + strconv.Itoa(outputHeight) + ":filter=spline36"
-	} else if strings.EqualFold(strings.TrimSpace(scaler), "spline") && outputWidth > 0 && outputHeight > 0 {
-		scaleFilter = "scale=w=" + strconv.Itoa(outputWidth) + ":h=" + strconv.Itoa(outputHeight) + ":flags=spline"
+	} else if strings.EqualFold(strings.TrimSpace(scaler), "spline") {
+		if outputWidth > 0 && outputHeight > 0 {
+			scaleFilter = "scale=w=" + strconv.Itoa(outputWidth) + ":h=" + strconv.Itoa(outputHeight) + ":flags=spline"
+		} else {
+			// Continuous channels can contain programs with different aspect ratios.
+			// Keep them inside the fixed channel frame without stretching the picture.
+			scaleFilter += ":flags=spline"
+		}
 	}
 
 	if normalizeTranscodeCodec(preferredCodec) == transcodeCodecHEVC {
