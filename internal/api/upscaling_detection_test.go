@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"github.com/stretchr/testify/require"
@@ -82,6 +83,22 @@ func TestUpscalingDetectionHandlesMissingFFmpeg(t *testing.T) {
 	require.Equal(t, "off", result.RecommendedMode)
 	require.False(t, result.Standard.Available)
 	require.Len(t, result.Models, len(taterAIUpscalerModelOrder))
+}
+
+func TestArtCNNQualityAllowsMoreTimeForShaderCompilation(t *testing.T) {
+	require.Equal(t, taterArtCNNQualityProbeTimeout, taterAIUpscalerModels["artcnn-c4f32"].probeTimeout)
+	require.Greater(t, taterAIUpscalerModels["artcnn-c4f32"].probeTimeout, taterUpscalingProbeTimeout)
+	require.Zero(t, taterAIUpscalerModels["artcnn-c4f16"].probeTimeout)
+}
+
+func TestUpscalingProbeReportsTimeoutInsteadOfSignalKilled(t *testing.T) {
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg")
+	require.NoError(t, os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexec sleep 5\n"), 0o755))
+
+	err := probeTaterUpscalingFilterWithTimeout(t.Context(), ffmpegPath, "scale=128:72", 25*time.Millisecond)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "probe timed out before completion")
+	require.NotContains(t, err.Error(), "signal: killed")
 }
 
 func writeUpscalingDetectionFFmpeg(t *testing.T, includeZscale bool) string {
