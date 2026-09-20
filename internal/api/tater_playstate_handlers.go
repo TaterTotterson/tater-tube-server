@@ -186,27 +186,32 @@ func (s *Server) handleTaterPlayStateSave(c *fiber.Ctx) error {
 		return RespondServiceUnavailable(c, "Failed to save play state", err.Error())
 	}
 
-	if playbackActive != nil && s.streamTracker != nil {
+	if playbackActive != nil {
 		if player, found := findTaterPlayerByToken(cfg, playerToken); found {
-			filePath := req.Path
-			source := "Local"
-			if req.NzbURL != "" {
-				filePath = req.SourceTitle
-				source = "Discovery"
+			if s.streamTracker != nil {
+				filePath := req.Path
+				source := "Local"
+				if req.NzbURL != "" {
+					filePath = req.SourceTitle
+					source = "Discovery"
+				}
+				if strings.TrimSpace(filePath) == "" {
+					filePath = req.Title
+				}
+				s.streamTracker.SetPlayerPlaybackPresence(nzbfilesystem.ActiveStream{
+					FilePath:         filePath,
+					Source:           source,
+					PlayerID:         player.ID,
+					UserName:         taterPlayerDisplayName(player),
+					ClientIP:         c.IP(),
+					UserAgent:        c.Get("User-Agent"),
+					PlaybackPosition: float64(req.PositionMS) / 1000,
+					MediaDuration:    float64(req.DurationMS) / 1000,
+				}, *playbackActive && !explicitlyCompleted)
 			}
-			if strings.TrimSpace(filePath) == "" {
-				filePath = req.Title
+			if !*playbackActive || explicitlyCompleted {
+				stopTaterPlaybackForPlayer(player.ID, taterPlayerDisplayName(player), s.streamTracker)
 			}
-			s.streamTracker.SetPlayerPlaybackPresence(nzbfilesystem.ActiveStream{
-				FilePath:         filePath,
-				Source:           source,
-				PlayerID:         player.ID,
-				UserName:         taterPlayerDisplayName(player),
-				ClientIP:         c.IP(),
-				UserAgent:        c.Get("User-Agent"),
-				PlaybackPosition: float64(req.PositionMS) / 1000,
-				MediaDuration:    float64(req.DurationMS) / 1000,
-			}, *playbackActive && !explicitlyCompleted)
 		}
 	}
 

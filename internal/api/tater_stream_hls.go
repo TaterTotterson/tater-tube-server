@@ -104,6 +104,7 @@ func (h *StreamHandler) prepareStreamHLSSession(
 	if globalTaterLocalHLS.isSuperseded(key) {
 		return nil, fmt.Errorf("HLS playback generation was superseded")
 	}
+	globalTaterTVHLS.unbindPlayer(playerID)
 	if existing := globalTaterLocalHLS.get(key); existing != nil {
 		if !existing.finished() || (existing.failure() == nil && existing.playlistReady()) {
 			existing.touch()

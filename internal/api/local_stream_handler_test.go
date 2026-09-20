@@ -569,6 +569,62 @@ func TestLocalStreamHandlerTracksActiveDirectStreams(t *testing.T) {
 	}
 }
 
+func TestLocalStreamHandlerUsesOpaquePathWhenReadableQueryIsRewritten(t *testing.T) {
+	root := t.TempDir()
+	relPath := "Face+Off (1997)/Face+Off (1997) Remux-2160p.mkv"
+	mediaPath := filepath.Join(root, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(mediaPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mediaPath, []byte("face off media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	enabled := true
+	cfg := &config.Config{
+		LocalMedia: config.LocalMediaConfig{
+			Enabled: &enabled,
+			Categories: []config.LocalMediaCategory{{
+				ID: "movies", Name: "Movies", LibraryType: "movies", Paths: []string{root}, Enabled: &enabled,
+			}},
+		},
+		Players: config.PlayersConfig{Paired: []config.PlayerConfig{{
+			ID: "apple-tv", Name: "Living Room", TokenHash: hashTaterSecret("local-token"),
+		}}},
+	}
+
+	streamURL := taterLocalStreamURL("http://tube.local", "movies", 0, relPath, "local-token")
+	parsed, err := url.Parse(streamURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	if query.Get(taterLocalPathRefQuery) == "" {
+		t.Fatal("local stream URL did not include an opaque path reference")
+	}
+	if got := taterLocalPathFromQuery(query); got != relPath {
+		t.Fatalf("opaque path decoded as %q, want %q", got, relPath)
+	}
+
+	// URLComponents on tvOS can collapse an encoded literal plus and a space
+	// into the same "+" query representation while appending HLS parameters.
+	// Preserve a deliberately damaged readable path here to verify that the
+	// opaque reference remains authoritative.
+	query.Set("path", "Face Off (1997)/Face Off (1997) Remux-2160p.mkv")
+	query.Set("tater_hls_generation", "test-generation")
+	parsed.RawQuery = query.Encode()
+
+	handler := NewLocalStreamHandler(func() *config.Config { return cfg }, nil).GetHTTPHandler()
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, parsed.String(), nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected opaque local path to play, got %d: %s", response.Code, response.Body.String())
+	}
+	if response.Body.String() != "face off media" {
+		t.Fatalf("unexpected local media response %q", response.Body.String())
+	}
+}
+
 func TestTaterTVItemHandlerServesScheduledMediaDirectly(t *testing.T) {
 	taterTVResetGuide()
 	root := t.TempDir()
