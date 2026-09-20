@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,8 +18,10 @@ import (
 )
 
 const (
-	defaultTaterAIUpscalerModel = "fsrcnnx-8"
-	maxTaterAIUpscalerSize      = 2 * 1024 * 1024
+	defaultTaterAIUpscalerModel    = "fsrcnnx-8"
+	maxTaterAIUpscalerSize         = 2 * 1024 * 1024
+	taterUpscalingProbeTimeout     = 15 * time.Second
+	taterArtCNNQualityProbeTimeout = 60 * time.Second
 )
 
 type taterAIUpscalerModel struct {
@@ -28,6 +31,7 @@ type taterAIUpscalerModel struct {
 	shaderURL      string
 	shaderSHA256   string
 	cacheNamespace string
+	probeTimeout   time.Duration
 }
 
 var taterAIUpscalerModels = map[string]taterAIUpscalerModel{
@@ -70,6 +74,7 @@ var taterAIUpscalerModels = map[string]taterAIUpscalerModel{
 		shaderURL:      "https://github.com/Artoriuz/ArtCNN/releases/download/v1.6.2/ArtCNN_C4F32.glsl",
 		shaderSHA256:   "f773bce6cf5fe7e5e5d599a695edd40df5cd7a20c3d08c4d164d07591d5bead3",
 		cacheNamespace: "artcnn-1.6.2",
+		probeTimeout:   taterArtCNNQualityProbeTimeout,
 	},
 	"anime4k-cnn-m": {
 		id:             "anime4k-cnn-m",
@@ -252,7 +257,7 @@ func prepareTaterAIUpscaler(ctx context.Context, ffmpegPath string, model taterA
 		shaderPath, err = findOrDownloadTaterAIUpscalerShader(ctx, model)
 	}
 	if err == nil {
-		err = probeTaterAIUpscaler(ctx, ffmpegPath, shaderPath)
+		err = probeTaterAIUpscaler(ctx, ffmpegPath, shaderPath, model)
 	}
 	result := taterAIUpscalerProbe{shaderPath: shaderPath, err: err, checkedAt: time.Now()}
 	taterAIUpscalerProbes.byFFmpeg[cacheKey] = result
@@ -367,19 +372,27 @@ func downloadTaterAIUpscalerShader(ctx context.Context, destination string, mode
 	return nil
 }
 
-func probeTaterAIUpscaler(parent context.Context, ffmpegPath, shaderPath string) error {
+func probeTaterAIUpscaler(parent context.Context, ffmpegPath, shaderPath string, model taterAIUpscalerModel) error {
 	filter := taterAIUpscaleFilter(128, 72, shaderPath)
-	if err := probeTaterUpscalingFilter(parent, ffmpegPath, filter); err != nil {
+	timeout := model.probeTimeout
+	if timeout <= 0 {
+		timeout = taterUpscalingProbeTimeout
+	}
+	if err := probeTaterUpscalingFilterWithTimeout(parent, ffmpegPath, filter, timeout); err != nil {
 		return fmt.Errorf("FFmpeg libplacebo/Vulkan probe failed: %s", err)
 	}
 	return nil
 }
 
 func probeTaterUpscalingFilter(parent context.Context, ffmpegPath, filter string) error {
+	return probeTaterUpscalingFilterWithTimeout(parent, ffmpegPath, filter, taterUpscalingProbeTimeout)
+}
+
+func probeTaterUpscalingFilterWithTimeout(parent context.Context, ffmpegPath, filter string, timeout time.Duration) error {
 	if _, err := exec.LookPath(ffmpegPath); err != nil {
 		return fmt.Errorf("ffmpeg was not found: %w", err)
 	}
-	probeCtx, cancel := context.WithTimeout(parent, 15*time.Second)
+	probeCtx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(probeCtx, ffmpegPath,
 		"-hide_banner", "-loglevel", "error", "-nostdin",
@@ -390,6 +403,12 @@ func probeTaterUpscalingFilter(parent context.Context, ffmpegPath, filter string
 	var stderr limitedBuffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("probe timed out before completion (limit %s)", timeout)
+		}
+		if errors.Is(probeCtx.Err(), context.Canceled) {
+			return fmt.Errorf("probe was canceled before completion")
+		}
 		reason := strings.TrimSpace(stderr.String())
 		if reason == "" {
 			reason = err.Error()
