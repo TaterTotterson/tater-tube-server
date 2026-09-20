@@ -1100,7 +1100,7 @@ func TestBuildTaterPlaybackPlanToneMapsDolbyVisionWhenItMustBeReencoded(t *testi
 
 func TestBuildTaterTVPlaybackPlanUsesHEVCFMP4ForHDRCapableTVOS(t *testing.T) {
 	plan := buildTaterTVPlaybackPlan(taterPlaybackSessionRequest{
-		StreamURL: "http://tube.local/api/tater/tv/channel/08/playlist.m3u8?player_token=secret",
+		StreamURL: "http://tube.local/api/tater/tv/channel/08/playlist.m3u8?player_token=secret&tater_scaler=ai&tater_ai_model=artcnn-c4f32",
 		Profile:   "hdmi_4k",
 		Capabilities: taterPlaybackCapabilities{
 			CapabilityVersion:        5,
@@ -1134,6 +1134,8 @@ func TestBuildTaterTVPlaybackPlanUsesHEVCFMP4ForHDRCapableTVOS(t *testing.T) {
 	require.Equal(t, "hdr10,hlg,dolby_vision", query.Get("tater_hdr_formats"))
 	require.Equal(t, "hls", query.Get("tater_output_container"))
 	require.Equal(t, "6", query.Get("tater_audio_channels"))
+	require.Empty(t, query.Get("tater_scaler"))
+	require.Empty(t, query.Get("tater_ai_model"))
 }
 
 func TestBuildTaterTVPlaybackPlanNegotiatesFixed4KHDR10Output(t *testing.T) {

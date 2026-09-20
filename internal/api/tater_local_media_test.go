@@ -2684,6 +2684,14 @@ func TestTaterTVHLSArgsUseStableAAC51WhenRequested(t *testing.T) {
 	if !strings.Contains(joined, "-c:a aac -b:a 320k -ac 6 -ar 48000") {
 		t.Fatalf("expected a stable AAC 5.1 HLS output: %s", joined)
 	}
+	if !strings.Contains(joined, "flags=spline") {
+		t.Fatalf("expected Tube TV to use portable Spline scaling: %s", joined)
+	}
+	for _, aiFilter := range []string{"libplacebo", "custom_shader_path", "FSRCNNX", "ArtCNN"} {
+		if strings.Contains(joined, aiFilter) {
+			t.Fatalf("Tube TV must not use AI upscaling filter %q: %s", aiFilter, joined)
+		}
+	}
 }
 
 func TestTaterTVHLSArgsUseFixed4KHDR10AndCadence(t *testing.T) {

@@ -1039,7 +1039,12 @@ func buildTaterTVChannelHLSArgsWithTimelineRangeAndAudio(cfg config.TranscodingC
 	if durationSeconds > 0 {
 		args = append(args, "-t", strconv.FormatFloat(durationSeconds, 'f', 3, 64))
 	}
-	videoCodec, filters := transcodeVideoSettingsForCodec(accel, cfg.HardwareDevice, profile, preferredCodec)
+	// Tube TV deliberately stays on the portable Spline scaler. Channels are
+	// continuous and may move between programs, commercials, and bumpers with
+	// different resolutions; AI upscaling is reserved for on-demand playback.
+	videoCodec, filters := transcodeVideoSettingsForCodecAndScaler(
+		accel, cfg.HardwareDevice, profile, preferredCodec, "spline", 0, 0,
+	)
 	filters = appendTaterTVRangeConversionFilter(
 		filters, sourceVideoRange, outputVideoRange, toneMapFilter,
 	)
