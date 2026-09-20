@@ -30,8 +30,12 @@ const (
 	taterTVHLSLiveStartSegments = 2
 	taterTVHLSRunWindow         = 12 * time.Hour
 	taterTVHLSPlaylistLimit     = 12
-	taterTVHLSFirstWait         = 30 * time.Second
-	taterTVHLSIdleTimeout       = 15 * time.Second
+	// Retain one extra playlist window on disk so a client fetching from the
+	// previous manifest can finish without allowing a long-running channel to
+	// accumulate every segment it has ever produced.
+	taterTVHLSSegmentFileLimit = taterTVHLSPlaylistLimit * 2
+	taterTVHLSFirstWait        = 30 * time.Second
+	taterTVHLSIdleTimeout      = 15 * time.Second
 	// Leave slightly more than one 48 kHz AAC/video frame between independently
 	// muxed items so encoder padding cannot make the next DTS overlap the last.
 	taterTVHLSTimestampGuardSeconds = 0.050
@@ -72,13 +76,16 @@ type taterTVHLSSession struct {
 	sessionStartedAt  time.Time
 	root              string
 	cancel            context.CancelFunc
+	runDone           chan struct{}
+	cleanupOnce       sync.Once
 
-	mu       sync.Mutex
-	segments []taterTVHLSSegment
-	seen     map[string]bool
-	done     bool
-	err      error
-	accessed time.Time
+	mu             sync.Mutex
+	segments       []taterTVHLSSegment
+	seen           map[string]bool
+	prunedSegments int
+	done           bool
+	err            error
+	accessed       time.Time
 }
 
 type taterTVHLSSegment struct {
@@ -289,7 +296,14 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 		return session, playerToken, true
 	}
 
-	sessionRoot := filepath.Join(taterTVHLSRoot(cfg), taterTVSafeName(key, "channel"))
+	// Give each encoder generation its own directory. A finished session may be
+	// replaced under the same logical key while its asynchronous cleanup is
+	// still completing; unique roots prevent the old cleanup from touching the
+	// replacement session.
+	sessionRoot := filepath.Join(
+		taterTVHLSRoot(cfg),
+		taterTVSafeName(key, "channel")+"-"+strconv.FormatInt(time.Now().UnixNano(), 10),
+	)
 	ctx, cancel := context.WithCancel(context.Background())
 	videoCodec, _ := transcodeVideoSettingsForCodec(accel, transcodeCfg.HardwareDevice, profile, videoCodecPreference)
 	effectiveAccel := effectiveTranscodeHardwareAccel(videoCodec)
@@ -319,6 +333,7 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 		sessionStartedAt:  time.Now(),
 		root:              sessionRoot,
 		cancel:            cancel,
+		runDone:           make(chan struct{}),
 		seen:              map[string]bool{},
 		accessed:          time.Now(),
 	}
@@ -537,6 +552,9 @@ func (s *taterTVHLSSession) run(ctx context.Context) {
 		s.mu.Lock()
 		s.done = true
 		s.mu.Unlock()
+		if s.runDone != nil {
+			close(s.runDone)
+		}
 	}()
 	_ = os.RemoveAll(s.root)
 	if err := os.MkdirAll(s.root, 0755); err != nil {
@@ -843,6 +861,12 @@ func (s *taterTVHLSSession) appendItemSegments(itemDirRel, playlistPath string, 
 	s.mu.Unlock()
 	for _, segment := range segments {
 		relPath := filepath.ToSlash(filepath.Join(itemDirRel, segment.File))
+		s.mu.Lock()
+		alreadySeen := s.seen[relPath]
+		s.mu.Unlock()
+		if alreadySeen {
+			continue
+		}
 		absPath := filepath.Join(s.root, filepath.FromSlash(relPath))
 		if stat, err := os.Stat(absPath); err != nil || stat.IsDir() || stat.Size() == 0 {
 			continue
@@ -874,6 +898,7 @@ func (s *taterTVHLSSession) appendItemSegments(itemDirRel, playlistPath string, 
 		s.mu.Unlock()
 		itemAlreadyAppended = true
 	}
+	s.pruneSegmentFiles()
 }
 
 func (s *taterTVHLSSession) segmentURI(relPath, playerToken string) string {
@@ -1026,6 +1051,7 @@ func (s *taterTVHLSSession) stop() {
 	if s.cancel != nil {
 		s.cancel()
 	}
+	s.cleanupAfterStop()
 }
 
 func (s *taterTVHLSSession) setError(err error) {

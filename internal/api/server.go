@@ -462,6 +462,7 @@ func (s *Server) Shutdown(ctx context.Context) {
 	if s.tvGuidePlannerCancel != nil {
 		s.tvGuidePlannerCancel()
 	}
+	taterTVResetHLS()
 	if s.speedtest != nil {
 		s.speedtest.shutdown()
 	}
@@ -473,6 +474,7 @@ func (s *Server) runTVGuidePlanner(ctx context.Context) {
 			return
 		}
 		cfg := s.configManager.GetConfig()
+		maintainTaterTVHLS(cfg, time.Now())
 		if cfg == nil || !taterTubeTVEnabled(cfg) {
 			return
 		}
