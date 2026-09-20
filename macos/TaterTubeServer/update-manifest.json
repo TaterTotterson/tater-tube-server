@@ -1,7 +1,7 @@
 {
-  "version": "1.7.1",
-  "build": 149,
-  "url": "https://github.com/TaterTotterson/tater-tube-server/releases/download/v1.7.1/Tater-Tube-Server-v1.7.1.zip",
-  "sha256": "ca894e522f0545a9c221b5a1949d30f1d35e82095ff337c11f81ee722e0d6c41",
-  "notes": "Tater Tube Server macOS update v1.7.1."
+  "version": "1.7.2",
+  "build": 150,
+  "url": "https://github.com/TaterTotterson/tater-tube-server/releases/download/v1.7.2/Tater-Tube-Server-v1.7.2.zip",
+  "sha256": "061eee9380c64cbde14edd211edd1cde27993d5e9465b5249350a5b1ca0ff9cf",
+  "notes": "Tater Tube Server macOS update v1.7.2."
 }
