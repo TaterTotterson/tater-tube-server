@@ -218,6 +218,13 @@ same models through Metal. If a selected model cannot initialize, Tater Tube
 tries its compatible AI fallback chain before continuing with Standard
 upscaling.
 
+On compatible FFmpeg builds, Tater Tube keeps libplacebo's compiled shaders in
+a persistent cache and **Auto Detect** warms that same cache while it checks the
+models. This makes later playback starts faster, although the first use of a
+model, resolution, or updated graphics driver may still take longer. Docker
+stores the cache under `/config/cache/libplacebo`; the macOS app stores it in
+Application Support. Old cache entries are cleaned automatically.
+
 ## Unraid
 
 | Setting | Value |

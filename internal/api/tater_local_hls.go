@@ -369,7 +369,7 @@ func buildTaterLocalHLSCommand(
 				toneMapSource, toneMapTarget, toneMapFilter, audioTrack, "mpegts", outputVideoRange,
 			)
 		} else {
-			scaler, aiShaderPath, aiModel := resolveTaterUpscalerForRequest(
+			scaler, aiShaderPath, aiShaderCachePath, aiModel := resolveTaterUpscalerForRequest(
 				r.Context(), effectiveFFmpegPath(cfg.Transcoding.FFmpegPath), r,
 			)
 			command.upscalingMethod = scaler
@@ -383,10 +383,11 @@ func buildTaterLocalHLSCommand(
 					AudioChannels: command.audioChannels,
 					ToneMapSource: toneMapSource, ToneMapTarget: toneMapTarget, ToneMapFilter: toneMapFilter,
 					SourceVideoRange: sourceVideoRange, OutputVideoRange: outputVideoRange,
-					Scaler:       scaler,
-					AIShaderPath: aiShaderPath,
-					OutputWidth:  requestedTaterVideoDimension(r, "tater_output_width"),
-					OutputHeight: requestedTaterVideoDimension(r, "tater_output_height"),
+					Scaler:            scaler,
+					AIShaderPath:      aiShaderPath,
+					AIShaderCachePath: aiShaderCachePath,
+					OutputWidth:       requestedTaterVideoDimension(r, "tater_output_width"),
+					OutputHeight:      requestedTaterVideoDimension(r, "tater_output_height"),
 				},
 			)
 			// A full tvOS HLS conversion owns both clocks. Correct small source

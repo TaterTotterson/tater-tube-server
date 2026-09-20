@@ -37,4 +37,8 @@ if [[ -z "${VK_DRIVER_FILES:-}" && -z "${VK_ICD_FILENAMES:-}" && -r "${nvidia_ic
     fi
 fi
 
+# Keep libplacebo's compiled AI shaders on the persistent /config volume so
+# subsequent streams and container updates can reuse them.
+export TATER_AI_SHADER_CACHE_DIR="${TATER_AI_SHADER_CACHE_DIR:-/config/cache/libplacebo/v1}"
+
 exec s6-setuidgid abc /app/tater-tube-server serve --config=/config/config.yaml

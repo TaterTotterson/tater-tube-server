@@ -101,6 +101,72 @@ func TestUpscalingProbeReportsTimeoutInsteadOfSignalKilled(t *testing.T) {
 	require.NotContains(t, err.Error(), "signal: killed")
 }
 
+func TestAIUpscaleFilterAddsPersistentShaderCache(t *testing.T) {
+	filter := taterAIUpscaleFilter(
+		3840,
+		2160,
+		"/tmp/tater shaders/FSRCNNX.glsl",
+		"/tmp/tater cache/",
+	)
+
+	require.Contains(t, filter, "libplacebo=w=3840:h=2160")
+	require.Contains(t, filter, "shader_cache='/tmp/tater cache/'")
+	require.Contains(t, filter, "custom_shader_path='/tmp/tater shaders/FSRCNNX.glsl'")
+	require.NotContains(t, taterAIUpscaleFilter(128, 72, "/tmp/model.glsl", ""), "shader_cache=")
+}
+
+func TestFFmpegShaderCacheSupportIsFeatureDetected(t *testing.T) {
+	supportedFFmpeg := filepath.Join(t.TempDir(), "ffmpeg-with-cache")
+	require.NoError(t, os.WriteFile(
+		supportedFFmpeg,
+		[]byte("#!/bin/sh\nprintf '   shader_cache      <string> Set shader cache path\\n'\n"),
+		0o755,
+	))
+	unsupportedFFmpeg := filepath.Join(t.TempDir(), "ffmpeg-without-cache")
+	require.NoError(t, os.WriteFile(
+		unsupportedFFmpeg,
+		[]byte("#!/bin/sh\nprintf 'libplacebo filter help\\n'\n"),
+		0o755,
+	))
+
+	require.True(t, taterFFmpegSupportsAIShaderCache(t.Context(), supportedFFmpeg))
+	require.False(t, taterFFmpegSupportsAIShaderCache(t.Context(), unsupportedFFmpeg))
+}
+
+func TestAIShaderCacheDirectoryUsesConfiguredPersistentPath(t *testing.T) {
+	configured := filepath.Join(t.TempDir(), "persistent", "libplacebo", "v1")
+	t.Setenv("TATER_AI_SHADER_CACHE_DIR", configured)
+
+	directory, err := taterAIShaderCacheDirectory()
+	require.NoError(t, err)
+	require.Equal(t, configured, directory)
+	info, err := os.Stat(directory)
+	require.NoError(t, err)
+	require.True(t, info.IsDir())
+}
+
+func TestPruneAIShaderCacheRemovesExpiredAndOldestFiles(t *testing.T) {
+	directory := t.TempDir()
+	now := time.Now()
+	writeCacheFile := func(name string, size int, age time.Duration) string {
+		t.Helper()
+		path := filepath.Join(directory, name)
+		require.NoError(t, os.WriteFile(path, make([]byte, size), 0o644))
+		modified := now.Add(-age)
+		require.NoError(t, os.Chtimes(path, modified, modified))
+		return path
+	}
+
+	expired := writeCacheFile("expired", 4, 48*time.Hour)
+	oldest := writeCacheFile("oldest", 6, 2*time.Hour)
+	newest := writeCacheFile("newest", 6, time.Hour)
+
+	require.NoError(t, pruneTaterAIShaderCache(directory, 8, 24*time.Hour, now))
+	require.NoFileExists(t, expired)
+	require.NoFileExists(t, oldest)
+	require.FileExists(t, newest)
+}
+
 func writeUpscalingDetectionFFmpeg(t *testing.T, includeZscale bool) string {
 	t.Helper()
 	filters := " .SC scale V->V Apply resize\n"
