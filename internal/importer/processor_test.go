@@ -22,7 +22,8 @@ import (
 )
 
 type processorTestPoolManager struct {
-	client *fakepool.Client
+	client         *fakepool.Client
+	budgetSnapshot pool.ImportBudgetSnapshot
 }
 
 func (m processorTestPoolManager) GetPool() (pool.NntpClient, error) { return m.client, nil }
@@ -56,6 +57,21 @@ func (m processorTestPoolManager) SetImportConnCapacity(int)                 {}
 func (m processorTestPoolManager) ImportConnCapacity() int                   { return 0 }
 func (m processorTestPoolManager) SetStreamSource(pool.StreamActivitySource) {}
 func (m processorTestPoolManager) NotifyStreamChange()                       {}
+func (m processorTestPoolManager) ImportBudgetSnapshot() pool.ImportBudgetSnapshot {
+	return m.budgetSnapshot
+}
+
+func TestFastFailConcurrencyHonorsLivePlaybackReserve(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Providers = []config.ProviderConfig{{MaxConnections: 40}}
+	manager := processorTestPoolManager{
+		budgetSnapshot: pool.ImportBudgetSnapshot{Capacity: 40, EffectiveCapacity: 32, Reserved: 8},
+	}
+
+	if got := fastFailConcurrencyWithBudget(cfg, manager); got != 32 {
+		t.Fatalf("fast-fail concurrency = %d, want live-safe limit 32", got)
+	}
+}
 
 func TestPreParseFastFailSkipsOnlyMissingEpisode(t *testing.T) {
 	client := fakepool.New()
@@ -647,6 +663,22 @@ func TestPreParseFastFailStrictFailsDegradedVideo(t *testing.T) {
 		t.Fatalf("strict policy: err = %v, want ErrNoFilesProcessed", err)
 	}
 	_ = brokenIdx
+}
+
+func TestPreParseFastFailDiscoveryForcesStrictDamagePolicy(t *testing.T) {
+	client := fakepool.New()
+	proc := &Processor{
+		poolManager:       processorTestPoolManager{client: client},
+		validationTimeout: 100 * time.Millisecond,
+	}
+	n := buildMultiSegmentNzb(client, "Movie.2024.mkv", 50, 25)
+	cfg := config.DefaultConfig()
+	cfg.Import.SegmentSamplePercentage = 100
+
+	_, _, err := proc.preParseFastFail(context.Background(), n, cfg, 1, true)
+	if !errors.Is(err, multifile.ErrNoFilesProcessed) {
+		t.Fatalf("Discovery strict override: err = %v, want ErrNoFilesProcessed", err)
+	}
 }
 
 // TestPreParseFastFailTolerantStillFailsLongRun verifies tolerant policy does

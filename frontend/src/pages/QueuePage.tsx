@@ -13,6 +13,7 @@ import {
 	Zap,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { PlaybackBufferBadge } from "../components/playback/PlaybackBufferBadge";
 import { PlaybackUpscalingBadge } from "../components/playback/PlaybackUpscalingBadge";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
@@ -37,7 +38,13 @@ function sourceBucket(stream: ActiveStream): SourceFilter {
 	const source = String(stream.source || "").toLowerCase();
 	if (source === "tube tv") return "tube-tv";
 	if (source === "local") return "local";
-	if (source === "api" || source === "stremio" || source.includes("nzb")) return "nzb";
+	if (
+		source === "api" ||
+		source === "stremio" ||
+		source.includes("nzb") ||
+		source.includes("discovery")
+	)
+		return "nzb";
 	return "other";
 }
 
@@ -578,7 +585,9 @@ export function QueuePage() {
 														)}
 														<span className="truncate font-semibold text-sm">{hardware}</span>
 													</div>
-													{(resolution || stream.upscaling_active) && (
+													{(resolution ||
+														stream.upscaling_active ||
+														stream.buffer_target_seconds) && (
 														<div className="mt-2 flex flex-wrap gap-1.5 md:justify-end">
 															{resolution && (
 																<span className="badge badge-primary badge-outline font-semibold">
@@ -586,6 +595,7 @@ export function QueuePage() {
 																</span>
 															)}
 															<PlaybackUpscalingBadge stream={stream} compact />
+															<PlaybackBufferBadge stream={stream} compact />
 														</div>
 													)}
 													{detail && (

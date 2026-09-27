@@ -604,6 +604,18 @@ func (t *StreamTracker) UpdateBufferedOffset(id string, offset int64) {
 	}
 }
 
+// SetHLSBufferInfo publishes the server-side Discovery HLS runway. Values are
+// stored atomically because the controller updates them several times per
+// second while dashboard snapshots are being assembled concurrently.
+func (t *StreamTracker) SetHLSBufferInfo(id string, bufferedSeconds, targetSeconds, underruns int64) {
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*streamInternal)
+		atomic.StoreInt64(&stream.BufferedSeconds, bufferedSeconds)
+		atomic.StoreInt64(&stream.BufferTargetSeconds, targetSeconds)
+		atomic.StoreInt64(&stream.BufferUnderruns, underruns)
+	}
+}
+
 // RecordPlayback stores a lightweight playback event that did not necessarily
 // map to a long-lived tracked stream, such as a Tube TV HLS segment request.
 func (t *StreamTracker) RecordPlayback(record nzbfilesystem.ActiveStream) {
@@ -672,6 +684,9 @@ func (t *StreamTracker) Remove(id string) {
 		finalStream.BytesDownloaded = atomic.LoadInt64(&internal.BytesDownloaded)
 		finalStream.CurrentOffset = atomic.LoadInt64(&internal.CurrentOffset)
 		finalStream.BufferedOffset = atomic.LoadInt64(&internal.BufferedOffset)
+		finalStream.BufferedSeconds = atomic.LoadInt64(&internal.BufferedSeconds)
+		finalStream.BufferTargetSeconds = atomic.LoadInt64(&internal.BufferTargetSeconds)
+		finalStream.BufferUnderruns = atomic.LoadInt64(&internal.BufferUnderruns)
 		finalStream.BytesPerSecond = 0
 		finalStream.DownloadSpeed = 0
 		finalStream.Status = "Completed"
@@ -748,6 +763,15 @@ func mergePlaybackRecord(existing *nzbfilesystem.ActiveStream, next nzbfilesyste
 	}
 	if next.BufferedOffset > 0 {
 		existing.BufferedOffset = next.BufferedOffset
+	}
+	if next.BufferedSeconds > 0 {
+		existing.BufferedSeconds = next.BufferedSeconds
+	}
+	if next.BufferTargetSeconds > 0 {
+		existing.BufferTargetSeconds = next.BufferTargetSeconds
+	}
+	if next.BufferUnderruns > existing.BufferUnderruns {
+		existing.BufferUnderruns = next.BufferUnderruns
 	}
 	if next.PlaybackPosition > 0 {
 		existing.PlaybackPosition = next.PlaybackPosition
@@ -936,6 +960,9 @@ func copyStreamPresentation(dst *nzbfilesystem.ActiveStream, src nzbfilesystem.A
 	dst.BytesDownloaded = src.BytesDownloaded
 	dst.CurrentOffset = src.CurrentOffset
 	dst.BufferedOffset = src.BufferedOffset
+	dst.BufferedSeconds = src.BufferedSeconds
+	dst.BufferTargetSeconds = src.BufferTargetSeconds
+	dst.BufferUnderruns = src.BufferUnderruns
 	dst.Transcoded = src.Transcoded
 	dst.TranscodeProfile = src.TranscodeProfile
 	dst.TranscodeName = src.TranscodeName
@@ -1008,6 +1035,9 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			existing.BytesDownloaded += currentDownloaded
 			existing.BytesPerSecond += internal.BytesPerSecond
 			existing.DownloadSpeed += internal.DownloadSpeed
+			existing.BufferedSeconds = atomic.LoadInt64(&s.BufferedSeconds)
+			existing.BufferTargetSeconds = atomic.LoadInt64(&s.BufferTargetSeconds)
+			existing.BufferUnderruns = atomic.LoadInt64(&s.BufferUnderruns)
 			// Average speed is complex to aggregate, but sum of averages approximates total throughput
 			existing.SpeedAvg += internal.SpeedAvg
 
@@ -1092,6 +1122,9 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			streamCopy.BytesDownloaded = atomic.LoadInt64(&s.BytesDownloaded)
 			streamCopy.CurrentOffset = atomic.LoadInt64(&s.CurrentOffset)
 			streamCopy.BufferedOffset = atomic.LoadInt64(&s.BufferedOffset)
+			streamCopy.BufferedSeconds = atomic.LoadInt64(&s.BufferedSeconds)
+			streamCopy.BufferTargetSeconds = atomic.LoadInt64(&s.BufferTargetSeconds)
+			streamCopy.BufferUnderruns = atomic.LoadInt64(&s.BufferUnderruns)
 			streamCopy.LastActivity = internal.lastReadAt
 			streamCopy.BytesPerSecond = internal.BytesPerSecond
 			streamCopy.DownloadSpeed = internal.DownloadSpeed

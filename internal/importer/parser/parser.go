@@ -867,7 +867,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 			continue
 		}
 
-		if len(data.RawBytes) == 0 {
+		if len(data.RawBytes) == 0 && !data.SkippedFirstSegment {
 			p.log.WarnContext(context.Background(), "First segment has no data",
 				"file", data.File.Subject)
 		}

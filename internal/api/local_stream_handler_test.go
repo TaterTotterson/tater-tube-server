@@ -63,6 +63,38 @@ func TestTaterLocalHLSPlaylistRequiresRequestedBuffer(t *testing.T) {
 	}
 }
 
+func TestRemoveTaterFFmpegInputPacingForAdaptiveDiscoveryBuffer(t *testing.T) {
+	args := []string{
+		"-hide_banner", "-readrate", "1.02", "-readrate_initial_burst", "24",
+		"-i", "http://127.0.0.1:8080/api/files/stream", "-c:v", "h264_nvenc",
+	}
+	joined := strings.Join(removeTaterFFmpegInputPacing(args), " ")
+	if strings.Contains(joined, "-readrate") || strings.Contains(joined, "initial_burst") {
+		t.Fatalf("adaptive Discovery command retained fixed pacing: %s", joined)
+	}
+	if !strings.Contains(joined, "-i http://127.0.0.1:8080/api/files/stream") {
+		t.Fatalf("input was damaged while removing pacing: %s", joined)
+	}
+}
+
+func TestTaterHLSSegmentIndex(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want int
+		ok   bool
+	}{
+		{name: "segment-000042.ts", want: 42, ok: true},
+		{name: "segment-000007.m4s", want: 7, ok: true},
+		{name: "init.mp4", ok: false},
+		{name: "../segment-nope.ts", ok: false},
+	} {
+		got, ok := taterHLSSegmentIndex(tc.name)
+		if got != tc.want || ok != tc.ok {
+			t.Fatalf("taterHLSSegmentIndex(%q) = (%d, %v), want (%d, %v)", tc.name, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
 func TestTaterLocalHLSStartupSegmentsUsesShorterSeekRunway(t *testing.T) {
 	initial := httptest.NewRequest(http.MethodGet, "/api/tater/local/stream", nil)
 	if got := taterLocalHLSStartupSegments(initial); got != taterLocalHLSInitialSegments {

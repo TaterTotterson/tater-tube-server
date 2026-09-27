@@ -30,9 +30,16 @@ const (
 	taterLocalHLSInitialSegments = 6
 	taterLocalHLSSeekSegments    = 2
 	taterLocalHLSReadRate        = "1.02"
-	taterLocalHLSFirstWait       = 35 * time.Second
-	taterLocalHLSIdleTimeout     = 5 * time.Minute
-	taterLocalHLSSupersededTTL   = 2 * time.Minute
+	// Discovery sources are allowed to run as quickly as the provider and
+	// transcoder permit, then are suspended once a bounded runway has been
+	// built. This avoids the almost-impossible recovery of a fixed 1.02x pace
+	// after a provider stall without converting the whole title in advance.
+	taterDiscoveryHLSTargetSegments  = 20 // 80 seconds
+	taterDiscoveryHLSResumeSegments  = 12 // refill below 48 seconds
+	taterDiscoveryHLSControlInterval = 250 * time.Millisecond
+	taterLocalHLSFirstWait           = 35 * time.Second
+	taterLocalHLSIdleTimeout         = 5 * time.Minute
+	taterLocalHLSSupersededTTL       = 2 * time.Minute
 )
 
 type taterLocalHLSManager struct {
@@ -58,6 +65,13 @@ type taterLocalHLSSession struct {
 	done     bool
 	err      error
 	once     sync.Once
+
+	adaptiveBuffer  bool
+	bufferProduced  int
+	bufferConsumed  int
+	bufferPaused    bool
+	bufferHealthy   bool
+	bufferUnderruns int64
 }
 
 type taterLocalHLSCommand struct {
@@ -488,6 +502,24 @@ func convertTaterFFmpegArgsToHLS(
 	)
 }
 
+// removeTaterFFmpegInputPacing removes the fixed input throttle installed for
+// ordinary local HLS. Discovery sessions use a bounded adaptive controller:
+// FFmpeg runs freely while the runway is low and is suspended at the target.
+func removeTaterFFmpegInputPacing(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-readrate", "-readrate_initial_burst":
+			if i+1 < len(args) {
+				i++
+			}
+		default:
+			out = append(out, args[i])
+		}
+	}
+	return out
+}
+
 func insertTaterFFmpegOutputArgs(args []string, values ...string) []string {
 	if len(args) >= 3 && args[len(args)-3] == "-f" && args[len(args)-1] == "pipe:1" {
 		inserted := make([]string, 0, len(args)+len(values))
@@ -637,7 +669,15 @@ func (s *taterLocalHLSSession) run(ctx context.Context, ffmpegPath string, args 
 	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
 	var stderr limitedBuffer
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err := cmd.Start()
+	if err == nil {
+		controllerDone := make(chan struct{})
+		if s.adaptiveBuffer && taterProcessSuspensionSupported() {
+			go s.controlAdaptiveBuffer(ctx, cmd.Process, controllerDone)
+		}
+		err = cmd.Wait()
+		close(controllerDone)
+	}
 	s.mu.Lock()
 	s.done = true
 	if err != nil && ctx.Err() == nil {
@@ -651,6 +691,66 @@ func (s *taterLocalHLSSession) run(ctx context.Context, ffmpegPath string, args 
 		// the normal five-minute HLS idle timeout expires.
 		globalTaterLocalHLS.removeIfSame(s.id, s)
 		s.stopAndCleanup()
+	}
+}
+
+func (s *taterLocalHLSSession) controlAdaptiveBuffer(ctx context.Context, process *os.Process, done <-chan struct{}) {
+	ticker := time.NewTicker(taterDiscoveryHLSControlInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+			s.updateAdaptiveBuffer(process)
+			return
+		case <-ticker.C:
+			s.updateAdaptiveBuffer(process)
+		}
+	}
+}
+
+func (s *taterLocalHLSSession) updateAdaptiveBuffer(process *os.Process) {
+	produced := s.playlistSegmentCount()
+	s.mu.Lock()
+	s.bufferProduced = produced
+	ahead := produced - s.bufferConsumed
+	if ahead < 0 {
+		ahead = 0
+	}
+	if ahead >= taterLocalHLSInitialSegments {
+		s.bufferHealthy = true
+	} else if ahead <= 1 && s.bufferHealthy && !s.done {
+		s.bufferHealthy = false
+		s.bufferUnderruns++
+	}
+	paused := s.bufferPaused
+	underruns := s.bufferUnderruns
+	done := s.done
+	s.mu.Unlock()
+
+	if !done && !paused && ahead >= taterDiscoveryHLSTargetSegments {
+		if err := taterSuspendProcess(process); err == nil {
+			s.mu.Lock()
+			s.bufferPaused = true
+			s.mu.Unlock()
+			paused = true
+		}
+	} else if paused && (done || ahead <= taterDiscoveryHLSResumeSegments) {
+		if err := taterResumeProcess(process); err == nil {
+			s.mu.Lock()
+			s.bufferPaused = false
+			s.mu.Unlock()
+		}
+	}
+
+	if s.tracker != nil && s.stream != nil {
+		s.tracker.SetHLSBufferInfo(
+			s.stream.ID,
+			int64(ahead*taterLocalHLSSegmentTime),
+			int64(taterDiscoveryHLSTargetSegments*taterLocalHLSSegmentTime),
+			underruns,
+		)
 	}
 }
 
@@ -677,12 +777,16 @@ func (s *taterLocalHLSSession) playlistReady() bool {
 }
 
 func (s *taterLocalHLSSession) playlistBuffered(minSegments int) bool {
-	data, err := os.ReadFile(s.playlistPath)
-	if err != nil {
-		return false
-	}
 	if minSegments < 1 {
 		minSegments = 1
+	}
+	return s.playlistSegmentCount() >= minSegments
+}
+
+func (s *taterLocalHLSSession) playlistSegmentCount() int {
+	data, err := os.ReadFile(s.playlistPath)
+	if err != nil {
+		return 0
 	}
 	segments := 0
 	for _, line := range strings.Split(string(data), "\n") {
@@ -694,7 +798,30 @@ func (s *taterLocalHLSSession) playlistBuffered(minSegments int) bool {
 			segments++
 		}
 	}
-	return segments >= minSegments
+	return segments
+}
+
+func (s *taterLocalHLSSession) markSegmentRequested(name string) {
+	index, ok := taterHLSSegmentIndex(name)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	consumed := index + 1
+	if consumed > s.bufferConsumed {
+		s.bufferConsumed = consumed
+	}
+	s.mu.Unlock()
+}
+
+func taterHLSSegmentIndex(name string) (int, bool) {
+	base := strings.TrimSuffix(filepath.Base(strings.TrimSpace(name)), filepath.Ext(name))
+	raw, ok := strings.CutPrefix(base, "segment-")
+	if !ok {
+		return 0, false
+	}
+	index, err := strconv.Atoi(raw)
+	return index, err == nil && index >= 0
 }
 
 func (s *taterLocalHLSSession) playlist() ([]byte, error) {

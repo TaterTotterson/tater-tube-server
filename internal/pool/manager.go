@@ -95,6 +95,13 @@ type Manager interface {
 	NotifyStreamChange()
 }
 
+// ImportBudgetReporter is an optional diagnostic surface implemented by the
+// production manager. Keeping it separate from Manager avoids forcing pool
+// test doubles to provide telemetry they do not use.
+type ImportBudgetReporter interface {
+	ImportBudgetSnapshot() ImportBudgetSnapshot
+}
+
 // StatsRepository defines the interface for persisting pool statistics
 type StatsRepository interface {
 	UpdateSystemStat(ctx context.Context, key string, value int64) error
@@ -510,6 +517,10 @@ func (m *manager) SetImportConnCapacity(total int) {
 // ImportConnCapacity returns the current budget capacity snapshot.
 func (m *manager) ImportConnCapacity() int {
 	return m.budget.Capacity()
+}
+
+func (m *manager) ImportBudgetSnapshot() ImportBudgetSnapshot {
+	return m.budget.Snapshot()
 }
 
 // SetStreamSource wires the source used to determine whether streams are

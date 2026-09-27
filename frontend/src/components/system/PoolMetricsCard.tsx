@@ -58,6 +58,37 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 
 				{poolMetrics && (
 					<div className="mt-4 space-y-2">
+						{poolMetrics.import_connection_capacity > 0 && (
+							<div className="rounded-md border border-base-300 bg-base-200/40 p-2.5">
+								<div className="flex items-center justify-between text-sm">
+									<span className="text-base-content/70">Active playback</span>
+									<span className="font-mono font-semibold">
+										{poolMetrics.active_playback_streams}
+									</span>
+								</div>
+								<div className="flex items-center justify-between text-sm">
+									<span className="text-base-content/70">Background fetches</span>
+									<span className="font-mono font-semibold">
+										{poolMetrics.import_connections_in_use} / {poolMetrics.import_connection_limit}
+									</span>
+								</div>
+								<div className="mt-1 flex items-center justify-between text-xs">
+									<span className="text-base-content/50">Playback reserve</span>
+									<span className="font-semibold text-success">
+										{poolMetrics.stream_reserved_connections} connections
+									</span>
+								</div>
+								{poolMetrics.import_connections_queued > 0 && (
+									<div className="mt-1 flex items-center justify-between text-xs">
+										<span className="text-base-content/50">Waiting for a slot</span>
+										<span className="font-semibold text-warning">
+											{poolMetrics.import_connections_queued}
+										</span>
+									</div>
+								)}
+							</div>
+						)}
+
 						{/* Download Speed */}
 						<div className="flex items-center justify-between text-sm">
 							<span className="text-base-content/70">Download Speed</span>

@@ -971,6 +971,7 @@ type ProviderStatusResponse struct {
 	Host                    string     `json:"host"`
 	Username                string     `json:"username"`
 	UsedConnections         int        `json:"used_connections"`
+	AvailableConnections    int        `json:"available_connections"`
 	MaxConnections          int        `json:"max_connections"`
 	State                   string     `json:"state"`
 	ErrorCount              int64      `json:"error_count"`
@@ -1009,6 +1010,12 @@ type PoolMetricsResponse struct {
 	Timestamp                   time.Time                `json:"timestamp"`
 	StartedAt                   time.Time                `json:"started_at"`
 	Providers                   []ProviderStatusResponse `json:"providers"`
+	ImportConnectionCapacity    int                      `json:"import_connection_capacity"`
+	ImportConnectionLimit       int                      `json:"import_connection_limit"`
+	ImportConnectionsInUse      int                      `json:"import_connections_in_use"`
+	ImportConnectionsQueued     int                      `json:"import_connections_queued"`
+	StreamReservedConnections   int                      `json:"stream_reserved_connections"`
+	ActivePlaybackStreams       int                      `json:"active_playback_streams"`
 }
 
 type TestProviderResponse struct {

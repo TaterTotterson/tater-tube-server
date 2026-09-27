@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 import { apiClient } from "../api/client";
+import { PlaybackBufferBadge } from "../components/playback/PlaybackBufferBadge";
 import { PlaybackUpscalingBadge } from "../components/playback/PlaybackUpscalingBadge";
 import { LocalMediaScanProgress } from "../components/system/LocalMediaScanProgress";
 import {
@@ -428,6 +429,7 @@ export function Dashboard() {
 												)}
 												{mode && <span className={`badge ${mode.className}`}>{mode.label}</span>}
 												<PlaybackUpscalingBadge stream={stream} />
+												<PlaybackBufferBadge stream={stream} />
 												<span className="badge badge-primary">{stream.status || "Streaming"}</span>
 											</div>
 										</div>

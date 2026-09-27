@@ -176,7 +176,7 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 // round-trips. Returns (brokenFileIndexes, knownMissingSegmentIDs, error).
 // Both maps are nil when no pool is available.
 // Returns ErrNoFilesProcessed (wrapped) when all eligible regular files are broken.
-func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, cfg *config.Config, queueID int) (map[int]struct{}, map[string]struct{}, error) {
+func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, cfg *config.Config, queueID int, forceStrict ...bool) (map[int]struct{}, map[string]struct{}, error) {
 	if !proc.poolManager.HasPool() {
 		return nil, nil, nil
 	}
@@ -206,9 +206,10 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	}
 
 	// Stat is a cheap single round-trip on the pool's normal lane; excess
-	// requests queue and yield to streaming (priority lane). Run sweeps at the
-	// pool's full connection capacity so multi-part releases don't crawl.
-	concurrency := fastFailConcurrency(cfg)
+	// requests queue and yield to streaming (priority lane). Use the pool's
+	// full connection capacity while idle, but honor the live-playback reserve
+	// when streams are active so a background probe cannot occupy every slot.
+	concurrency := fastFailConcurrencyWithBudget(cfg, proc.poolManager)
 
 	// Phase 1: cheap release-level probe. Sample the whole release once
 	// (≤55 Stats) and fail fast. Healthy releases — the common case — pay only
@@ -270,6 +271,9 @@ func (proc *Processor) preParseFastFail(ctx context.Context, n *nzbparser.Nzb, c
 	missingIDs := make(map[string]struct{})
 	eligibleRegularCount := 0
 	tolerant := cfg.GetImportDamagePolicyTolerant()
+	if len(forceStrict) > 0 && forceStrict[0] {
+		tolerant = false
+	}
 
 	for i, result := range results {
 		f := n.Files[i]
@@ -380,6 +384,19 @@ func fastFailConcurrency(cfg *config.Config) int {
 	return capacity
 }
 
+func fastFailConcurrencyWithBudget(cfg *config.Config, manager pool.Manager) int {
+	concurrency := fastFailConcurrency(cfg)
+	reporter, ok := manager.(pool.ImportBudgetReporter)
+	if !ok {
+		return concurrency
+	}
+	effective := reporter.ImportBudgetSnapshot().EffectiveCapacity
+	if effective > 0 && effective < concurrency {
+		return effective
+	}
+	return concurrency
+}
+
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path.
 // Returns (resultPath, writtenMetadataPaths, error). writtenMetadataPaths contains all virtual paths of
 // metadata files written to disk; it is populated even on partial failure so callers can clean up.
@@ -443,7 +460,11 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		proc.updateProgressWithStage(queueID, 0, "Checking segment availability")
 		var missingIDs map[string]struct{}
 		var fastFailErr error
-		brokenIdx, missingIDs, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID)
+		// Interactive Discovery playback should fail over to another result
+		// instead of importing a known-holed file and freezing later in the
+		// movie. Library imports retain the configured tolerant/strict policy.
+		strictDiscovery := category != nil && strings.EqualFold(strings.TrimSpace(*category), "tater-tube")
+		brokenIdx, missingIDs, fastFailErr = proc.preParseFastFail(ctx, n, cfg, queueID, strictDiscovery)
 		if fastFailErr != nil {
 			return "", nil, NewNonRetryableError("fast-fail segment check failed", fastFailErr)
 		}

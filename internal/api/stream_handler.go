@@ -1963,7 +1963,10 @@ func appendVideoEncoderOptions(args []string, videoCodec string, profile transco
 			"-pix_fmt", "yuv420p",
 		)
 	case "h264_nvenc":
-		return append(args, "-preset", "p4", "-profile:v", "main")
+		// H.264 NVENC is an 8-bit output path on the supported NVIDIA cards.
+		// Make the conversion explicit so a 10-bit HDR/VP9 source cannot carry
+		// P010 surfaces through a simple scale filter and fail at encoder open.
+		return append(args, "-preset", "p4", "-profile:v", "main", "-pix_fmt", "yuv420p")
 	case "hevc_nvenc":
 		return append(args, "-preset", "p4")
 	case "h264_videotoolbox":
@@ -2158,7 +2161,7 @@ func transcodeVideoSettingsForCodecAndUpscaler(
 	case "qsv":
 		return "h264_qsv", scaleFilter + ",format=nv12"
 	case "nvenc":
-		return "h264_nvenc", scaleFilter
+		return "h264_nvenc", scaleFilter + ",format=yuv420p"
 	case "videotoolbox":
 		// VideoToolbox consumes NV12 for ordinary 8-bit video. Make that
 		// conversion explicit before handing frames to the encoder. Besides
