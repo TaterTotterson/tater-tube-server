@@ -128,19 +128,24 @@ func (h *StreamHandler) prepareStreamHLSSession(
 		_ = os.RemoveAll(root)
 		return nil, err
 	}
+	adaptiveBuffer := taterProcessSuspensionSupported()
+	if adaptiveBuffer {
+		command.args = removeTaterFFmpegInputPacing(command.args)
+	}
 
 	sessionCtx, cancel := context.WithCancel(context.Background())
 	session := &taterLocalHLSSession{
-		id:           key,
-		slot:         taterLocalHLSSlot(playerID),
-		playerID:     playerID,
-		playerToken:  playerToken,
-		playlistURL:  r.URL.Path,
-		root:         root,
-		playlistPath: playlistPath,
-		cancel:       cancel,
-		tracker:      h.streamTracker,
-		accessed:     time.Now(),
+		id:             key,
+		slot:           taterLocalHLSSlot(playerID),
+		playerID:       playerID,
+		playerToken:    playerToken,
+		playlistURL:    r.URL.Path,
+		root:           root,
+		playlistPath:   playlistPath,
+		cancel:         cancel,
+		tracker:        h.streamTracker,
+		accessed:       time.Now(),
+		adaptiveBuffer: adaptiveBuffer,
 	}
 	session, created := globalTaterLocalHLS.addOrReplace(key, session)
 	if !created {
@@ -170,6 +175,14 @@ func (h *StreamHandler) prepareStreamHLSSession(
 		applyTaterRequestedDynamicRangeInfo(h.streamTracker, session.stream.ID, r)
 		applyTaterRequestedResolutionInfo(h.streamTracker, session.stream.ID, r)
 		applyTaterResolvedUpscalingInfo(h.streamTracker, session.stream.ID, r, command.upscalingMethod, command.upscalingModel)
+		if adaptiveBuffer {
+			h.streamTracker.SetHLSBufferInfo(
+				session.stream.ID,
+				0,
+				int64(taterDiscoveryHLSTargetSegments*taterLocalHLSSegmentTime),
+				0,
+			)
+		}
 	}
 
 	go session.run(sessionCtx, ffmpegPath, command.args)
@@ -207,6 +220,7 @@ func (h *StreamHandler) serveStreamHLSSegment(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	session.markSegmentRequested(segmentName)
 	session.touch()
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "private, max-age=300")

@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/TaterTotterson/tater-tube-server/internal/pool"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -479,13 +480,13 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 	}
 
 	// Get the pool to fetch provider stats
-	pool, err := s.poolManager.GetPool()
+	poolClient, err := s.poolManager.GetPool()
 	if err != nil {
 		return RespondInternalError(c, "Failed to get NNTP pool", err.Error())
 	}
 
 	// Get provider stats from pool (v4 API)
-	poolStats := pool.Stats()
+	poolStats := poolClient.Stats()
 
 	// Get current configuration to access provider details and speed test results
 	config := s.configManager.GetConfig()
@@ -590,6 +591,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			Host:                    host,
 			Username:                username,
 			UsedConnections:         ps.ActiveConnections,
+			AvailableConnections:    ps.AvailableSlots,
 			MaxConnections:          ps.MaxConnections,
 			State:                   "active",
 			ErrorCount:              errorCount,
@@ -644,6 +646,10 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 	}
 
 	// Map pool metrics to API response format
+	var budget pool.ImportBudgetSnapshot
+	if reporter, ok := s.poolManager.(pool.ImportBudgetReporter); ok {
+		budget = reporter.ImportBudgetSnapshot()
+	}
 	response := PoolMetricsResponse{
 		BytesDownloaded:             metrics.BytesDownloaded,
 		BytesDownloaded24h:          bytesDownloaded24h,
@@ -659,6 +665,12 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		Timestamp:                   metrics.Timestamp,
 		StartedAt:                   metrics.StartedAt,
 		Providers:                   providers,
+		ImportConnectionCapacity:    budget.Capacity,
+		ImportConnectionLimit:       budget.EffectiveCapacity,
+		ImportConnectionsInUse:      budget.InFlight,
+		ImportConnectionsQueued:     budget.Queued,
+		StreamReservedConnections:   budget.Reserved,
+		ActivePlaybackStreams:       budget.ActiveStreams,
 	}
 
 	return RespondSuccess(c, response)

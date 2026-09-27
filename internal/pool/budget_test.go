@@ -65,14 +65,14 @@ func TestImportBudget_StreamsShrinkEffectiveCap(t *testing.T) {
 	src := &stubStreamSource{}
 	b := NewImportBudget()
 	b.SetStreamSource(src)
-	b.SetCapacity(8)
+	b.SetCapacity(40)
 
-	// 2 streams -> reserve 2*streamHeadroom=4 -> effective cap 4.
+	// 2 streams -> reserve 8 + 4 additional -> effective cap 28.
 	src.set(2)
 	b.NotifyStreamChange()
 
 	var releases []func()
-	for i := range 4 {
+	for i := range 28 {
 		r, err := b.Acquire(context.Background())
 		if err != nil {
 			t.Fatalf("acquire %d: %v", i, err)
@@ -90,11 +90,11 @@ func TestImportBudget_StreamsShrinkEffectiveCap(t *testing.T) {
 	}()
 	select {
 	case <-blocked:
-		t.Fatal("fifth Acquire should block at effective cap 4 (capacity 8, 2 streams)")
+		t.Fatal("29th Acquire should block at effective cap 28 (capacity 40, 2 streams)")
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	// Streams stop -> effective cap returns to 8, waiter granted.
+	// Streams stop -> effective cap returns to 40, waiter granted.
 	src.set(0)
 	b.NotifyStreamChange()
 	select {
@@ -104,6 +104,29 @@ func TestImportBudget_StreamsShrinkEffectiveCap(t *testing.T) {
 	}
 	for _, r := range releases {
 		r()
+	}
+}
+
+func TestImportBudgetSnapshotReportsPlaybackReservationAndPressure(t *testing.T) {
+	src := &stubStreamSource{}
+	b := NewImportBudget()
+	b.SetStreamSource(src)
+	b.SetCapacity(40)
+	src.set(1)
+	b.NotifyStreamChange()
+
+	release, err := b.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	snapshot := b.Snapshot()
+	if snapshot.Capacity != 40 || snapshot.EffectiveCapacity != 32 || snapshot.Reserved != 8 {
+		t.Fatalf("unexpected capacity snapshot: %+v", snapshot)
+	}
+	if snapshot.InFlight != 1 || snapshot.ActiveStreams != 1 {
+		t.Fatalf("unexpected pressure snapshot: %+v", snapshot)
 	}
 }
 

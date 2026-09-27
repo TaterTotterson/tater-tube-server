@@ -376,6 +376,7 @@ export interface ProviderStatus {
 	host: string;
 	username: string;
 	used_connections: number;
+	available_connections: number;
 	max_connections: number;
 	state: string;
 	error_count: number;
@@ -419,6 +420,9 @@ export interface ActiveStream {
 	status: string;
 	total_connections: number;
 	buffered_offset: number;
+	buffered_seconds?: number;
+	buffer_target_seconds?: number;
+	buffer_underruns?: number;
 	playback_position_seconds: number;
 	playback_start_seconds?: number;
 	media_duration_seconds?: number;
@@ -472,6 +476,12 @@ export interface PoolMetrics {
 	timestamp: string;
 	started_at: string;
 	providers: ProviderStatus[];
+	import_connection_capacity: number;
+	import_connection_limit: number;
+	import_connections_in_use: number;
+	import_connections_queued: number;
+	stream_reserved_connections: number;
+	active_playback_streams: number;
 }
 
 // System Browse types

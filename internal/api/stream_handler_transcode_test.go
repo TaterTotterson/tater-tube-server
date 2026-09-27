@@ -358,7 +358,22 @@ func TestBuildFFmpegTranscodeArgsUsesAIUpscalerForRequestedUpscale(t *testing.T)
 	require.Contains(t, joined, "shader_cache='/tmp/tater-ai/cache/'")
 	require.Contains(t, joined, "custom_shader_path='/tmp/tater-ai/FSRCNNX.glsl'")
 	require.Contains(t, joined, "-c:v h264_nvenc")
+	require.Contains(t, joined, "-pix_fmt yuv420p")
 	require.NotContains(t, joined, "zscale=w=3840:h=2160:filter=spline36")
+}
+
+func TestBuildFFmpegTranscodeArgsForcesEightBitH264NVENC(t *testing.T) {
+	args := buildFFmpegTranscodeArgsWithOptions(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_4k"], "nvenc", transcodeCodecH264,
+		transcodeOutputOptions{
+			Scaler: "spline36", OutputWidth: 3840, OutputHeight: 2160,
+		},
+	)
+	joined := strings.Join(args, " ")
+	require.Contains(t, joined, "-vf zscale=w=3840:h=2160:filter=spline36,format=yuv420p")
+	require.Contains(t, joined, "-c:v h264_nvenc")
+	require.Contains(t, joined, "-pix_fmt yuv420p")
+	require.NotContains(t, joined, "p010")
 }
 
 func TestAIUpscalerFallsBackBeforeHardwareProbeForUnsupportedMedia(t *testing.T) {

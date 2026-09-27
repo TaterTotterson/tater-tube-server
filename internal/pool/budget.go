@@ -4,20 +4,30 @@ import (
 	"context"
 )
 
-// streamHeadroom is how many connections are set aside per active stream when
-// shrinking the import budget. Deliberately a constant, not config: the whole
-// point of the budget is automatic balancing without knobs. Streams get hard
-// priority via the pool's priority request lane regardless; the headroom just
-// keeps free connections available so a stream never waits for an import
-// article to finish.
-const streamHeadroom = 2
+// Live playback receives meaningful connection headroom instead of competing
+// with an import burst for every provider slot. The first stream reserves
+// eight slots; additional streams reserve four each. Small pools retain at
+// least one import slot so background work still makes progress.
+const (
+	streamBaseHeadroom       = 8
+	streamAdditionalHeadroom = 4
+)
+
+type ImportBudgetSnapshot struct {
+	Capacity          int
+	EffectiveCapacity int
+	InFlight          int
+	Queued            int
+	Reserved          int
+	ActiveStreams     int
+}
 
 // ImportBudget bounds the total number of in-flight import segment (body)
 // fetches pool-wide, across all concurrent imports. Its capacity tracks the
 // pool's total connection count and automatically shrinks while streams are
 // active:
 //
-//	effective cap = capacity − min(streamHeadroom × activeStreams, capacity−1)
+//	effective cap = capacity − min(8 + 4 × (activeStreams−1), capacity−1)
 //
 // so imports expand to the full pool when idle, yield headroom to streams
 // under playback, and always keep at least 1 connection so a lone import can
@@ -44,12 +54,39 @@ func (b *ImportBudget) effectiveCapLocked() int {
 	}
 	reserve := 0
 	if b.streamSource != nil {
-		reserve = streamHeadroom * b.streamSource.ActiveStreams()
+		streams := b.streamSource.ActiveStreams()
+		if streams > 0 {
+			reserve = streamBaseHeadroom + streamAdditionalHeadroom*(streams-1)
+		}
 	}
 	if reserve > b.capacity-1 {
 		reserve = b.capacity - 1
 	}
 	return b.capacity - reserve
+}
+
+// Snapshot returns the current background-fetch pressure and live-playback
+// reservation without changing admission state.
+func (b *ImportBudget) Snapshot() ImportBudgetSnapshot {
+	b.sem.mu.Lock()
+	defer b.sem.mu.Unlock()
+	activeStreams := 0
+	if b.streamSource != nil {
+		activeStreams = b.streamSource.ActiveStreams()
+	}
+	effective := b.effectiveCapLocked()
+	reserved := b.capacity - effective
+	if reserved < 0 {
+		reserved = 0
+	}
+	return ImportBudgetSnapshot{
+		Capacity:          b.capacity,
+		EffectiveCapacity: effective,
+		InFlight:          b.sem.inFlight,
+		Queued:            len(b.sem.waiters),
+		Reserved:          reserved,
+		ActiveStreams:     activeStreams,
+	}
 }
 
 // SetCapacity updates the total connection capacity (sum of provider
