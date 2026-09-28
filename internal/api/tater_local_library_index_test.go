@@ -179,6 +179,273 @@ EOF
 	}
 }
 
+func TestTaterLocalLibraryIncrementalScanOnlyProcessesChanges(t *testing.T) {
+	root := t.TempDir()
+	metadataRoot := filepath.Join(root, "metadata")
+	movieRoot := filepath.Join(root, "movies")
+	binDir := filepath.Join(root, "bin")
+	for _, dir := range []string{metadataRoot, movieRoot, binDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	probeCount := filepath.Join(root, "probe-count")
+	ffmpegPath := filepath.Join(binDir, "ffmpeg")
+	ffprobePath := filepath.Join(binDir, "ffprobe")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	probeScript := fmt.Sprintf("#!/bin/sh\nprintf x >> %q\nprintf '3600.000\\n'\n", probeCount)
+	if err := os.WriteFile(ffprobePath, []byte(probeScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	firstPath := filepath.Join(movieRoot, "First.2025.mkv")
+	if err := os.WriteFile(firstPath, []byte("first"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	cfg := &config.Config{
+		Metadata:    config.MetadataConfig{RootPath: metadataRoot},
+		Transcoding: config.TranscodingConfig{FFmpegPath: ffmpegPath},
+		LocalMedia: config.LocalMediaConfig{
+			Enabled: &enabled,
+			Categories: []config.LocalMediaCategory{{
+				ID: "movies", Name: "Movies", LibraryType: "movies",
+				Paths: []string{movieRoot}, Enabled: &enabled,
+			}},
+		},
+	}
+
+	first, err := scanTaterLocalLibrary(context.Background(), cfg, taterLocalLibraryIndex{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Files) != 1 {
+		t.Fatalf("first scan files = %d, want 1", len(first.Files))
+	}
+
+	progressEvents := []taterLocalLibraryScanProgress{}
+	second, err := scanTaterLocalLibraryWithOptions(
+		context.Background(), cfg, first,
+		func(progress taterLocalLibraryScanProgress) { progressEvents = append(progressEvents, progress) },
+		taterLocalLibraryScanOptions{Incremental: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Files) != 1 {
+		t.Fatalf("unchanged incremental scan files = %d, want 1", len(second.Files))
+	}
+	for _, progress := range progressEvents {
+		if progress.Phase == "discovering" {
+			t.Fatal("incremental scan performed the full pre-count walk")
+		}
+	}
+	if count, err := os.ReadFile(probeCount); err != nil || len(count) != 1 {
+		t.Fatalf("unchanged file was probed again, count=%q error=%v", count, err)
+	}
+
+	secondPath := filepath.Join(movieRoot, "Second.2026.mkv")
+	if err := os.WriteFile(secondPath, []byte("second"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	third, err := scanTaterLocalLibraryWithOptions(
+		context.Background(), cfg, second, nil, taterLocalLibraryScanOptions{Incremental: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(third.Files) != 2 {
+		t.Fatalf("incremental addition files = %d, want 2", len(third.Files))
+	}
+	if count, err := os.ReadFile(probeCount); err != nil || len(count) != 2 {
+		t.Fatalf("new file was not the only additional probe, count=%q error=%v", count, err)
+	}
+
+	if err := os.Remove(firstPath); err != nil {
+		t.Fatal(err)
+	}
+	fourth, err := scanTaterLocalLibraryWithOptions(
+		context.Background(), cfg, third, nil, taterLocalLibraryScanOptions{Incremental: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fourth.Files) != 1 || fourth.Files[0].Path != filepath.Base(secondPath) {
+		t.Fatalf("incremental removal did not reconcile index: %#v", fourth.Files)
+	}
+}
+
+func TestTaterLocalLibraryAutoScanSettings(t *testing.T) {
+	enabled := true
+	disabled := false
+	cfg := &config.Config{LocalMedia: config.LocalMediaConfig{
+		Enabled: &enabled,
+		Categories: []config.LocalMediaCategory{{
+			ID: "movies", Name: "Movies", Paths: []string{"/media"}, Enabled: &enabled,
+		}},
+	}}
+	if !taterLocalLibraryAutoScanEnabled(cfg) {
+		t.Fatal("nil auto-scan setting should default to enabled")
+	}
+	if !taterLocalLibraryRealtimeMonitoringEnabled(cfg) {
+		t.Fatal("nil real-time monitoring setting should default to enabled")
+	}
+	if got := taterLocalLibraryAutoScanInterval(cfg); got != 15*time.Minute {
+		t.Fatalf("default interval = %s, want 15m", got)
+	}
+	cfg.LocalMedia.AutoScanEnabled = &disabled
+	if taterLocalLibraryAutoScanEnabled(cfg) {
+		t.Fatal("explicitly disabled auto scan should remain disabled")
+	}
+	cfg.LocalMedia.AutoScanIntervalMinutes = 1
+	if got := taterLocalLibraryAutoScanInterval(cfg); got != 5*time.Minute {
+		t.Fatalf("minimum interval = %s, want 5m", got)
+	}
+	cfg.LocalMedia.RealtimeMonitoringEnabled = &disabled
+	if taterLocalLibraryRealtimeMonitoringEnabled(cfg) {
+		t.Fatal("explicitly disabled real-time monitoring should remain disabled")
+	}
+}
+
+func TestTaterLocalLibraryWatcherReportsPerPathFallback(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "Show", "Season 01")
+	hidden := filepath.Join(root, ".incoming")
+	if err := os.MkdirAll(nested, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(hidden, 0755); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(root, "missing")
+	enabled := true
+	cfg := &config.Config{LocalMedia: config.LocalMediaConfig{
+		Enabled:                   &enabled,
+		RealtimeMonitoringEnabled: &enabled,
+		AutoScanEnabled:           &enabled,
+		Categories: []config.LocalMediaCategory{
+			{ID: "tv", Name: "TV", LibraryType: "tv", Paths: []string{root}, Enabled: &enabled},
+			{ID: "movies", Name: "Movies", LibraryType: "movies", Paths: []string{missing}, Enabled: &enabled},
+		},
+	}}
+
+	watcher, roots, _, status, needsRetry := configureTaterLocalLibraryWatcher(cfg)
+	if watcher != nil {
+		defer watcher.Close()
+	}
+	if !status.Active || status.State != "watching" {
+		t.Fatalf("monitor status = %#v, want active watcher", status)
+	}
+	if status.WatchedDirectories != 3 {
+		t.Fatalf("watched directories = %d, want root plus two visible descendants", status.WatchedDirectories)
+	}
+	if !needsRetry {
+		t.Fatal("missing library path should schedule a watcher retry")
+	}
+	states := map[string]string{}
+	for _, pathStatus := range status.Paths {
+		states[pathStatus.CategoryID] = pathStatus.State
+	}
+	if states["tv"] != "watching" || states["movies"] != "unavailable" {
+		t.Fatalf("unexpected path states: %#v", states)
+	}
+	if got := taterLocalLibraryEventCategories(filepath.Join(nested, "Episode.mkv"), roots); len(got) != 1 || got[0] != "tv" {
+		t.Fatalf("event categories = %#v, want tv", got)
+	}
+	if got := taterLocalLibraryEventCategories(filepath.Join(hidden, "partial.mkv"), roots); len(got) != 0 {
+		t.Fatalf("hidden event categories = %#v, want none", got)
+	}
+}
+
+func TestTaterLocalLibraryTargetedScanPreservesOtherLibraries(t *testing.T) {
+	root := t.TempDir()
+	metadataRoot := filepath.Join(root, "metadata")
+	movieRoot := filepath.Join(root, "movies")
+	tvRoot := filepath.Join(root, "tv")
+	binDir := filepath.Join(root, "bin")
+	for _, dir := range []string{metadataRoot, movieRoot, tvRoot, binDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	firstMovie := filepath.Join(movieRoot, "First.mkv")
+	firstEpisode := filepath.Join(tvRoot, "Show", "Season 01", "Show.S01E01.mkv")
+	if err := os.MkdirAll(filepath.Dir(firstEpisode), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{firstMovie, firstEpisode} {
+		if err := os.WriteFile(path, []byte("video"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	probeCount := filepath.Join(root, "probe-count")
+	ffmpegPath := filepath.Join(binDir, "ffmpeg")
+	ffprobePath := filepath.Join(binDir, "ffprobe")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	probeScript := fmt.Sprintf("#!/bin/sh\nprintf x >> %q\nprintf '120.000\\n'\n", probeCount)
+	if err := os.WriteFile(ffprobePath, []byte(probeScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	cfg := &config.Config{
+		Metadata:    config.MetadataConfig{RootPath: metadataRoot},
+		Transcoding: config.TranscodingConfig{FFmpegPath: ffmpegPath},
+		LocalMedia: config.LocalMediaConfig{
+			Enabled: &enabled,
+			Categories: []config.LocalMediaCategory{
+				{ID: "movies", Name: "Movies", LibraryType: "movies", Paths: []string{movieRoot}, Enabled: &enabled},
+				{ID: "tv", Name: "TV", LibraryType: "tv", Paths: []string{tvRoot}, Enabled: &enabled},
+			},
+		},
+	}
+
+	first, err := scanTaterLocalLibrary(context.Background(), cfg, taterLocalLibraryIndex{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Files) != 2 {
+		t.Fatalf("initial files = %d, want 2", len(first.Files))
+	}
+	if err := os.RemoveAll(tvRoot); err != nil {
+		t.Fatal(err)
+	}
+	secondMovie := filepath.Join(movieRoot, "Second.mkv")
+	if err := os.WriteFile(secondMovie, []byte("video"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	targeted, err := scanTaterLocalLibraryWithOptions(
+		context.Background(), cfg, first, nil,
+		taterLocalLibraryScanOptions{
+			Incremental: true,
+			CategoryIDs: map[string]struct{}{"movies": {}},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targeted.Files) != 3 {
+		t.Fatalf("targeted files = %d, want two movies plus preserved TV item", len(targeted.Files))
+	}
+	if count, err := os.ReadFile(probeCount); err != nil || len(count) != 3 {
+		t.Fatalf("targeted scan should probe only the new movie, count=%q error=%v", count, err)
+	}
+
+	full, err := scanTaterLocalLibraryWithOptions(
+		context.Background(), cfg, targeted, nil, taterLocalLibraryScanOptions{Incremental: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(full.Files) != 2 {
+		t.Fatalf("full reconciliation files = %d, want 2 movies", len(full.Files))
+	}
+}
+
 func TestTaterLocalLibraryMissingAttentionIncludesArtworkAndMetadata(t *testing.T) {
 	if taterLocalMusicAlbumNeedsAttention(taterLocalMusicAlbumIndex{
 		HasArtwork: true, MetadataAvailable: true, HasMetadata: true,

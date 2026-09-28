@@ -1,6 +1,7 @@
 import {
 	AlertTriangle,
 	CircleCheck,
+	Clock3,
 	Disc3,
 	ExternalLink,
 	FileText,
@@ -17,6 +18,7 @@ import {
 	LockOpen,
 	Music2,
 	Plus,
+	RadioTower,
 	RefreshCw,
 	Save,
 	Search,
@@ -57,6 +59,9 @@ interface LocalMediaConfigSectionProps {
 
 const DEFAULT_LOCAL_MEDIA: LocalMediaConfig = {
 	enabled: false,
+	realtime_monitoring_enabled: true,
+	auto_scan_enabled: true,
+	auto_scan_interval_minutes: 15,
 	audiodb_enabled: true,
 	audiodb_api_key: "",
 	audiodb_api_key_set: false,
@@ -128,6 +133,9 @@ function normalize(config: ConfigResponse): LocalMediaConfig {
 	const source = config.local_media ?? DEFAULT_LOCAL_MEDIA;
 	return {
 		enabled: source.enabled ?? false,
+		realtime_monitoring_enabled: source.realtime_monitoring_enabled ?? true,
+		auto_scan_enabled: source.auto_scan_enabled ?? true,
+		auto_scan_interval_minutes: source.auto_scan_interval_minutes ?? 15,
 		audiodb_enabled: source.audiodb_enabled ?? true,
 		audiodb_api_key: "",
 		audiodb_api_key_set: source.audiodb_api_key_set ?? false,
@@ -295,6 +303,7 @@ export function LocalMediaConfigSection({
 		message: string;
 	} | null>(null);
 	const scanWasRunning = useRef(false);
+	const lastScanFinishedAt = useRef<string | undefined>(undefined);
 	const [folderPicker, setFolderPicker] = useState<{
 		categoryIndex: number;
 		pathIndex: number;
@@ -323,11 +332,17 @@ export function LocalMediaConfigSection({
 
 	useEffect(() => {
 		const running = scan.data?.running ?? false;
-		if (scanWasRunning.current && !running) {
+		const finishedAt = scan.data?.finished_at;
+		const completedSinceLastPoll =
+			finishedAt !== undefined &&
+			lastScanFinishedAt.current !== undefined &&
+			finishedAt !== lastScanFinishedAt.current;
+		if ((scanWasRunning.current && !running) || completedSinceLastPoll) {
 			void library.refetch();
 		}
 		scanWasRunning.current = running;
-	}, [library.refetch, scan.data?.running]);
+		lastScanFinishedAt.current = finishedAt;
+	}, [library.refetch, scan.data?.finished_at, scan.data?.running]);
 
 	const update = (next: LocalMediaConfig) => {
 		setFormData(next);
@@ -394,6 +409,12 @@ export function LocalMediaConfigSection({
 		if (!onUpdate || !hasChanges) return;
 		const next = {
 			enabled: formData.enabled,
+			realtime_monitoring_enabled: formData.realtime_monitoring_enabled ?? true,
+			auto_scan_enabled: formData.auto_scan_enabled ?? true,
+			auto_scan_interval_minutes: Math.min(
+				1440,
+				Math.max(5, formData.auto_scan_interval_minutes ?? 15),
+			),
 			audiodb_enabled: formData.audiodb_enabled ?? true,
 			audiodb_api_key: formData.audiodb_api_key?.trim() ?? "",
 			tmdb_enabled: formData.tmdb_enabled ?? true,
@@ -524,6 +545,7 @@ export function LocalMediaConfigSection({
 	const stats = library.data?.stats ?? EMPTY_STATS;
 	const scanStatus = scan.data ?? library.data?.scan;
 	const scanRunning = scanStatus?.running ?? false;
+	const monitorStatus = scanStatus?.monitor;
 	const albumRows = library.data?.albums ?? [];
 	const videoRows = library.data?.videos ?? [];
 	const tmdbConfigured =
@@ -566,6 +588,148 @@ export function LocalMediaConfigSection({
 							Scan Libraries
 						</button>
 					</div>
+				</div>
+
+				<div className="mt-5 overflow-hidden rounded-xl border border-base-300 bg-base-100/65">
+					<div className="flex flex-col gap-2 border-base-300 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+						<div>
+							<div className="font-bold text-sm">Automatic Library Updates</div>
+							<p className="mt-0.5 text-base-content/55 text-xs">
+								New media appears quickly, with a scheduled scan as a reliable safety net.
+							</p>
+						</div>
+						{monitorStatus && (
+							<span
+								className={`badge badge-sm font-bold ${
+									monitorStatus.state === "watching"
+										? "badge-success"
+										: monitorStatus.state === "periodic_only"
+											? "badge-warning"
+											: "badge-ghost"
+								}`}
+							>
+								{monitorStatus.state === "watching"
+									? "Watching"
+									: monitorStatus.state === "periodic_only"
+										? "Scheduled fallback"
+										: monitorStatus.state === "unavailable"
+											? "Unavailable"
+											: "Disabled"}
+							</span>
+						)}
+					</div>
+
+					<div className="grid gap-3 p-4 lg:grid-cols-2">
+						<div className="flex min-w-0 gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3.5">
+							<div className="h-fit rounded-lg bg-primary/10 p-2 text-primary">
+								<RadioTower className="h-4 w-4" />
+							</div>
+							<div className="min-w-0 flex-1">
+								<div className="flex flex-wrap items-center justify-between gap-3">
+									<span className="font-bold text-sm">Real-Time Monitoring</span>
+									<input
+										type="checkbox"
+										className="toggle toggle-primary toggle-sm"
+										checked={formData.realtime_monitoring_enabled ?? true}
+										disabled={isReadOnly}
+										onChange={(event) =>
+											update({
+												...formData,
+												realtime_monitoring_enabled: event.target.checked,
+											})
+										}
+									/>
+								</div>
+								<p className="mt-1 text-base-content/55 text-xs leading-relaxed">
+									Detects additions, changes, renames, and removals as they happen, then refreshes
+									only the affected library.
+								</p>
+							</div>
+						</div>
+
+						<div className="flex min-w-0 gap-3 rounded-xl border border-base-300 bg-base-200/45 p-3.5">
+							<div className="h-fit rounded-lg bg-base-300/60 p-2 text-base-content/65">
+								<Clock3 className="h-4 w-4" />
+							</div>
+							<div className="min-w-0 flex-1">
+								<div className="flex flex-wrap items-center justify-between gap-3">
+									<span className="font-bold text-sm">Scheduled Safety Scan</span>
+									<input
+										type="checkbox"
+										className="toggle toggle-primary toggle-sm"
+										checked={formData.auto_scan_enabled ?? true}
+										disabled={isReadOnly}
+										onChange={(event) =>
+											update({ ...formData, auto_scan_enabled: event.target.checked })
+										}
+									/>
+								</div>
+								<div className="mt-2 flex items-center gap-2">
+									<span className="shrink-0 text-base-content/55 text-xs">Check every</span>
+									<input
+										type="number"
+										className="input input-bordered input-xs w-20 bg-base-100 font-mono"
+										min={5}
+										max={1440}
+										value={formData.auto_scan_interval_minutes ?? 15}
+										disabled={isReadOnly || formData.auto_scan_enabled === false}
+										onChange={(event) =>
+											update({
+												...formData,
+												auto_scan_interval_minutes: Number.parseInt(event.target.value, 10) || 15,
+											})
+										}
+									/>
+									<span className="text-base-content/50 text-xs">minutes</span>
+								</div>
+								<p className="mt-1.5 text-[11px] text-base-content/45 leading-relaxed">
+									Catches changes missed by network shares or interrupted filesystem watchers.
+								</p>
+							</div>
+						</div>
+					</div>
+
+					{monitorStatus && monitorStatus.paths.length > 0 && (
+						<div className="border-base-300 border-t px-4 py-3">
+							<div className="mb-2 flex items-center justify-between gap-3">
+								<span className="font-bold text-base-content/65 text-xs">Library watchers</span>
+								{monitorStatus.watched_directories > 0 && (
+									<span className="text-[11px] text-base-content/45">
+										{monitorStatus.watched_directories.toLocaleString()} folders monitored
+									</span>
+								)}
+							</div>
+							<div className="grid max-h-40 gap-2 overflow-y-auto sm:grid-cols-2">
+								{monitorStatus.paths.map((pathStatus) => (
+									<div
+										key={`${pathStatus.category_id}:${pathStatus.path}`}
+										className="flex min-w-0 items-center gap-2 rounded-lg bg-base-200/60 px-3 py-2"
+										title={pathStatus.message || pathStatus.path}
+									>
+										<span
+											className={`h-2 w-2 shrink-0 rounded-full ${
+												pathStatus.state === "watching"
+													? "bg-success"
+													: pathStatus.state === "periodic_only"
+														? "bg-warning"
+														: "bg-base-content/25"
+											}`}
+										/>
+										<div className="min-w-0">
+											<div className="truncate font-bold text-xs">{pathStatus.category_name}</div>
+											<div className="truncate font-mono text-[10px] text-base-content/45">
+												{pathStatus.path}
+											</div>
+										</div>
+									</div>
+								))}
+							</div>
+							<p className="mt-2 text-[11px] text-base-content/45 leading-relaxed">
+								Network-mounted folders may still rely on the scheduled safety scan when their
+								filesystem does not forward change events.
+							</p>
+						</div>
+					)}
 				</div>
 
 				{hasChanges && (

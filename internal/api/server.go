@@ -73,7 +73,15 @@ type Server struct {
 	// stremioPlayGroup coalesces concurrent Stremio plays of the same title (download once).
 	stremioPlayGroup singleflight.Group
 
-	tvGuidePlannerCancel context.CancelFunc
+	tvGuidePlannerCancel           context.CancelFunc
+	localLibraryScanCancel         context.CancelFunc
+	localLibraryScanWake           chan struct{}
+	localLibraryMonitorWake        chan struct{}
+	localLibraryRealtimeScanWake   chan struct{}
+	localLibraryRealtimeMu         sync.Mutex
+	localLibraryRealtimeCategories map[string]struct{}
+	localLibraryMonitorMu          sync.RWMutex
+	localLibraryMonitorStatus      taterLocalLibraryMonitorStatus
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -99,24 +107,28 @@ func NewServer(
 	}
 
 	server := &Server{
-		config:              apiConfig,
-		queueRepo:           queueRepo,
-		healthRepo:          healthRepo,
-		authService:         authService,
-		userRepo:            userRepo,
-		configManager:       configManager,
-		metadataReader:      metadataReader,
-		metadataService:     metadataService,
-		nzbFilesystem:       nzbFilesystem,
-		importerService:     importService, // Will be set later via SetImporterService
-		poolManager:         poolManager,
-		arrsService:         arrsService,
-		startTime:           time.Now(),
-		progressBroadcaster: progressBroadcaster,
-		streamTracker:       streamTracker,
-		cacheSource:         cacheSource,
-		speedtest:           newSpeedtestCoordinator(),
-		updater:             updater.Default(),
+		config:                         apiConfig,
+		queueRepo:                      queueRepo,
+		healthRepo:                     healthRepo,
+		authService:                    authService,
+		userRepo:                       userRepo,
+		configManager:                  configManager,
+		metadataReader:                 metadataReader,
+		metadataService:                metadataService,
+		nzbFilesystem:                  nzbFilesystem,
+		importerService:                importService, // Will be set later via SetImporterService
+		poolManager:                    poolManager,
+		arrsService:                    arrsService,
+		startTime:                      time.Now(),
+		progressBroadcaster:            progressBroadcaster,
+		streamTracker:                  streamTracker,
+		cacheSource:                    cacheSource,
+		speedtest:                      newSpeedtestCoordinator(),
+		updater:                        updater.Default(),
+		localLibraryScanWake:           make(chan struct{}, 1),
+		localLibraryMonitorWake:        make(chan struct{}, 1),
+		localLibraryRealtimeScanWake:   make(chan struct{}, 1),
+		localLibraryRealtimeCategories: map[string]struct{}{},
 	}
 
 	// Wire stream-activity ↔ pool admission. Streams notify the pool when they
@@ -134,10 +146,22 @@ func NewServer(
 				taterTVResetGuideForConfig(newConfig)
 				taterTVResetHLS()
 			}
+			select {
+			case server.localLibraryScanWake <- struct{}{}:
+			default:
+			}
+			select {
+			case server.localLibraryMonitorWake <- struct{}{}:
+			default:
+			}
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		server.tvGuidePlannerCancel = cancel
 		go server.runTVGuidePlanner(ctx)
+		localScanCtx, localScanCancel := context.WithCancel(context.Background())
+		server.localLibraryScanCancel = localScanCancel
+		go server.runLocalLibraryScanner(localScanCtx)
+		go server.runLocalLibraryMonitor(localScanCtx)
 	}
 
 	return server
@@ -463,6 +487,9 @@ func (s *Server) Shutdown(ctx context.Context) {
 	if s.tvGuidePlannerCancel != nil {
 		s.tvGuidePlannerCancel()
 	}
+	if s.localLibraryScanCancel != nil {
+		s.localLibraryScanCancel()
+	}
 	taterTVResetHLS()
 	if s.speedtest != nil {
 		s.speedtest.shutdown()
@@ -479,6 +506,9 @@ func (s *Server) runTVGuidePlanner(ctx context.Context) {
 		if cfg == nil || !taterTubeTVEnabled(cfg) {
 			return
 		}
+		// Retain Tube TV's index-maintenance fallback for guide safety. Normal
+		// new/changed media discovery belongs to the independent local-library
+		// scanner and does not depend on Tube TV being enabled.
 		if needed, message := taterLocalLibraryIndexNeedsMaintenance(cfg); needed {
 			scanCfg := cfg.DeepCopy()
 			if !beginTaterLocalLibraryScan(scanCfg, message) {
