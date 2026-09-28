@@ -163,12 +163,15 @@ type NewznabConfig struct {
 
 // LocalMediaConfig configures server-local folders exposed to Tater Tube players.
 type LocalMediaConfig struct {
-	Enabled        *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	AudioDBEnabled *bool                `yaml:"audiodb_enabled" mapstructure:"audiodb_enabled" json:"audiodb_enabled"`
-	AudioDBAPIKey  string               `yaml:"audiodb_api_key" mapstructure:"audiodb_api_key" json:"audiodb_api_key,omitempty"`
-	TMDBEnabled    *bool                `yaml:"tmdb_enabled" mapstructure:"tmdb_enabled" json:"tmdb_enabled"`
-	TMDBAPIKey     string               `yaml:"tmdb_api_key" mapstructure:"tmdb_api_key" json:"tmdb_api_key,omitempty"`
-	Categories     []LocalMediaCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
+	Enabled                   *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	RealtimeMonitoringEnabled *bool                `yaml:"realtime_monitoring_enabled" mapstructure:"realtime_monitoring_enabled" json:"realtime_monitoring_enabled"`
+	AutoScanEnabled           *bool                `yaml:"auto_scan_enabled" mapstructure:"auto_scan_enabled" json:"auto_scan_enabled"`
+	AutoScanIntervalMinutes   int                  `yaml:"auto_scan_interval_minutes" mapstructure:"auto_scan_interval_minutes" json:"auto_scan_interval_minutes"`
+	AudioDBEnabled            *bool                `yaml:"audiodb_enabled" mapstructure:"audiodb_enabled" json:"audiodb_enabled"`
+	AudioDBAPIKey             string               `yaml:"audiodb_api_key" mapstructure:"audiodb_api_key" json:"audiodb_api_key,omitempty"`
+	TMDBEnabled               *bool                `yaml:"tmdb_enabled" mapstructure:"tmdb_enabled" json:"tmdb_enabled"`
+	TMDBAPIKey                string               `yaml:"tmdb_api_key" mapstructure:"tmdb_api_key" json:"tmdb_api_key,omitempty"`
+	Categories                []LocalMediaCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
 }
 
 // LocalMediaCategory maps one or more host folders into a named The Tube category.
@@ -907,6 +910,23 @@ func (c *Config) Validate() error {
 	if c.LocalMedia.Enabled == nil {
 		enabled := false
 		c.LocalMedia.Enabled = &enabled
+	}
+	if c.LocalMedia.AutoScanEnabled == nil {
+		enabled := true
+		c.LocalMedia.AutoScanEnabled = &enabled
+	}
+	if c.LocalMedia.RealtimeMonitoringEnabled == nil {
+		enabled := true
+		c.LocalMedia.RealtimeMonitoringEnabled = &enabled
+	}
+	if c.LocalMedia.AutoScanIntervalMinutes <= 0 {
+		c.LocalMedia.AutoScanIntervalMinutes = 15
+	}
+	if c.LocalMedia.AutoScanIntervalMinutes < 5 {
+		return fmt.Errorf("local media auto_scan_interval_minutes must be at least 5")
+	}
+	if c.LocalMedia.AutoScanIntervalMinutes > 1440 {
+		return fmt.Errorf("local media auto_scan_interval_minutes must not exceed 1440")
 	}
 	if c.LocalMedia.AudioDBEnabled == nil {
 		enabled := true
@@ -1919,19 +1939,21 @@ func DefaultConfig(configDir ...string) *Config {
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 	fuseEnabled := false
-	loginRequired := false      // Login disabled by default for local appliance-style setup
-	stremioEnabled := false     // Stremio endpoint disabled by default
-	segmentCacheEnabled := true // Persist decoded Usenet segments by default
-	transcodingEnabled := false // Direct play by default; FFmpeg transcode is opt-in
-	newznabEnabled := false     // Player-facing Stream catalog disabled by default
-	localMediaEnabled := false  // Server-local media catalog disabled by default
-	audioDBEnabled := true      // Supplement MusicBrainz with album genre/style metadata
-	tmdbEnabled := true         // Fetch missing movie and series posters and NFO metadata when a TMDB key is configured
-	tubeTVEnabled := true       // Tube TV is available when local media is configured
-	tubeTVAutoChannels := true  // Tube TV auto-generates channels by default
-	tubeTVCommercials := true   // Commercial breaks enabled when commercials exist
-	tubeTVMidroll := false      // Mid-roll breaks opt-in by default
-	taterBumpersLiveTV := true  // Built-in Tater Tube bumpers enabled by default
+	loginRequired := false               // Login disabled by default for local appliance-style setup
+	stremioEnabled := false              // Stremio endpoint disabled by default
+	segmentCacheEnabled := true          // Persist decoded Usenet segments by default
+	transcodingEnabled := false          // Direct play by default; FFmpeg transcode is opt-in
+	newznabEnabled := false              // Player-facing Stream catalog disabled by default
+	localMediaEnabled := false           // Server-local media catalog disabled by default
+	localMediaRealtimeMonitoring := true // Watch supported filesystems for local media changes
+	localMediaAutoScan := true           // Keep configured local libraries current automatically
+	audioDBEnabled := true               // Supplement MusicBrainz with album genre/style metadata
+	tmdbEnabled := true                  // Fetch missing movie and series posters and NFO metadata when a TMDB key is configured
+	tubeTVEnabled := true                // Tube TV is available when local media is configured
+	tubeTVAutoChannels := true           // Tube TV auto-generates channels by default
+	tubeTVCommercials := true            // Commercial breaks enabled when commercials exist
+	tubeTVMidroll := false               // Mid-roll breaks opt-in by default
+	taterBumpersLiveTV := true           // Built-in Tater Tube bumpers enabled by default
 	taterBumpersLocalMovies := true
 	taterBumpersLocalSeries := true
 	taterBumpersNZBMovies := true
@@ -2001,10 +2023,13 @@ func DefaultConfig(configDir ...string) *Config {
 			WatchAgainRetentionDays: 30,
 		},
 		LocalMedia: LocalMediaConfig{
-			Enabled:        &localMediaEnabled,
-			AudioDBEnabled: &audioDBEnabled,
-			TMDBEnabled:    &tmdbEnabled,
-			Categories:     []LocalMediaCategory{},
+			Enabled:                   &localMediaEnabled,
+			RealtimeMonitoringEnabled: &localMediaRealtimeMonitoring,
+			AutoScanEnabled:           &localMediaAutoScan,
+			AutoScanIntervalMinutes:   15,
+			AudioDBEnabled:            &audioDBEnabled,
+			TMDBEnabled:               &tmdbEnabled,
+			Categories:                []LocalMediaCategory{},
 		},
 		TubeTV: TubeTVConfig{
 			Enabled:                       &tubeTVEnabled,

@@ -567,6 +567,9 @@ export interface LocalMediaCategory {
 
 export interface LocalMediaConfig {
 	enabled: boolean;
+	realtime_monitoring_enabled?: boolean;
+	auto_scan_enabled?: boolean;
+	auto_scan_interval_minutes?: number;
 	audiodb_enabled?: boolean;
 	audiodb_api_key?: string;
 	audiodb_api_key_set?: boolean;
@@ -689,6 +692,26 @@ export interface LocalMediaScanStatus {
 	genre_matches: number;
 	genre_unmatched: number;
 	error?: string;
+	monitor?: LocalMediaMonitorStatus;
+}
+
+export interface LocalMediaMonitorPathStatus {
+	category_id: string;
+	category_name: string;
+	path: string;
+	state: "watching" | "periodic_only" | "unavailable" | "disabled" | string;
+	message?: string;
+}
+
+export interface LocalMediaMonitorStatus {
+	enabled: boolean;
+	active: boolean;
+	state: "watching" | "periodic_only" | "unavailable" | "disabled" | string;
+	message?: string;
+	watched_directories: number;
+	paths: LocalMediaMonitorPathStatus[];
+	last_event_at?: string;
+	last_scan_requested_at?: string;
 }
 
 export interface LocalMediaLibraryResponse {

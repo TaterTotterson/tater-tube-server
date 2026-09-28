@@ -169,14 +169,17 @@ type NewznabAPIResponse struct {
 
 // LocalMediaAPIResponse exposes server-local media categories for the config UI.
 type LocalMediaAPIResponse struct {
-	Enabled          bool                        `json:"enabled"`
-	AudioDBEnabled   bool                        `json:"audiodb_enabled"`
-	AudioDBAPIKey    string                      `json:"audiodb_api_key"`
-	AudioDBAPIKeySet bool                        `json:"audiodb_api_key_set"`
-	TMDBEnabled      bool                        `json:"tmdb_enabled"`
-	TMDBAPIKey       string                      `json:"tmdb_api_key"`
-	TMDBAPIKeySet    bool                        `json:"tmdb_api_key_set"`
-	Categories       []config.LocalMediaCategory `json:"categories"`
+	Enabled                   bool                        `json:"enabled"`
+	RealtimeMonitoringEnabled bool                        `json:"realtime_monitoring_enabled"`
+	AutoScanEnabled           bool                        `json:"auto_scan_enabled"`
+	AutoScanIntervalMinutes   int                         `json:"auto_scan_interval_minutes"`
+	AudioDBEnabled            bool                        `json:"audiodb_enabled"`
+	AudioDBAPIKey             string                      `json:"audiodb_api_key"`
+	AudioDBAPIKeySet          bool                        `json:"audiodb_api_key_set"`
+	TMDBEnabled               bool                        `json:"tmdb_enabled"`
+	TMDBAPIKey                string                      `json:"tmdb_api_key"`
+	TMDBAPIKeySet             bool                        `json:"tmdb_api_key_set"`
+	Categories                []config.LocalMediaCategory `json:"categories"`
 }
 
 // Helper functions to create API responses from core config types
@@ -305,12 +308,15 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		newznabResp.APIKey = "********"
 	}
 	localMediaResp := LocalMediaAPIResponse{
-		Enabled:          cfg.LocalMedia.Enabled != nil && *cfg.LocalMedia.Enabled,
-		AudioDBEnabled:   cfg.LocalMedia.AudioDBEnabled == nil || *cfg.LocalMedia.AudioDBEnabled,
-		AudioDBAPIKeySet: strings.TrimSpace(cfg.LocalMedia.AudioDBAPIKey) != "",
-		TMDBEnabled:      cfg.LocalMedia.TMDBEnabled == nil || *cfg.LocalMedia.TMDBEnabled,
-		TMDBAPIKeySet:    strings.TrimSpace(cfg.LocalMedia.TMDBAPIKey) != "",
-		Categories:       cfg.LocalMedia.Categories,
+		Enabled:                   cfg.LocalMedia.Enabled != nil && *cfg.LocalMedia.Enabled,
+		RealtimeMonitoringEnabled: cfg.LocalMedia.RealtimeMonitoringEnabled == nil || *cfg.LocalMedia.RealtimeMonitoringEnabled,
+		AutoScanEnabled:           cfg.LocalMedia.AutoScanEnabled == nil || *cfg.LocalMedia.AutoScanEnabled,
+		AutoScanIntervalMinutes:   cfg.LocalMedia.AutoScanIntervalMinutes,
+		AudioDBEnabled:            cfg.LocalMedia.AudioDBEnabled == nil || *cfg.LocalMedia.AudioDBEnabled,
+		AudioDBAPIKeySet:          strings.TrimSpace(cfg.LocalMedia.AudioDBAPIKey) != "",
+		TMDBEnabled:               cfg.LocalMedia.TMDBEnabled == nil || *cfg.LocalMedia.TMDBEnabled,
+		TMDBAPIKeySet:             strings.TrimSpace(cfg.LocalMedia.TMDBAPIKey) != "",
+		Categories:                cfg.LocalMedia.Categories,
 	}
 	if localMediaResp.AudioDBAPIKeySet {
 		localMediaResp.AudioDBAPIKey = "********"
