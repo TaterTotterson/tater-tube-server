@@ -17,20 +17,20 @@ export function Layout() {
 	};
 
 	return (
-		<div className="drawer lg:drawer-open">
+		<div className="drawer xl:drawer-open">
 			<input id="sidebar-toggle" type="checkbox" className="drawer-toggle" />
 
 			<div className="drawer-content min-w-0 bg-transparent">
 				<label
 					htmlFor="sidebar-toggle"
-					className="btn btn-square btn-primary fixed top-4 left-4 z-30 shadow-lg lg:hidden"
+					className="btn btn-square btn-primary fixed top-4 left-4 z-30 shadow-lg xl:hidden"
 					aria-label="Open navigation"
 				>
 					<Menu className="h-5 w-5" />
 				</label>
 
 				{/* Page content */}
-				<main className="min-w-0 px-4 pt-20 pb-6 md:px-6 lg:pt-6 xl:p-8">
+				<main className="min-w-0 px-4 pt-20 pb-6 md:px-6 xl:p-8">
 					<Outlet />
 				</main>
 			</div>

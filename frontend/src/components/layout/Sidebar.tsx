@@ -133,10 +133,10 @@ export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
 
 	return (
 		<aside
-			className={`min-h-full overflow-y-auto border-base-300 border-r bg-base-200/95 transition-[width] duration-200 ${collapsed ? "w-64 lg:w-20" : "w-64"}`}
+			className={`min-h-full overflow-y-auto border-base-300 border-r bg-base-200/95 transition-[width] duration-200 ${collapsed ? "w-64 xl:w-20" : "w-64"}`}
 		>
-			<div className={`flex min-h-full flex-col p-4 ${collapsed ? "lg:px-3" : ""}`}>
-				<div className={`mb-6 flex items-center gap-2 ${collapsed ? "lg:flex-col" : ""}`}>
+			<div className={`flex min-h-full flex-col p-4 ${collapsed ? "xl:px-3" : ""}`}>
+				<div className={`mb-6 flex items-center gap-2 ${collapsed ? "xl:flex-col" : ""}`}>
 					<NavLink
 						to="/"
 						className="min-w-0 flex-1 rounded-2xl border border-transparent px-1 py-2 transition hover:border-primary/15 hover:bg-primary/5"
@@ -145,18 +145,18 @@ export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
 						<img
 							src="/tater-tube-logo-leaning-transparent.png"
 							alt="Tater Tube"
-							className={`h-auto max-h-28 w-full object-contain ${collapsed ? "lg:hidden" : ""}`}
+							className={`h-auto max-h-28 w-full object-contain ${collapsed ? "xl:hidden" : ""}`}
 						/>
 						<img
 							src="/logo.png"
 							alt=""
-							className={`mx-auto hidden h-11 w-11 rounded-xl object-contain ${collapsed ? "lg:block" : ""}`}
+							className={`mx-auto hidden h-11 w-11 rounded-xl object-contain ${collapsed ? "xl:block" : ""}`}
 						/>
 					</NavLink>
 					<button
 						type="button"
 						onClick={onToggleCollapsed}
-						className="btn btn-square btn-ghost btn-sm hidden shrink-0 border border-base-300/70 lg:inline-flex"
+						className="btn btn-square btn-ghost btn-sm hidden shrink-0 border border-base-300/70 xl:inline-flex"
 						aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
 						title={collapsed ? "Expand navigation" : "Collapse navigation"}
 					>
@@ -174,7 +174,7 @@ export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
 								key={item.name}
 								to={item.href}
 								className={({ isActive }) =>
-									`flex items-center rounded-xl border py-2.5 font-medium transition-all ${collapsed ? "lg:justify-center lg:px-2" : "gap-3 px-3.5"} ${
+									`flex items-center rounded-xl border py-2.5 font-medium transition-all ${collapsed ? "xl:justify-center xl:px-2" : "gap-3 px-3.5"} ${
 										isActive
 											? "border-primary/30 bg-primary/15 text-primary shadow-sm"
 											: "border-transparent text-base-content/70 hover:border-base-300 hover:bg-base-100 hover:text-base-content"
@@ -183,9 +183,9 @@ export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
 								title={collapsed ? item.name : undefined}
 							>
 								<item.icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-								<span className={`flex-1 ${collapsed ? "lg:sr-only" : ""}`}>{item.name}</span>
+								<span className={`flex-1 ${collapsed ? "xl:sr-only" : ""}`}>{item.name}</span>
 								{badgeCount > 0 && (
-									<span className={`badge badge-sm ${badgeColor} ${collapsed ? "lg:hidden" : ""}`}>
+									<span className={`badge badge-sm ${badgeColor} ${collapsed ? "xl:hidden" : ""}`}>
 										<span className="sr-only">{badgeCount} items</span>
 										{badgeCount}
 									</span>
@@ -196,7 +196,7 @@ export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
 				</nav>
 
 				<div className="mt-auto pt-8">
-					<div className={collapsed ? "lg:hidden" : ""}>
+					<div className={collapsed ? "xl:hidden" : ""}>
 						<div className="rounded-2xl border border-base-300 bg-base-100/65 p-3.5 shadow-sm">
 							<div className="mb-3 text-[10px] text-base-content/40 uppercase tracking-[0.16em]">
 								Server status
@@ -246,7 +246,7 @@ export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
 						</div>
 					</div>
 
-					<div className={`hidden flex-col items-center gap-2 ${collapsed ? "lg:flex" : ""}`}>
+					<div className={`hidden flex-col items-center gap-2 ${collapsed ? "xl:flex" : ""}`}>
 						<div
 							className="flex h-10 w-10 items-center justify-center rounded-xl border border-base-300 bg-base-100/65"
 							title={`Server ${statusLabel()} · ${queueLabel()}`}
