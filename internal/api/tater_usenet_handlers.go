@@ -1532,15 +1532,65 @@ func taterLocalFolderItems(cfg *config.Config, cat config.LocalMediaCategory, pa
 	return items, nil
 }
 
+var taterFreshLocalLibraryIndexCache = struct {
+	sync.Mutex
+	path        string
+	size        int64
+	modifiedAt  time.Time
+	fingerprint string
+	index       taterLocalLibraryIndex
+	valid       bool
+}{}
+
 func taterFreshLocalLibraryIndex(cfg *config.Config) (taterLocalLibraryIndex, bool) {
-	index, err := readTaterLocalLibraryIndex(cfg)
+	path := taterLocalLibraryIndexPath(cfg)
+	info, err := os.Stat(path)
 	if err != nil {
 		return taterLocalLibraryIndex{}, false
 	}
-	if index.ConfigFingerprint != taterLocalLibraryFingerprint(cfg) {
+	fingerprint := taterLocalLibraryFingerprint(cfg)
+
+	// A player Home response can consult the library index many times while it
+	// resolves Continue Watching, recent additions, movies, and series. Parsing
+	// a large JSON index for every lookup makes the first screen take long
+	// enough for TV clients to time out. Serialize cache fills so concurrent
+	// requests also share one decoded, read-only snapshot.
+	taterFreshLocalLibraryIndexCache.Lock()
+	defer taterFreshLocalLibraryIndexCache.Unlock()
+	if taterFreshLocalLibraryIndexCache.valid &&
+		taterFreshLocalLibraryIndexCache.path == path &&
+		taterFreshLocalLibraryIndexCache.size == info.Size() &&
+		taterFreshLocalLibraryIndexCache.modifiedAt.Equal(info.ModTime()) &&
+		taterFreshLocalLibraryIndexCache.fingerprint == fingerprint {
+		return taterFreshLocalLibraryIndexCache.index, true
+	}
+
+	index, err := readTaterLocalLibraryIndex(cfg)
+	if err != nil || index.ConfigFingerprint != fingerprint {
 		return taterLocalLibraryIndex{}, false
 	}
+	// The scanner replaces the index atomically. Record the final file identity
+	// so an index replaced while this request was reading is never cached as the
+	// current snapshot.
+	finalInfo, err := os.Stat(path)
+	if err != nil || finalInfo.Size() != info.Size() || !finalInfo.ModTime().Equal(info.ModTime()) {
+		return index, true
+	}
+	taterFreshLocalLibraryIndexCache.path = path
+	taterFreshLocalLibraryIndexCache.size = finalInfo.Size()
+	taterFreshLocalLibraryIndexCache.modifiedAt = finalInfo.ModTime()
+	taterFreshLocalLibraryIndexCache.fingerprint = fingerprint
+	taterFreshLocalLibraryIndexCache.index = index
+	taterFreshLocalLibraryIndexCache.valid = true
 	return index, true
+}
+
+func invalidateTaterFreshLocalLibraryIndex(path string) {
+	taterFreshLocalLibraryIndexCache.Lock()
+	defer taterFreshLocalLibraryIndexCache.Unlock()
+	if taterFreshLocalLibraryIndexCache.path == filepath.Clean(path) {
+		taterFreshLocalLibraryIndexCache.valid = false
+	}
 }
 
 func taterIndexedLocalFiles(cfg *config.Config, cat config.LocalMediaCategory, sourceIndex int) ([]taterLocalLibraryFileIndex, bool) {

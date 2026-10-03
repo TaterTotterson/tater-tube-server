@@ -14,6 +14,42 @@ import (
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
 )
 
+func TestTaterFreshLocalLibraryIndexCacheRefreshesAfterAtomicWrite(t *testing.T) {
+	root := t.TempDir()
+	metadataRoot := filepath.Join(root, "metadata")
+	enabled := true
+	cfg := config.DefaultConfig(root)
+	cfg.Metadata.RootPath = metadataRoot
+	cfg.LocalMedia.Enabled = &enabled
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID: "movies", Name: "Movies", LibraryType: "movies",
+		Paths: []string{filepath.Join(root, "movies")}, Enabled: &enabled,
+	}}
+	fingerprint := taterLocalLibraryFingerprint(cfg)
+
+	first := taterLocalLibraryIndex{
+		Schema: taterLocalLibraryIndexSchema, ConfigFingerprint: fingerprint,
+		Files: []taterLocalLibraryFileIndex{{CategoryID: "movies", Path: "First.mkv"}},
+	}
+	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), first); err != nil {
+		t.Fatal(err)
+	}
+	loaded, ok := taterFreshLocalLibraryIndex(cfg)
+	if !ok || len(loaded.Files) != 1 || loaded.Files[0].Path != "First.mkv" {
+		t.Fatalf("unexpected first cached index: %#v", loaded.Files)
+	}
+
+	second := first
+	second.Files = []taterLocalLibraryFileIndex{{CategoryID: "movies", Path: "Second.mkv"}}
+	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), second); err != nil {
+		t.Fatal(err)
+	}
+	loaded, ok = taterFreshLocalLibraryIndex(cfg)
+	if !ok || len(loaded.Files) != 1 || loaded.Files[0].Path != "Second.mkv" {
+		t.Fatalf("cache did not refresh after index replacement: %#v", loaded.Files)
+	}
+}
+
 func TestTaterLocalLibraryIndexBuildsStatsArtworkAndReusesUnchangedMusicMetadata(t *testing.T) {
 	root := t.TempDir()
 	metadataRoot := filepath.Join(root, "metadata")
