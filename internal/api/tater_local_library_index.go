@@ -369,6 +369,7 @@ func writeTaterJSON(path string, value any) error {
 		_ = os.Remove(tmpPath)
 		return err
 	}
+	invalidateTaterFreshLocalLibraryIndex(path)
 	return nil
 }
 
