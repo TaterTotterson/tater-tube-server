@@ -22,7 +22,14 @@ const (
 	taterPlayerHomeProtocolVersion = "1"
 	taterPlayerHomeItemLimit       = 12
 	taterPlayerArtworkMaximumBytes = 20 * 1024 * 1024
+	taterPlayerHomeCacheTTL        = 5 * time.Minute
 )
+
+type taterPlayerHomeCacheEntry struct {
+	response  taterPlayerHomeResponse
+	signature string
+	expiresAt time.Time
+}
 
 type taterPlayerHomeCapabilities struct {
 	LocalMedia         bool `json:"localMedia"`
@@ -93,6 +100,12 @@ func (s *Server) handleTaterPlayerHome(c *fiber.Ctx) error {
 	}
 
 	baseURL := resolveBaseURL(c, "")
+	includeLive := c.QueryBool("include_live", true)
+	if !includeLive {
+		if cached, found := s.taterCachedPlayerHome(cfg, baseURL, playerToken, time.Now()); found {
+			return RespondSuccess(c, cached)
+		}
+	}
 	response := taterPlayerHomeResponse{
 		ProtocolVersion:  taterPlayerHomeProtocolVersion,
 		ServerName:       "Tater Tube Server",
@@ -134,7 +147,7 @@ func (s *Server) handleTaterPlayerHome(c *fiber.Ctx) error {
 	// The modern player can request the local shelves without live-channel data
 	// so artwork can begin loading before a large guide has been prepared and
 	// personalized. Existing clients retain the combined response by default.
-	if response.Capabilities.TubeTV && c.QueryBool("include_live", true) {
+	if response.Capabilities.TubeTV && includeLive {
 		channels, channelErr := taterPlayerHomeChannels(cfg, baseURL, playerToken, response.GeneratedAt)
 		if channelErr != nil {
 			response.Warnings = append(response.Warnings, "Tube TV is temporarily unavailable")
@@ -142,8 +155,94 @@ func (s *Server) handleTaterPlayerHome(c *fiber.Ctx) error {
 			response.LiveChannels = channels
 		}
 	}
+	if !includeLive && len(response.Warnings) == 0 {
+		s.storeTaterPlayerHomeCache(cfg, baseURL, playerToken, response, time.Now())
+	}
 
 	return RespondSuccess(c, response)
+}
+
+func (s *Server) taterCachedPlayerHome(
+	cfg *config.Config,
+	baseURL, playerToken string,
+	now time.Time,
+) (taterPlayerHomeResponse, bool) {
+	if s == nil {
+		return taterPlayerHomeResponse{}, false
+	}
+	key := taterPlayerHomeCacheKey(baseURL, playerToken)
+	signature := taterPlayerHomeSourceSignature(cfg)
+	s.taterPlayerHomeCacheMu.RLock()
+	entry, found := s.taterPlayerHomeCache[key]
+	s.taterPlayerHomeCacheMu.RUnlock()
+	if !found || !now.Before(entry.expiresAt) || entry.signature != signature {
+		return taterPlayerHomeResponse{}, false
+	}
+	return entry.response, true
+}
+
+func (s *Server) storeTaterPlayerHomeCache(
+	cfg *config.Config,
+	baseURL, playerToken string,
+	response taterPlayerHomeResponse,
+	now time.Time,
+) {
+	if s == nil {
+		return
+	}
+	entry := taterPlayerHomeCacheEntry{
+		response:  response,
+		signature: taterPlayerHomeSourceSignature(cfg),
+		expiresAt: now.Add(taterPlayerHomeCacheTTL),
+	}
+	key := taterPlayerHomeCacheKey(baseURL, playerToken)
+	s.taterPlayerHomeCacheMu.Lock()
+	if s.taterPlayerHomeCache == nil {
+		s.taterPlayerHomeCache = map[string]taterPlayerHomeCacheEntry{}
+	}
+	for cachedKey, cached := range s.taterPlayerHomeCache {
+		if !now.Before(cached.expiresAt) {
+			delete(s.taterPlayerHomeCache, cachedKey)
+		}
+	}
+	s.taterPlayerHomeCache[key] = entry
+	s.taterPlayerHomeCacheMu.Unlock()
+}
+
+func taterPlayerHomeCacheKey(baseURL, playerToken string) string {
+	tokenDigest := sha256.Sum256([]byte(strings.TrimSpace(playerToken)))
+	return strings.TrimRight(baseURL, "/") + "|" + fmt.Sprintf("%x", tokenDigest[:])
+}
+
+func taterPlayerHomeSourceSignature(cfg *config.Config) string {
+	capabilities := taterPlayerCapabilities(cfg)
+	parts := []string{
+		taterLocalLibraryFingerprint(cfg),
+		fmt.Sprintf(
+			"%t:%t:%t:%t:%t:%t:%t",
+			capabilities.LocalMedia,
+			capabilities.Newznab,
+			capabilities.TubeTV,
+			capabilities.Commercials,
+			capabilities.MidrollCommercials,
+			capabilities.TaterLink,
+			capabilities.HDRHLS,
+		),
+	}
+	for _, path := range []string{
+		taterLocalLibraryIndexPath(cfg),
+		taterPlayStateStorePath(cfg),
+	} {
+		info, err := os.Stat(path)
+		if err != nil {
+			parts = append(parts, path+":missing")
+			continue
+		}
+		parts = append(parts, fmt.Sprintf(
+			"%s:%d:%d", path, info.Size(), info.ModTime().UnixNano(),
+		))
+	}
+	return strings.Join(parts, "|")
 }
 
 func (s *Server) taterPlayerLinkedHero(ctx context.Context, now time.Time) (bool, *taterPlayerHomeHero) {
@@ -429,6 +528,28 @@ func taterPlayerHomeProgramFromSchedule(cfg *config.Config, baseURL, playerToken
 }
 
 func decorateTaterPlayerHomeItems(cfg *config.Config, baseURL, playerToken string, items []taterUsenetItem) {
+	// Home and library responses must not probe every media directory while the
+	// client is waiting. Network-mounted libraries can turn a handful of
+	// os.Stat/ReadDir calls per card into a multi-second response. A fresh scan
+	// index is authoritative for player-card artwork; the artwork endpoint can
+	// resolve and serve the actual file later when the client requests it.
+	var libraryIndex *taterLocalLibraryIndex
+	if index, ok := taterFreshLocalLibraryIndex(cfg); ok {
+		libraryIndex = &index
+	}
+	artworkURL := func(item *taterUsenetItem, kind string) string {
+		if indexedURL, handled := taterPlayerIndexedLocalArtworkURL(
+			libraryIndex, cfg, baseURL, playerToken,
+			item.CategoryID, item.SourceIndex, item.Path, kind,
+		); handled {
+			return indexedURL
+		}
+		return taterPlayerAvailableLocalArtworkURL(
+			cfg, baseURL, playerToken,
+			item.CategoryID, item.SourceIndex, item.Path, kind,
+		)
+	}
+
 	for index := range items {
 		item := &items[index]
 		if cfg == nil {
@@ -438,24 +559,16 @@ func decorateTaterPlayerHomeItems(cfg *config.Config, baseURL, playerToken strin
 		category, categoryFound := taterLocalMediaCategory(cfg, taterRawLocalCategoryID(item.CategoryID))
 		isTV := categoryFound && strings.EqualFold(strings.TrimSpace(category.LibraryType), "tv")
 		if strings.TrimSpace(item.Backdrop) == "" {
-			item.Backdrop = taterPlayerAvailableLocalArtworkURL(
-				cfg, baseURL, playerToken, item.CategoryID, item.SourceIndex, item.Path, "backdrop",
-			)
+			item.Backdrop = artworkURL(item, "backdrop")
 		}
 		if isTV {
-			item.SeriesPoster = taterPlayerAvailableLocalArtworkURL(
-				cfg, baseURL, playerToken, item.CategoryID, item.SourceIndex, item.Path, "series-poster",
-			)
+			item.SeriesPoster = artworkURL(item, "series-poster")
 			mediaType := strings.ToLower(strings.TrimSpace(item.MediaType))
 			if mediaType == "season" || mediaType == "episode" {
-				item.SeasonPoster = taterPlayerAvailableLocalArtworkURL(
-					cfg, baseURL, playerToken, item.CategoryID, item.SourceIndex, item.Path, "season-poster",
-				)
+				item.SeasonPoster = artworkURL(item, "season-poster")
 			}
 			if mediaType == "episode" {
-				item.EpisodeStill = taterPlayerAvailableLocalArtworkURL(
-					cfg, baseURL, playerToken, item.CategoryID, item.SourceIndex, item.Path, "episode-still",
-				)
+				item.EpisodeStill = artworkURL(item, "episode-still")
 			}
 			if strings.TrimSpace(item.Poster) == "" {
 				for _, candidate := range []string{item.EpisodeStill, item.SeasonPoster, item.SeriesPoster} {
@@ -467,12 +580,77 @@ func decorateTaterPlayerHomeItems(cfg *config.Config, baseURL, playerToken strin
 			}
 		}
 		if strings.TrimSpace(item.Poster) == "" {
-			item.Poster = taterPlayerAvailableLocalArtworkURL(
-				cfg, baseURL, playerToken, item.CategoryID, item.SourceIndex, item.Path, "poster",
-			)
+			item.Poster = artworkURL(item, "poster")
 		}
 		items[index].HasArtwork = items[index].Poster != ""
 	}
+}
+
+// taterPlayerIndexedLocalArtworkURL resolves whether the scan index knows
+// enough to answer an artwork lookup without touching a media mount. The
+// handled result is true even when the indexed answer is "no artwork" so the
+// request path does not fall back to synchronous filesystem discovery.
+func taterPlayerIndexedLocalArtworkURL(
+	index *taterLocalLibraryIndex,
+	cfg *config.Config,
+	baseURL, playerToken, categoryID string,
+	sourceIndex int,
+	relPath, kind string,
+) (string, bool) {
+	if index == nil || cfg == nil {
+		return "", false
+	}
+	category, ok := taterLocalMediaCategory(cfg, taterRawLocalCategoryID(categoryID))
+	if !ok {
+		return "", false
+	}
+	libraryType := strings.ToLower(strings.TrimSpace(category.LibraryType))
+	if libraryType != "movies" && libraryType != "tv" {
+		return "", false
+	}
+
+	normalizedKind := taterPlayerArtworkKind(kind)
+	mediaType := "movie"
+	mediaPath := cleanLocalRelativePath(relPath)
+	if libraryType == "tv" {
+		parts := strings.Split(mediaPath, "/")
+		if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+			return "", true
+		}
+		mediaType = "show"
+		mediaPath = parts[0]
+	}
+	mediaID := taterVideoMediaID(category.ID, sourceIndex, mediaType, mediaPath)
+	video, found := findTaterLocalVideo(index, mediaID)
+	if !found || !video.HasArtwork || strings.TrimSpace(video.ArtworkRef) == "" {
+		return "", true
+	}
+
+	artworkURL := taterPlayerLocalArtworkURLForKind(
+		baseURL, playerToken, categoryID, sourceIndex, relPath, normalizedKind,
+	)
+	// The index records the canonical movie/show poster. Variant requests are
+	// intentionally left on the normal daily cache policy because their exact
+	// file timestamp is not recorded. The artwork endpoint resolves the desired
+	// variant lazily and falls back to the indexed poster when it is absent.
+	if normalizedKind != "poster" && normalizedKind != "series-poster" {
+		return artworkURL, true
+	}
+	version := video.ArtworkUpdated
+	if version <= 0 {
+		version = video.ModifiedUnix
+	}
+	if version <= 0 {
+		return artworkURL, true
+	}
+	u, err := url.Parse(artworkURL)
+	if err != nil {
+		return artworkURL, true
+	}
+	query := u.Query()
+	query.Set("v", strconv.FormatInt(version, 10))
+	u.RawQuery = query.Encode()
+	return u.String(), true
 }
 
 func taterPlayerLocalArtworkURL(baseURL, playerToken, categoryID string, sourceIndex int, relPath string) string {
@@ -691,6 +869,19 @@ func (s *Server) handleTaterPlayerLocalArtwork(c *fiber.Ctx) error {
 	}
 	if !found {
 		artworkPath, found = taterPlayerLocalArtworkPathForKind(cfg, categoryID, sourceIndex, relPath, kind)
+	}
+	if !found && kind != "poster" {
+		// A prepared menu may optimistically request a wide or episode-specific
+		// variant based on its indexed poster. Keep that request useful even when
+		// the optional variant is missing.
+		if category, categoryFound := taterLocalMediaCategory(cfg, taterRawLocalCategoryID(categoryID)); categoryFound {
+			artworkPath, found = taterStoredVideoArtworkPath(cfg, category, sourceIndex, relPath)
+		}
+		if !found {
+			artworkPath, found = taterPlayerLocalArtworkPathForKind(
+				cfg, categoryID, sourceIndex, relPath, "poster",
+			)
+		}
 	}
 	if !found {
 		return RespondNotFound(c, "Local media artwork", fmt.Sprintf("%s:%d:%s", categoryID, sourceIndex, relPath))

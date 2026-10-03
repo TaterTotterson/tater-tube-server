@@ -82,6 +82,8 @@ type Server struct {
 	localLibraryRealtimeCategories map[string]struct{}
 	localLibraryMonitorMu          sync.RWMutex
 	localLibraryMonitorStatus      taterLocalLibraryMonitorStatus
+	taterPlayerHomeCacheMu         sync.RWMutex
+	taterPlayerHomeCache           map[string]taterPlayerHomeCacheEntry
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)

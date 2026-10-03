@@ -258,6 +258,112 @@ func TestTaterPlayerHomeAggregatesLocalMediaAndArtwork(t *testing.T) {
 		"thumbnail=poster")
 }
 
+func TestTaterPlayerHomeUsesIndexedArtworkWithoutProbingMediaMount(t *testing.T) {
+	configDir := t.TempDir()
+	offlineLibraryRoot := filepath.Join(t.TempDir(), "offline-library")
+	enabled := true
+	cfg := config.DefaultConfig(configDir)
+	cfg.LocalMedia.Enabled = &enabled
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID:          "movies",
+		Name:        "Movies",
+		LibraryType: "movies",
+		Paths:       []string{offlineLibraryRoot},
+		Enabled:     &enabled,
+	}}
+
+	relPath := "Indexed.Movie.2026/Indexed.Movie.2026.mkv"
+	index := taterLocalLibraryIndex{
+		Schema:            taterLocalLibraryIndexSchema,
+		ConfigFingerprint: taterLocalLibraryFingerprint(cfg),
+		Videos: []taterLocalVideoIndex{{
+			ID:             taterVideoMediaID("movies", 0, "movie", relPath),
+			CategoryID:     "movies",
+			LibraryType:    "movies",
+			MediaType:      "movie",
+			SourceIndex:    0,
+			Path:           relPath,
+			HasArtwork:     true,
+			ArtworkRef:     "Indexed.Movie.2026/poster.jpg",
+			ArtworkUpdated: 77,
+		}},
+	}
+	require.NoError(t, writeTaterJSON(taterLocalLibraryIndexPath(cfg), index))
+
+	items := []taterUsenetItem{{
+		Title:       "Indexed Movie",
+		MediaType:   "movie",
+		CategoryID:  "local:movies",
+		SourceIndex: 0,
+		Path:        relPath,
+	}}
+	decorateTaterPlayerHomeItems(cfg, "http://tube.local", "player-token", items)
+
+	require.True(t, items[0].HasArtwork)
+	require.Contains(t, items[0].Poster, "/api/v1/player/artwork/local")
+	require.Contains(t, items[0].Poster, "player_token=player-token")
+	posterURL, err := url.Parse(items[0].Poster)
+	require.NoError(t, err)
+	require.Equal(t, "77", posterURL.Query().Get("v"))
+	require.Contains(t, items[0].Backdrop, "/api/v1/player/artwork/local")
+	backdropURL, err := url.Parse(items[0].Backdrop)
+	require.NoError(t, err)
+	require.Equal(t, "backdrop", backdropURL.Query().Get("kind"))
+	require.Empty(t, backdropURL.Query().Get("v"))
+	require.NoDirExists(t, offlineLibraryRoot)
+}
+
+func TestTaterPlayerHomeCacheInvalidatesWhenPlayerDataChanges(t *testing.T) {
+	configDir := t.TempDir()
+	cfg := config.DefaultConfig(configDir)
+	server := &Server{}
+	now := time.Now().UTC()
+	response := taterPlayerHomeResponse{
+		ProtocolVersion: taterPlayerHomeProtocolVersion,
+		GeneratedAt:     now,
+	}
+
+	server.storeTaterPlayerHomeCache(cfg, "http://tube.local", "player-token", response, now)
+	cached, found := server.taterCachedPlayerHome(
+		cfg, "http://tube.local", "player-token", now.Add(time.Second),
+	)
+	require.True(t, found)
+	require.Equal(t, response.GeneratedAt, cached.GeneratedAt)
+
+	_, found = server.taterCachedPlayerHome(
+		cfg, "http://tube.local", "different-player", now.Add(time.Second),
+	)
+	require.False(t, found)
+	require.NotContains(t, taterPlayerHomeCacheKey("http://tube.local", "player-token"), "player-token")
+
+	require.NoError(t, saveTaterPlayStateStore(cfg, taterPlayStateStore{Items: map[string]taterPlayState{
+		"changed": {
+			ID: "changed", Title: "Changed", Path: "Changed/movie.mkv", UpdatedAt: now,
+		},
+	}}))
+	_, found = server.taterCachedPlayerHome(
+		cfg, "http://tube.local", "player-token", now.Add(2*time.Second),
+	)
+	require.False(t, found)
+
+	server.storeTaterPlayerHomeCache(cfg, "http://tube.local", "player-token", response, now)
+	require.NoError(t, writeTaterJSON(taterLocalLibraryIndexPath(cfg), taterLocalLibraryIndex{
+		Schema:            taterLocalLibraryIndexSchema,
+		ConfigFingerprint: taterLocalLibraryFingerprint(cfg),
+		GeneratedAt:       now.Add(3 * time.Second),
+	}))
+	_, found = server.taterCachedPlayerHome(
+		cfg, "http://tube.local", "player-token", now.Add(3*time.Second),
+	)
+	require.False(t, found)
+
+	server.storeTaterPlayerHomeCache(cfg, "http://tube.local", "player-token", response, now)
+	_, found = server.taterCachedPlayerHome(
+		cfg, "http://tube.local", "player-token", now.Add(taterPlayerHomeCacheTTL),
+	)
+	require.False(t, found)
+}
+
 func TestTaterPlayerHomeCanLoadShelvesWithoutLiveGuide(t *testing.T) {
 	configDir := t.TempDir()
 	enabled := true
@@ -359,6 +465,45 @@ func TestTaterPlayerLocalArtworkRejectsEscapingPath(t *testing.T) {
 	response, err := app.Test(request)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNotFound, response.StatusCode)
+}
+
+func TestTaterPlayerLocalArtworkVariantFallsBackToPoster(t *testing.T) {
+	configDir := t.TempDir()
+	libraryRoot := t.TempDir()
+	movieDir := filepath.Join(libraryRoot, "Poster.Only.2026")
+	require.NoError(t, os.MkdirAll(movieDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(movieDir, "Poster.Only.2026.mkv"), []byte("media"), 0o644,
+	))
+	writeTaterPlayerTestJPEG(t, filepath.Join(movieDir, "poster.jpg"), 600, 900,
+		color.RGBA{R: 210, G: 90, B: 30, A: 255})
+
+	enabled := true
+	cfg := config.DefaultConfig(configDir)
+	cfg.LocalMedia.Enabled = &enabled
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID: "movies", Name: "Movies", LibraryType: "movies",
+		Paths: []string{libraryRoot}, Enabled: &enabled,
+	}}
+	cfg.Players.Paired = []config.PlayerConfig{{
+		ID: "home-player", TokenHash: hashTaterSecret("home-token"),
+	}}
+	server := &Server{configManager: &mockConfigManager{cfg: cfg}}
+	app := fiber.New()
+	app.Get("/api/v1/player/artwork/local", server.handleTaterPlayerLocalArtwork)
+
+	request := httptest.NewRequest(http.MethodGet,
+		"/api/v1/player/artwork/local?category_id=movies&source=0&path="+
+			url.QueryEscape("Poster.Only.2026/Poster.Only.2026.mkv")+
+			"&kind=backdrop&thumbnail=wide&player_token=home-token", nil)
+	response, err := app.Test(request)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	require.Equal(t, "image/jpeg", response.Header.Get(fiber.HeaderContentType))
+	served, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	_, _, err = image.Decode(bytes.NewReader(served))
+	require.NoError(t, err)
 }
 
 func TestTaterPlayerHomeProgramReportsCurrentProgress(t *testing.T) {
