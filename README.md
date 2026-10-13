@@ -11,9 +11,6 @@
   <a href="https://github.com/TaterTotterson/Tater-Tube-Player">
     <img alt="Tater Tube Player" src="https://img.shields.io/badge/Tater%20Tube-Player-2D333B?style=for-the-badge&logo=github&logoColor=white" />
   </a>
-  <a href="https://discord.gg/w52namKyXT">
-    <img alt="Join the community" src="https://img.shields.io/badge/Discord-Join%20the%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" />
-  </a>
 </p>
 
 Tater Tube Server is the self-hosted backend for Tater Tube players. It brings
