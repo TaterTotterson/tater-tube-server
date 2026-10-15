@@ -19,7 +19,10 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-const taterLocalLibraryIndexSchema = 4
+const (
+	taterLocalLibraryIndexSchema         = 5
+	taterLocalLibraryPreviousIndexSchema = 4
+)
 
 type taterLocalLibraryStats struct {
 	Files           int   `json:"files"`
@@ -79,6 +82,16 @@ type taterLocalLibraryFileIndex struct {
 	Track              int      `json:"track,omitempty"`
 	Disc               int      `json:"disc,omitempty"`
 	DurationSeconds    float64  `json:"duration_seconds,omitempty"`
+	MediaInfoScanned   bool     `json:"media_info_scanned,omitempty"`
+	VideoWidth         int      `json:"video_width,omitempty"`
+	VideoHeight        int      `json:"video_height,omitempty"`
+	VideoCodec         string   `json:"video_codec,omitempty"`
+	VideoProfile       string   `json:"video_profile,omitempty"`
+	VideoRange         string   `json:"video_range,omitempty"`
+	AudioCodec         string   `json:"audio_codec,omitempty"`
+	AudioProfile       string   `json:"audio_profile,omitempty"`
+	AudioChannels      int      `json:"audio_channels,omitempty"`
+	AudioChannelLayout string   `json:"audio_channel_layout,omitempty"`
 	HasEmbeddedArtwork bool     `json:"has_embedded_artwork,omitempty"`
 }
 
@@ -235,8 +248,9 @@ type taterLocalDurationProbeJob struct {
 }
 
 type taterLocalDurationProbeResult struct {
-	FileIndex       int
-	DurationSeconds float64
+	FileIndex int
+	MediaInfo taterPlaybackMediaInfo
+	Scanned   bool
 }
 
 type taterLocalMusicArtworkRequest struct {
@@ -318,9 +332,13 @@ func readTaterLocalLibraryIndex(cfg *config.Config) (taterLocalLibraryIndex, err
 	if err := json.Unmarshal(raw, &index); err != nil {
 		return taterLocalLibraryIndex{}, err
 	}
-	if index.Schema != taterLocalLibraryIndexSchema {
+	if index.Schema != taterLocalLibraryIndexSchema &&
+		index.Schema != taterLocalLibraryPreviousIndexSchema {
 		return taterLocalLibraryIndex{}, fmt.Errorf("unsupported local library index schema %d", index.Schema)
 	}
+	// Schema 5 only adds cached technical stream details. Keep schema 4 indexes
+	// available to players while the automatic scanner backfills those fields.
+	index.Schema = taterLocalLibraryIndexSchema
 	if index.Categories == nil {
 		index.Categories = []taterLocalLibraryCategoryIndex{}
 	}
@@ -682,7 +700,8 @@ func scanTaterLocalLibraryWithOptions(
 					file.TVDBID = item.TVDBID
 				}
 				index.Files = append(index.Files, file)
-				if category.LibraryType != "music" && file.DurationSeconds <= 0 {
+				if category.LibraryType != "music" &&
+					(file.DurationSeconds <= 0 || !file.MediaInfoScanned) {
 					durationJobs = append(durationJobs, taterLocalDurationProbeJob{
 						FileIndex: len(index.Files) - 1,
 						Path:      path,
@@ -741,10 +760,10 @@ func probeTaterLocalLibraryDurations(
 		go func() {
 			defer workers.Done()
 			for job := range jobQueue {
-				duration := probeMediaDurationSeconds(ctx, cfg.Transcoding.FFmpegPath, job.Path)
+				mediaInfo, err := probeTaterPlaybackMedia(ctx, cfg, job.Path)
 				select {
 				case results <- taterLocalDurationProbeResult{
-					FileIndex: job.FileIndex, DurationSeconds: duration,
+					FileIndex: job.FileIndex, MediaInfo: mediaInfo, Scanned: err == nil,
 				}:
 				case <-ctx.Done():
 					return
@@ -770,13 +789,28 @@ func probeTaterLocalLibraryDurations(
 	completed := 0
 	for result := range results {
 		if result.FileIndex >= 0 && result.FileIndex < len(index.Files) {
-			index.Files[result.FileIndex].DurationSeconds = result.DurationSeconds
+			file := &index.Files[result.FileIndex]
+			if result.MediaInfo.DurationSeconds > 0 {
+				file.DurationSeconds = result.MediaInfo.DurationSeconds
+			}
+			if result.Scanned {
+				file.MediaInfoScanned = true
+				file.VideoWidth = result.MediaInfo.Width
+				file.VideoHeight = result.MediaInfo.Height
+				file.VideoCodec = result.MediaInfo.VideoCodec
+				file.VideoProfile = result.MediaInfo.VideoProfile
+				file.VideoRange = result.MediaInfo.VideoRange
+				file.AudioCodec = result.MediaInfo.AudioCodec
+				file.AudioProfile = result.MediaInfo.AudioProfile
+				file.AudioChannels = result.MediaInfo.AudioChannels
+				file.AudioChannelLayout = result.MediaInfo.ChannelLayout
+			}
 		}
 		completed++
 		if progress != nil && (completed%10 == 0 || completed == len(jobs)) {
 			progress(taterLocalLibraryScanProgress{
 				Phase: "durations", Message: fmt.Sprintf(
-					"Reading video durations (%d/%d)", completed, len(jobs),
+					"Reading media details (%d/%d)", completed, len(jobs),
 				),
 				FilesScanned: filesScanned, FilesTotal: filesTotal,
 				Current: completed, Total: len(jobs),
@@ -1288,6 +1322,11 @@ func taterLocalLibraryIndexNeedsMaintenance(cfg *config.Config) (bool, string) {
 	}
 	if !index.VideoDurationsScanned {
 		return true, "Backfilling video durations"
+	}
+	for _, file := range index.Files {
+		if !strings.EqualFold(file.LibraryType, "music") && !file.MediaInfoScanned {
+			return true, "Backfilling media details"
+		}
 	}
 	return false, ""
 }

@@ -1,6 +1,7 @@
 import {
 	ArrowLeft,
 	Check,
+	ChevronDown,
 	Clapperboard,
 	Film,
 	Flag,
@@ -120,6 +121,18 @@ function logoPreviewURL(path?: string) {
 			.map((part) => encodeURIComponent(part))
 			.join("/")
 	);
+}
+
+function bumperGroupSelectionLabel(
+	channel: TubeTVCustomChannel,
+	library: TubeTVBumperLibrary | null,
+) {
+	const selected = channel.bumper_groups ?? [];
+	if (selected.length === 0) return "No bumpers";
+	if (selected.length === 1) {
+		return library?.groups.find((group) => group.id === selected[0])?.title ?? "1 group selected";
+	}
+	return `${selected.length} groups selected`;
 }
 
 function normalizeLogoPosition(value?: string): string {
@@ -1124,7 +1137,7 @@ export function TubeTVConfigSection({
 								key={`tube-tv-channel-${channelIndex}`}
 								className="rounded-xl border border-base-300 bg-base-100/70 p-4"
 							>
-								<div className="grid gap-3 md:grid-cols-[7rem_1fr_1fr_14rem_auto] md:items-end">
+								<div className="grid gap-3 md:grid-cols-2 md:items-end xl:grid-cols-[7rem_minmax(12rem,1fr)_minmax(12rem,1fr)_14rem_14rem_auto]">
 									<label className="form-control">
 										<span className="label-text font-bold text-base-content text-sm">Channel</span>
 										<input
@@ -1191,6 +1204,59 @@ export function TubeTVConfigSection({
 											))}
 										</select>
 									</label>
+									<div className="form-control min-w-0">
+										<span className="label-text font-bold text-base-content text-sm">Bumpers</span>
+										<details className="dropdown dropdown-end mt-2 w-full">
+											<summary className="select select-bordered flex w-full cursor-pointer list-none items-center justify-between gap-2 pr-3 [&::-webkit-details-marker]:hidden">
+												<span className="truncate">
+													{bumperGroupSelectionLabel(channel, bumperLibrary)}
+												</span>
+												<ChevronDown className="h-4 w-4 shrink-0 text-base-content/50" />
+											</summary>
+											<div className="dropdown-content z-[70] mt-2 max-h-80 w-full min-w-72 overflow-y-auto rounded-xl border border-base-300 bg-base-100 p-2 shadow-2xl">
+												{(bumperLibrary?.groups ?? []).length === 0 ? (
+													<div className="p-3 text-base-content/50 text-xs">
+														Create bumper groups in the Bumpers tab first.
+													</div>
+												) : (
+													<>
+														{(bumperLibrary?.groups ?? []).map((group) => {
+															const selected = (channel.bumper_groups ?? []).includes(group.id);
+															return (
+																<label
+																	key={`${channelIndex}-${group.placement}-${group.id}`}
+																	className={`flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition ${
+																		selected ? "bg-primary/10" : "hover:bg-base-200"
+																	}`}
+																>
+																	<input
+																		type="checkbox"
+																		className="checkbox checkbox-primary checkbox-sm"
+																		checked={selected}
+																		disabled={isReadOnly}
+																		onChange={() =>
+																			toggleChannelBumperGroup(channelIndex, group.id)
+																		}
+																	/>
+																	<span className="min-w-0 flex-1">
+																		<span className="block truncate font-bold text-sm">
+																			{group.title}
+																		</span>
+																		<span className="block truncate text-base-content/50 text-xs">
+																			{group.placementLabel} · {group.count} videos
+																		</span>
+																	</span>
+																</label>
+															);
+														})}
+														<div className="mt-1 border-base-300 border-t px-3 pt-2 text-[11px] text-base-content/45">
+															One bumper from each selected group plays at its labeled position.
+														</div>
+													</>
+												)}
+											</div>
+										</details>
+									</div>
 									<button
 										type="button"
 										className="btn btn-error btn-outline"
@@ -1200,50 +1266,6 @@ export function TubeTVConfigSection({
 										Remove
 									</button>
 								</div>
-
-								<div className="mt-4 rounded-xl border border-base-300 bg-base-200/60 p-4">
-									<div className="flex items-center gap-2 font-bold text-base-content/50 text-xs uppercase tracking-widest">
-										<Flag className="h-4 w-4" />
-										Bumper Groups
-									</div>
-									<p className="mt-1 text-base-content/60 text-xs">
-										Selected groups contribute one bumper at their labeled position in every
-										commercial break.
-									</p>
-									{(bumperLibrary?.groups ?? []).length === 0 ? (
-										<div className="mt-3 rounded-lg border border-base-300 border-dashed bg-base-100/60 p-3 text-base-content/50 text-xs">
-											Create bumper groups in the Bumpers tab first.
-										</div>
-									) : (
-										<div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-											{(bumperLibrary?.groups ?? []).map((group) => (
-												<label
-													key={`${channelIndex}-${group.placement}-${group.id}`}
-													className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition ${
-														(channel.bumper_groups ?? []).includes(group.id)
-															? "border-primary bg-primary/10"
-															: "border-base-300 bg-base-100/70 hover:border-primary/50"
-													}`}
-												>
-													<input
-														type="checkbox"
-														className="checkbox checkbox-primary checkbox-sm"
-														checked={(channel.bumper_groups ?? []).includes(group.id)}
-														disabled={isReadOnly}
-														onChange={() => toggleChannelBumperGroup(channelIndex, group.id)}
-													/>
-													<span className="min-w-0 flex-1">
-														<span className="block truncate font-bold text-sm">{group.title}</span>
-														<span className="block truncate text-base-content/50 text-xs">
-															{group.placementLabel} / {group.count} videos
-														</span>
-													</span>
-												</label>
-											))}
-										</div>
-									)}
-								</div>
-
 								<div className="mt-4 rounded-xl border border-base-300 bg-base-200/60 p-4">
 									<div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
 										<div>
