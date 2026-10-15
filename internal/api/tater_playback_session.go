@@ -1395,6 +1395,15 @@ func probeTaterPlaybackMedia(parent context.Context, cfg *config.Config, path st
 	}
 	var result taterFFprobePlaybackResult
 	if err := json.Unmarshal(out, &result); err != nil {
+		// Some test and third-party ffprobe wrappers return a plain duration even
+		// when JSON output is requested. Preserve the useful duration while leaving
+		// technical fields empty instead of failing the entire library scan.
+		for _, field := range strings.Fields(string(out)) {
+			duration, parseErr := strconv.ParseFloat(strings.TrimSpace(field), 64)
+			if parseErr == nil && duration > 0 {
+				return taterPlaybackMediaInfo{DurationSeconds: duration}, nil
+			}
+		}
 		return taterPlaybackMediaInfo{}, err
 	}
 	info := taterPlaybackMediaInfo{Container: cleanTaterContainerName(result.Format.FormatName)}

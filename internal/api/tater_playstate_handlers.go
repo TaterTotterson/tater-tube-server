@@ -383,6 +383,15 @@ func taterAttachLocalFolderProgress(cfg *config.Config, baseURL, playerToken str
 		item.Duration = resume.Duration
 		item.DurationSeconds = resume.DurationSeconds
 		item.DurationDisplay = resume.DurationDisplay
+		item.VideoWidth = resume.VideoWidth
+		item.VideoHeight = resume.VideoHeight
+		item.VideoCodec = resume.VideoCodec
+		item.VideoProfile = resume.VideoProfile
+		item.VideoRange = resume.VideoRange
+		item.AudioCodec = resume.AudioCodec
+		item.AudioProfile = resume.AudioProfile
+		item.AudioChannels = resume.AudioChannels
+		item.AudioLayout = resume.AudioLayout
 	}
 	return items
 }

@@ -106,7 +106,9 @@ func (s *Server) runLocalLibraryScanner(ctx context.Context) {
 
 		interval := taterLocalLibraryAutoScanInterval(cfg)
 		previous, previousErr := readTaterLocalLibraryIndex(cfg)
-		if !realtimeScan && previousErr == nil && previous.ConfigFingerprint == taterLocalLibraryFingerprint(cfg) {
+		needsMaintenance, _ := taterLocalLibraryIndexNeedsMaintenance(cfg)
+		if !realtimeScan && !needsMaintenance && previousErr == nil &&
+			previous.ConfigFingerprint == taterLocalLibraryFingerprint(cfg) {
 			age := time.Since(previous.GeneratedAt)
 			if age >= 0 && age < interval {
 				if taterLocalLibraryAutoScanEnabled(cfg) {

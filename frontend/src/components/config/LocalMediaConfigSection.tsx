@@ -115,6 +115,9 @@ const EMPTY_STATS: LocalMediaLibraryStats = {
 };
 
 const LIBRARY_PAGE_SIZE = 24;
+// Keep the unfinished per-title artwork editor out of the library tabs until it
+// has a dedicated settings experience. The supporting APIs remain available.
+const SHOW_INLINE_ARTWORK_LIBRARY_EDITOR = false;
 
 function slug(value: string) {
 	return value
@@ -312,10 +315,11 @@ export function LocalMediaConfigSection({
 
 	const library = useLocalMediaLibrary({
 		type: activeTab,
-		q: activeTab !== "folders" ? search.trim() : undefined,
-		missing_only: activeTab !== "folders" ? missingOnly : undefined,
-		limit: LIBRARY_PAGE_SIZE,
-		offset: activeTab !== "folders" ? libraryOffset : 0,
+		q: SHOW_INLINE_ARTWORK_LIBRARY_EDITOR && activeTab !== "folders" ? search.trim() : undefined,
+		missing_only:
+			SHOW_INLINE_ARTWORK_LIBRARY_EDITOR && activeTab !== "folders" ? missingOnly : undefined,
+		limit: SHOW_INLINE_ARTWORK_LIBRARY_EDITOR ? LIBRARY_PAGE_SIZE : 1,
+		offset: SHOW_INLINE_ARTWORK_LIBRARY_EDITOR && activeTab !== "folders" ? libraryOffset : 0,
 	});
 	const scan = useLocalMediaScanStatus();
 	const startScan = useStartLocalMediaScan();
@@ -1099,7 +1103,7 @@ export function LocalMediaConfigSection({
 				</div>
 			</section>
 
-			{(activeTab === "movies" || activeTab === "tv") && (
+			{SHOW_INLINE_ARTWORK_LIBRARY_EDITOR && (activeTab === "movies" || activeTab === "tv") && (
 				<section className="space-y-4 rounded-2xl border border-base-300 bg-base-100/70 p-4 sm:p-5">
 					<div className="space-y-4">
 						<div>
@@ -1304,7 +1308,7 @@ export function LocalMediaConfigSection({
 				</section>
 			)}
 
-			{activeTab === "music" && (
+			{SHOW_INLINE_ARTWORK_LIBRARY_EDITOR && activeTab === "music" && (
 				<section className="space-y-4 rounded-2xl border border-base-300 bg-base-100/70 p-4 sm:p-5">
 					<div className="space-y-4">
 						<div>

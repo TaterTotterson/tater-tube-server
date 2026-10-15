@@ -50,6 +50,39 @@ func TestTaterFreshLocalLibraryIndexCacheRefreshesAfterAtomicWrite(t *testing.T)
 	}
 }
 
+func TestTaterLocalLibraryIndexKeepsPreviousSchemaAvailableDuringMediaInfoBackfill(t *testing.T) {
+	root := t.TempDir()
+	enabled := true
+	cfg := config.DefaultConfig(root)
+	cfg.Metadata.RootPath = filepath.Join(root, "metadata")
+	cfg.LocalMedia.Enabled = &enabled
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID: "movies", Name: "Movies", LibraryType: "movies",
+		Paths: []string{filepath.Join(root, "movies")}, Enabled: &enabled,
+	}}
+	legacy := taterLocalLibraryIndex{
+		Schema:                taterLocalLibraryPreviousIndexSchema,
+		ConfigFingerprint:     taterLocalLibraryFingerprint(cfg),
+		GeneratedAt:           time.Now().UTC(),
+		VideoDurationsScanned: true,
+		Files: []taterLocalLibraryFileIndex{{
+			Key: "movies\x000\x00Movie.mkv", CategoryID: "movies",
+			LibraryType: "movies", Path: "Movie.mkv", DurationSeconds: 5400,
+		}},
+	}
+	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), legacy); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, ok := taterFreshLocalLibraryIndex(cfg)
+	if !ok || len(loaded.Files) != 1 || loaded.Schema != taterLocalLibraryIndexSchema {
+		t.Fatalf("previous index should remain available during backfill: %#v", loaded)
+	}
+	if needed, reason := taterLocalLibraryIndexNeedsMaintenance(cfg); !needed || reason != "Backfilling media details" {
+		t.Fatalf("previous index should schedule media detail backfill, needed=%v reason=%q", needed, reason)
+	}
+}
+
 func TestTaterLocalLibraryIndexBuildsStatsArtworkAndReusesUnchangedMusicMetadata(t *testing.T) {
 	root := t.TempDir()
 	metadataRoot := filepath.Join(root, "metadata")
@@ -88,6 +121,12 @@ func TestTaterLocalLibraryIndexBuildsStatsArtworkAndReusesUnchangedMusicMetadata
 	probeScript := fmt.Sprintf(`#!/bin/sh
 printf x >> %q
 case "$*" in
+  *format=format_name,duration*)
+    cat <<'EOF'
+{"format":{"format_name":"matroska","duration":"5400.000"},"streams":[{"index":0,"codec_type":"video","codec_name":"hevc","profile":"Main 10","width":3840,"height":2160,"side_data_list":[{"side_data_type":"DOVI configuration record","dv_profile":8}]},{"index":1,"codec_type":"audio","codec_name":"truehd","profile":"Dolby TrueHD + Dolby Atmos","channels":8,"channel_layout":"7.1","tags":{"language":"eng"},"disposition":{"default":1}},{"index":2,"codec_type":"audio","codec_name":"aac","profile":"LC","channels":2,"channel_layout":"stereo","tags":{"language":"eng","title":"Director Commentary"},"disposition":{"comment":1}}]}
+EOF
+    exit 0
+    ;;
   *default=noprint_wrappers*)
     printf '5400.000\n'
     exit 0
@@ -163,6 +202,12 @@ EOF
 	for _, file := range first.Files {
 		if file.LibraryType != "music" && file.DurationSeconds != 5400 {
 			t.Fatalf("expected indexed video duration, got %#v", file)
+		}
+		if file.LibraryType != "music" &&
+			(!file.MediaInfoScanned || file.VideoWidth != 3840 || file.VideoHeight != 2160 ||
+				file.VideoCodec != "hevc" || file.VideoRange != "dolby_vision" ||
+				file.AudioCodec != "truehd" || file.AudioChannels != 8) {
+			t.Fatalf("expected indexed technical media details, got %#v", file)
 		}
 	}
 	countBefore, err := os.ReadFile(probeCount)

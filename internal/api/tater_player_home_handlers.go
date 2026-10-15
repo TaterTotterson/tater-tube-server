@@ -534,8 +534,12 @@ func decorateTaterPlayerHomeItems(cfg *config.Config, baseURL, playerToken strin
 	// index is authoritative for player-card artwork; the artwork endpoint can
 	// resolve and serve the actual file later when the client requests it.
 	var libraryIndex *taterLocalLibraryIndex
+	indexedFiles := map[string]taterLocalLibraryFileIndex{}
 	if index, ok := taterFreshLocalLibraryIndex(cfg); ok {
 		libraryIndex = &index
+		for _, file := range index.Files {
+			indexedFiles[file.Key] = file
+		}
 	}
 	artworkURL := func(item *taterUsenetItem, kind string) string {
 		if indexedURL, handled := taterPlayerIndexedLocalArtworkURL(
@@ -555,6 +559,25 @@ func decorateTaterPlayerHomeItems(cfg *config.Config, baseURL, playerToken strin
 		if cfg == nil {
 			item.HasArtwork = strings.TrimSpace(item.Poster) != ""
 			continue
+		}
+		if path := cleanLocalRelativePath(item.Path); path != "" {
+			fileKey := taterLocalLibraryFileKey(
+				taterRawLocalCategoryID(item.CategoryID), item.SourceIndex, path,
+			)
+			if file, ok := indexedFiles[fileKey]; ok {
+				if item.DurationSeconds <= 0 {
+					attachTaterDuration(item, file.DurationSeconds)
+				}
+				item.VideoWidth = file.VideoWidth
+				item.VideoHeight = file.VideoHeight
+				item.VideoCodec = file.VideoCodec
+				item.VideoProfile = file.VideoProfile
+				item.VideoRange = file.VideoRange
+				item.AudioCodec = file.AudioCodec
+				item.AudioProfile = file.AudioProfile
+				item.AudioChannels = file.AudioChannels
+				item.AudioLayout = file.AudioChannelLayout
+			}
 		}
 		category, categoryFound := taterLocalMediaCategory(cfg, taterRawLocalCategoryID(item.CategoryID))
 		isTV := categoryFound && strings.EqualFold(strings.TrimSpace(category.LibraryType), "tv")

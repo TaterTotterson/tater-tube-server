@@ -97,6 +97,15 @@ type taterUsenetItem struct {
 	Index           int               `json:"index,omitempty"`
 	Duration        int64             `json:"duration,omitempty"`
 	DurationSeconds float64           `json:"durationSeconds,omitempty"`
+	VideoWidth      int               `json:"videoWidth,omitempty"`
+	VideoHeight     int               `json:"videoHeight,omitempty"`
+	VideoCodec      string            `json:"videoCodec,omitempty"`
+	VideoProfile    string            `json:"videoProfile,omitempty"`
+	VideoRange      string            `json:"videoRange,omitempty"`
+	AudioCodec      string            `json:"audioCodec,omitempty"`
+	AudioProfile    string            `json:"audioProfile,omitempty"`
+	AudioChannels   int               `json:"audioChannels,omitempty"`
+	AudioLayout     string            `json:"audioChannelLayout,omitempty"`
 	PlayStateID     string            `json:"playStateId,omitempty"`
 	SeriesStateID   string            `json:"seriesStateId,omitempty"`
 	ViewOffset      int64             `json:"viewOffset,omitempty"`
@@ -1670,6 +1679,15 @@ func taterIndexedLocalVideoItem(cfg *config.Config, cat config.LocalMediaCategor
 		TVDBID:          file.TVDBID,
 		Category:        strings.Join(file.Genres, ", "),
 		Genres:          append([]string(nil), file.Genres...),
+		VideoWidth:      file.VideoWidth,
+		VideoHeight:     file.VideoHeight,
+		VideoCodec:      file.VideoCodec,
+		VideoProfile:    file.VideoProfile,
+		VideoRange:      file.VideoRange,
+		AudioCodec:      file.AudioCodec,
+		AudioProfile:    file.AudioProfile,
+		AudioChannels:   file.AudioChannels,
+		AudioLayout:     file.AudioChannelLayout,
 		SizeBytes:       file.SizeBytes,
 		ModifiedUnix:    file.ModifiedUnix,
 		AddedUnix:       taterLocalFileAddedUnix(file),
