@@ -1480,11 +1480,12 @@ func selectTaterPlaybackAudioTrack(info *taterPlaybackMediaInfo, requested *int,
 		for index, track := range info.AudioTracks {
 			tier := taterPlaybackAudioTrackPreferenceTier(track)
 			score := taterPlaybackAudioTrackScore(track)
-			// Only compare compatibility and quality inside the same purpose and
-			// language tier. A directly playable commentary track must never beat
-			// main-program audio merely because the latter needs conversion.
+			// Purpose, language, and source quality choose the track. Direct
+			// compatibility is only a final tie-breaker; a lossy AC-3/AAC track
+			// must not beat TrueHD, DTS-HD, or another better main-program source
+			// merely because the better track needs conversion for this player.
 			if caps != nil && taterPlaybackAudioTrackCompatible(track, *caps) {
-				score += 500_000
+				score++
 			}
 			if selected < 0 || tier > bestTier || (tier == bestTier && score > bestScore) {
 				selected = index
@@ -1556,20 +1557,24 @@ func taterPlaybackAudioTrackCompatible(track taterPlaybackAudioTrack, caps tater
 func taterPlaybackAudioTrackScore(track taterPlaybackAudioTrack) int64 {
 	score := int64(0)
 	if isTaterEnglishAudioLanguage(track.Language) {
-		score += 1_000_000
+		score += 100_000_000
 	} else if strings.TrimSpace(track.Language) == "" {
-		score += 100_000
-	}
-	if track.Default {
-		score += 25_000
+		score += 10_000_000
 	}
 	if track.Commentary || track.Descriptive {
-		score -= 200_000
+		score -= 20_000_000
 	}
-	score += int64(track.Channels) * 10_000
-	score += int64(taterPlaybackAudioCodecRank(track.Codec)) * 1_000
+	// Prefer the highest-quality source before considering container defaults or
+	// client compatibility. This keeps lossless TrueHD/DTS-HD/FLAC ahead of
+	// convenient AC-3/AAC alternatives, even when the lossy track is marked as
+	// default. Channel count and bitrate choose between tracks of similar quality.
+	score += int64(taterPlaybackAudioCodecRank(track.Codec)) * 1_000_000
+	score += int64(track.Channels) * 100_000
 	if track.BitRate > 0 {
-		score += min(track.BitRate/1000, 20_000)
+		score += min(track.BitRate/1000, 99_000)
+	}
+	if track.Default {
+		score += 1_000
 	}
 	return score
 }

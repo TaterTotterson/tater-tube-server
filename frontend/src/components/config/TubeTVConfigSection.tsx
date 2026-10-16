@@ -1137,14 +1137,14 @@ export function TubeTVConfigSection({
 								key={`tube-tv-channel-${channelIndex}`}
 								className="rounded-xl border border-base-300 bg-base-100/70 p-4"
 							>
-								<div className="grid gap-3 md:grid-cols-2 md:items-end xl:grid-cols-[7rem_minmax(12rem,1fr)_minmax(12rem,1fr)_14rem_14rem_auto]">
-									<label className="form-control">
+								<div className="grid gap-3 md:grid-cols-2 md:items-end xl:grid-cols-12">
+									<label className="form-control min-w-0 xl:col-span-2">
 										<span className="label-text font-bold text-base-content text-sm">Channel</span>
 										<input
 											type="text"
 											inputMode="numeric"
 											maxLength={2}
-											className="input input-bordered mt-2"
+											className="input input-bordered mt-2 w-full min-w-0"
 											value={channel.channel_number || ""}
 											placeholder="Auto"
 											onChange={(event) =>
@@ -1159,36 +1159,36 @@ export function TubeTVConfigSection({
 											}
 										/>
 									</label>
-									<label className="form-control">
+									<label className="form-control min-w-0 xl:col-span-3">
 										<span className="label-text font-bold text-base-content text-sm">
 											Channel Name
 										</span>
 										<input
 											type="text"
-											className="input input-bordered mt-2"
+											className="input input-bordered mt-2 w-full min-w-0"
 											value={channel.title}
 											onChange={(event) =>
 												updateChannel(channelIndex, { title: event.target.value })
 											}
 										/>
 									</label>
-									<label className="form-control">
+									<label className="form-control min-w-0 xl:col-span-3">
 										<span className="label-text font-bold text-base-content text-sm">
 											Channel ID
 										</span>
 										<input
 											type="text"
-											className="input input-bordered mt-2"
+											className="input input-bordered mt-2 w-full min-w-0"
 											value={channel.id}
 											onChange={(event) => updateChannel(channelIndex, { id: event.target.value })}
 										/>
 									</label>
-									<label className="form-control">
+									<label className="form-control min-w-0 xl:col-span-4">
 										<span className="label-text font-bold text-base-content text-sm">
 											Commercials
 										</span>
 										<select
-											className="select select-bordered mt-2"
+											className="select select-bordered mt-2 w-full min-w-0"
 											value={channel.commercial_category || ""}
 											onChange={(event) =>
 												updateChannel(channelIndex, {
@@ -1204,7 +1204,7 @@ export function TubeTVConfigSection({
 											))}
 										</select>
 									</label>
-									<div className="form-control min-w-0">
+									<div className="form-control min-w-0 xl:col-span-9">
 										<span className="label-text font-bold text-base-content text-sm">Bumpers</span>
 										<details className="dropdown dropdown-end mt-2 w-full">
 											<summary className="select select-bordered flex w-full cursor-pointer list-none items-center justify-between gap-2 pr-3 [&::-webkit-details-marker]:hidden">
@@ -1213,7 +1213,7 @@ export function TubeTVConfigSection({
 												</span>
 												<ChevronDown className="h-4 w-4 shrink-0 text-base-content/50" />
 											</summary>
-											<div className="dropdown-content z-[70] mt-2 max-h-80 w-full min-w-72 overflow-y-auto rounded-xl border border-base-300 bg-base-100 p-2 shadow-2xl">
+											<div className="dropdown-content z-[70] mt-2 max-h-80 w-full min-w-0 overflow-y-auto rounded-xl border border-base-300 bg-base-100 p-2 shadow-2xl">
 												{(bumperLibrary?.groups ?? []).length === 0 ? (
 													<div className="p-3 text-base-content/50 text-xs">
 														Create bumper groups in the Bumpers tab first.
@@ -1259,7 +1259,7 @@ export function TubeTVConfigSection({
 									</div>
 									<button
 										type="button"
-										className="btn btn-error btn-outline"
+										className="btn btn-error btn-outline w-full xl:col-span-3"
 										onClick={() => removeChannel(channelIndex)}
 									>
 										<Trash2 className="h-4 w-4" />

@@ -204,7 +204,7 @@ func TestTaterPlaybackAudioTitleClassification(t *testing.T) {
 	require.False(t, taterPlaybackAudioTitleIsDescriptive("English Dolby Atmos"))
 }
 
-func TestBuildTaterPlaybackPlanPrefersCompatibleEnglishSurroundTrack(t *testing.T) {
+func TestBuildTaterPlaybackPlanPrefersBestEnglishSurroundTrack(t *testing.T) {
 	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
 		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
 		Capabilities: taterPlaybackCapabilities{
@@ -215,17 +215,39 @@ func TestBuildTaterPlaybackPlanPrefersCompatibleEnglishSurroundTrack(t *testing.
 	}, taterPlaybackMediaInfo{
 		VideoCodec: "h264",
 		AudioTracks: []taterPlaybackAudioTrack{
-			{Index: 0, Codec: "truehd", Channels: 8, Language: "eng", Default: true},
-			{Index: 1, Codec: "ac3", Channels: 6, Language: "eng"},
+			{Index: 0, Codec: "truehd", Channels: 8, Language: "eng"},
+			{Index: 1, Codec: "ac3", Channels: 6, Language: "eng", Default: true},
 			{Index: 2, Codec: "aac", Channels: 2, Language: "eng"},
 		},
 	})
 
-	require.Equal(t, 1, plan.SelectedAudioTrack)
-	require.Equal(t, "ac3", plan.Source.AudioCodec)
-	require.Equal(t, 6, plan.Source.AudioChannels)
-	require.Equal(t, "direct", plan.AudioMode)
-	require.NotContains(t, plan.StreamURL, "transcode=")
+	require.Equal(t, 0, plan.SelectedAudioTrack)
+	require.Equal(t, "truehd", plan.Source.AudioCodec)
+	require.Equal(t, 8, plan.Source.AudioChannels)
+	require.Equal(t, "transcode", plan.AudioMode)
+	require.Equal(t, "0", playbackPlanQuery(t, plan.StreamURL).Get("tater_audio_track"))
+}
+
+func TestBuildTaterPlaybackPlanPrefersDTSHDOverCompatibleAC3(t *testing.T) {
+	plan := buildTaterPlaybackPlan(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Capabilities: taterPlaybackCapabilities{
+			VideoCodecs:      []string{"h264"},
+			AudioCodecs:      []string{"aac", "ac3"},
+			MaxAudioChannels: 2,
+		},
+	}, taterPlaybackMediaInfo{
+		VideoCodec: "h264",
+		AudioTracks: []taterPlaybackAudioTrack{
+			{Index: 0, Codec: "dts_hd", Channels: 2, Language: "eng", BitRate: 1_622_451},
+			{Index: 1, Codec: "ac3", Channels: 2, Language: "eng", Default: true, BitRate: 192_000},
+		},
+	})
+
+	require.Equal(t, 0, plan.SelectedAudioTrack)
+	require.Equal(t, "dts_hd", plan.Source.AudioCodec)
+	require.Equal(t, "transcode", plan.AudioMode)
+	require.Equal(t, "0", playbackPlanQuery(t, plan.StreamURL).Get("tater_audio_track"))
 }
 
 func TestBuildTaterPlaybackPlanHonorsRequestedAudioTrack(t *testing.T) {
