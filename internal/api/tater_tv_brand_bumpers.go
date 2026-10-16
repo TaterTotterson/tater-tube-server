@@ -4,8 +4,10 @@ import (
 	"embed"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
@@ -15,6 +17,7 @@ const (
 	taterTVBrandBumperKind     = "tater_bumper"
 	taterTVBrandBumperDuration = 10.005
 	taterTVBrandBumperGroupID  = "tater-tube"
+	taterTVCustomBumperGroupID = "custom-tater-bumpers"
 )
 
 type taterTVBrandBumperDefinition struct {
@@ -73,6 +76,108 @@ func taterTVBuiltInBumpers(cfg *config.Config) []taterTVBumper {
 		})
 	}
 	return bumpers
+}
+
+// taterTVBrandBumpers returns the single active Tater Bumper rotation. A valid
+// custom library is intentionally exclusive: built-ins return only when the
+// last custom bumper is removed.
+func taterTVBrandBumpers(cfg *config.Config) []taterTVBumper {
+	if custom := taterTVCustomBrandBumpers(cfg); len(custom) > 0 {
+		return custom
+	}
+	return taterTVBuiltInBumpers(cfg)
+}
+
+func taterTVCustomBrandBumpers(cfg *config.Config) []taterTVBumper {
+	root := taterTVCustomBumperRoot(cfg)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return []taterTVBumper{}
+	}
+
+	bumpers := make([]taterTVBumper, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || strings.HasPrefix(entry.Name(), ".") || !isMediaExtension(filepath.Ext(entry.Name())) {
+			continue
+		}
+		path := filepath.Join(root, entry.Name())
+		duration := taterLocalDurationSeconds(cfg, path)
+		if duration <= 0 || math.IsNaN(duration) || math.IsInf(duration, 0) {
+			continue
+		}
+		info, statErr := entry.Info()
+		if statErr != nil {
+			continue
+		}
+		title := cleanMovieTitleFromName(strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name())))
+		if title == "" {
+			title = "Custom Tater Bumper"
+		}
+		bumpers = append(bumpers, taterTVBumper{
+			Title:          title,
+			GroupID:        taterTVCustomBumperGroupID,
+			Group:          "Custom Tater Bumpers",
+			Placement:      "brand",
+			PlacementLabel: "Tater Tube",
+			Name:           entry.Name(),
+			Kind:           taterTVBrandBumperKind,
+			Local:          true,
+			Duration:       duration,
+			FullDuration:   duration,
+			DurationKnown:  true,
+			Size:           info.Size(),
+		})
+	}
+	sort.SliceStable(bumpers, func(i, j int) bool {
+		return strings.ToLower(bumpers[i].Title) < strings.ToLower(bumpers[j].Title)
+	})
+	return bumpers
+}
+
+func taterTVCustomBumperRoot(cfg *config.Config) string {
+	if cfg == nil || strings.TrimSpace(cfg.Metadata.RootPath) == "" {
+		return filepath.Join(os.TempDir(), "tater-tube-custom-bumpers")
+	}
+	return filepath.Join(filepath.Clean(cfg.Metadata.RootPath), "tater-bumpers")
+}
+
+func taterTVResolveBrandBumper(cfg *config.Config, rawName string) (taterTVBumper, string, error) {
+	name := taterTVSafeFileName(rawName)
+	custom := taterTVCustomBrandBumpers(cfg)
+	if len(custom) > 0 {
+		for _, bumper := range custom {
+			if bumper.Name == name {
+				return bumper, filepath.Join(taterTVCustomBumperRoot(cfg), bumper.Name), nil
+			}
+		}
+		return taterTVBumper{}, "", fmt.Errorf("custom Tater bumper %q not found", rawName)
+	}
+
+	definition, ok := taterBumperDefinitionByName(name)
+	if !ok {
+		return taterTVBumper{}, "", fmt.Errorf("built-in Tater bumper %q not found", rawName)
+	}
+	path, err := taterTVEnsureBuiltInBumperFile(cfg, definition.Name)
+	if err != nil {
+		return taterTVBumper{}, "", err
+	}
+	duration := definition.Duration
+	if duration <= 0 {
+		duration = taterTVBrandBumperDuration
+	}
+	return taterTVBumper{
+		Title:          definition.Title,
+		GroupID:        taterTVBrandBumperGroupID,
+		Group:          "Tater Tube",
+		Placement:      "brand",
+		PlacementLabel: "Tater Tube",
+		Name:           definition.Name,
+		Kind:           taterTVBrandBumperKind,
+		Local:          true,
+		Duration:       duration,
+		FullDuration:   duration,
+		DurationKnown:  true,
+	}, path, nil
 }
 
 func taterTVBuiltInBumperRoot(cfg *config.Config) string {

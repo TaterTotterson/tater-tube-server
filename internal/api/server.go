@@ -323,6 +323,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Delete("/tater/viewing/history", s.handleTaterClearViewingHistory)
 	api.Get("/tube-tv/commercials", s.handleTubeTVCommercialLibrary)
 	api.Get("/tube-tv/bumpers", s.handleTubeTVBumperLibrary)
+	api.Get("/tater-bumpers", s.handleTaterBumperLibrary)
 	api.Get("/tube-tv/local-library", s.handleTubeTVLocalLibrary)
 	api.Get("/tube-tv/logos/search", s.handleTubeTVLogoSearch)
 	api.Get("/tube-tv/guide", s.handleTubeTVGuide)
@@ -344,6 +345,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/tube-tv/bumpers/upload", s.handleTubeTVUploadBumpers)
 	api.Delete("/tube-tv/bumpers/file", s.handleTubeTVDeleteBumperFile)
 	api.Delete("/tube-tv/bumpers/group", s.handleTubeTVDeleteBumperGroup)
+	api.Post("/tater-bumpers/upload", s.handleTaterBumperUpload)
+	api.Delete("/tater-bumpers/file", s.handleTaterBumperDeleteFile)
 
 	// Queue endpoints
 	api.Get("/queue", s.handleListQueue)

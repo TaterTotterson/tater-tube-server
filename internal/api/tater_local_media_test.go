@@ -1566,6 +1566,73 @@ func TestTaterTVAutoChannelsRequireSelectedCommercialGroups(t *testing.T) {
 	}
 }
 
+func TestTaterTVCustomChannelCanDisableCommercialsAndBumpers(t *testing.T) {
+	cfg := config.DefaultConfig(t.TempDir())
+	cfg.TubeTV.CommercialsEnabled = boolPtr(true)
+	cfg.TubeTV.CommercialCategories = []string{"ads"}
+	cfg.TaterBumpers.LiveTV = boolPtr(true)
+	source := taterTVSource{
+		Title:               "Clean Channel",
+		SourceType:          "custom",
+		CommercialsDisabled: true,
+		BumpersDisabled:     true,
+		Programs: []taterUsenetItem{
+			{Title: "Feature One", StreamURL: "http://server/feature-1", DurationSeconds: 600},
+			{Title: "Feature Two", StreamURL: "http://server/feature-2", DurationSeconds: 600},
+		},
+	}
+	commercials := []taterTVCommercialCategory{{
+		ID: "ads",
+		Videos: []taterTVCommercial{{
+			Title: "Ad", CategoryID: "ads", Name: "ad.mp4", Duration: 15, DurationKnown: true,
+		}},
+	}}
+
+	schedule, _ := taterTVBuildSchedule(cfg, source, commercials, rand.New(rand.NewSource(4)))
+	if len(schedule) != len(source.Programs) {
+		t.Fatalf("expected programming without break content, got %#v", schedule)
+	}
+	for _, row := range schedule {
+		if kind := rowString(row, "kind"); kind != "movie" {
+			t.Fatalf("expected only movies when commercials and bumpers are disabled, got %q: %#v", kind, row)
+		}
+	}
+}
+
+func TestTaterTVCustomChannelBumpersPlayWithoutCommercials(t *testing.T) {
+	cfg := config.DefaultConfig(t.TempDir())
+	cfg.TubeTV.CommercialsEnabled = boolPtr(true)
+	cfg.TaterBumpers.LiveTV = boolPtr(false)
+	source := taterTVSource{
+		Title:               "Bumper Only Channel",
+		SourceType:          "custom",
+		CommercialsDisabled: true,
+		BumperGroups:        []string{"station-ids"},
+		Programs: []taterUsenetItem{{
+			Title: "Feature", StreamURL: "http://server/feature", DurationSeconds: 600,
+		}},
+	}
+	bumperGroups := []taterTVBumperGroup{{
+		ID:        "station-ids",
+		Placement: taterTVBumperBefore,
+		Videos: []taterTVBumper{{
+			Title: "Station ID", GroupID: "station-ids", Name: "station.mp4",
+			Placement: taterTVBumperBefore, Duration: 8, DurationKnown: true,
+		}},
+	}}
+	decks := taterTVNewScheduleDecks(cfg, source, nil, bumperGroups)
+
+	schedule, _ := taterTVBuildSchedulePassWithDecks(
+		cfg, source, decks, rand.New(rand.NewSource(7)), 0, math.Inf(1),
+	)
+	if len(schedule) != 2 {
+		t.Fatalf("expected a program followed by the selected bumper, got %#v", schedule)
+	}
+	if rowString(schedule[0], "kind") != "movie" || rowString(schedule[1], "kind") != "bumper" {
+		t.Fatalf("expected bumper-only break without commercials, got %#v", schedule)
+	}
+}
+
 func TestTaterTVBumpersWrapCommercialBreaksAndDoNotRepeatEarly(t *testing.T) {
 	configDir := t.TempDir()
 	cfg := config.DefaultConfig(configDir)

@@ -740,7 +740,9 @@ export interface TubeTVCustomChannel {
 	id: string;
 	title: string;
 	channel_number?: string;
+	commercials_enabled?: boolean;
 	commercial_category?: string;
+	bumpers_enabled?: boolean;
 	bumper_groups?: string[];
 	logo_path?: string;
 	logo_title?: string;
@@ -830,6 +832,23 @@ export interface TubeTVBumperGroup {
 export interface TubeTVBumperLibrary {
 	root: string;
 	groups: TubeTVBumperGroup[];
+}
+
+export interface TaterBumperVideo {
+	title: string;
+	name: string;
+	duration: number;
+	fullDuration: number;
+	size?: number;
+}
+
+export interface TaterBumperLibrary {
+	root: string;
+	mode: "built_in" | "custom";
+	customActive: boolean;
+	builtInCount: number;
+	customCount: number;
+	videos: TaterBumperVideo[];
 }
 
 export interface TubeTVLocalLibraryRow {

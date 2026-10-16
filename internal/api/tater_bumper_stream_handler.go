@@ -15,7 +15,7 @@ import (
 	"github.com/TaterTotterson/tater-tube-server/internal/nzbfilesystem"
 )
 
-// TaterBumperStreamHandler serves built-in Tater Tube bumpers to paired players.
+// TaterBumperStreamHandler serves the active built-in or custom Tater Bumper rotation to paired players.
 type TaterBumperStreamHandler struct {
 	configGetter  config.ConfigGetter
 	streamTracker *StreamTracker
@@ -50,16 +50,15 @@ func (h *TaterBumperStreamHandler) GetHTTPHandler() http.Handler {
 			http.Error(w, "Unauthorized: valid player_token required", http.StatusUnauthorized)
 			return
 		}
-
-		name := taterBumperNameFromPath(r.URL.Path)
-		definition, ok := taterBumperDefinitionByName(name)
-		if !ok {
-			http.Error(w, "Bumper not found", http.StatusNotFound)
+		if strings.TrimSpace(r.URL.Query().Get(taterLocalHLSSegmentQuery)) != "" {
+			h.serveBumperHLSSegment(w, r, player)
 			return
 		}
-		path, err := taterTVEnsureBuiltInBumperFile(cfg, definition.Name)
+
+		name := taterBumperNameFromPath(r.URL.Path)
+		bumper, path, err := taterTVResolveBrandBumper(cfg, name)
 		if err != nil {
-			http.Error(w, "Bumper unavailable", http.StatusServiceUnavailable)
+			http.Error(w, "Bumper not found", http.StatusNotFound)
 			return
 		}
 
@@ -75,6 +74,10 @@ func (h *TaterBumperStreamHandler) GetHTTPHandler() http.Handler {
 			http.Error(w, "Bumper unavailable", http.StatusNotFound)
 			return
 		}
+		if requestedTaterOutputContainer(r) == "hls" {
+			h.serveBumperHLSPlaylist(w, r, cfg, player, token, bumper, path, info)
+			return
+		}
 
 		streamReq := r
 		var cleanup func()
@@ -85,10 +88,10 @@ func (h *TaterBumperStreamHandler) GetHTTPHandler() http.Handler {
 			streamCtx, cancel := context.WithCancel(r.Context())
 			streamReq = r.WithContext(streamCtx)
 			playerName := taterPlayerDisplayName(player)
-			stream = h.streamTracker.AddStream(definition.Title, "Tater Bumper", playerName, r.RemoteAddr, r.UserAgent(), info.Size())
+			stream = h.streamTracker.AddStream(bumper.Title, "Tater Bumper", playerName, r.RemoteAddr, r.UserAgent(), info.Size())
 			h.streamTracker.SetPlayerID(stream.ID, player.ID)
 			h.streamTracker.SetCancelFunc(stream.ID, cancel)
-			h.streamTracker.SetMediaInfo(stream.ID, definition.Duration, 0)
+			h.streamTracker.SetMediaInfo(stream.ID, bumper.Duration, 0)
 			cleanup = func() {
 				cancel()
 				h.streamTracker.Remove(stream.ID)

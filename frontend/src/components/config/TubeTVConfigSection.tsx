@@ -57,6 +57,7 @@ const DEFAULT_TUBE_TV: TubeTVConfig = {
 };
 
 const TUBE_TV_LOGO_RAW_BASE = "https://raw.githubusercontent.com/tv-logo/tv-logos/main/";
+const NO_CHANNEL_COMMERCIALS = "__none__";
 
 const LOGO_POSITION_OPTIONS = [
 	{ value: "top_left", label: "Top left" },
@@ -127,8 +128,9 @@ function bumperGroupSelectionLabel(
 	channel: TubeTVCustomChannel,
 	library: TubeTVBumperLibrary | null,
 ) {
+	if (channel.bumpers_enabled === false) return "No bumpers";
 	const selected = channel.bumper_groups ?? [];
-	if (selected.length === 0) return "No bumpers";
+	if (selected.length === 0) return "Tater bumpers";
 	if (selected.length === 1) {
 		return library?.groups.find((group) => group.id === selected[0])?.title ?? "1 group selected";
 	}
@@ -152,23 +154,28 @@ function normalize(config: ConfigResponse): TubeTVConfig {
 		auto_channel_logo_overlay_enabled: source.auto_channel_logo_overlay_enabled ?? true,
 		auto_channel_logo_position: normalizeLogoPosition(source.auto_channel_logo_position),
 		commercial_categories: source.commercial_categories ?? [],
-		custom_channels: (source.custom_channels ?? []).map((channel) => ({
-			id: channel.id || slug(channel.title || "channel"),
-			title: channel.title || "Custom Channel",
-			channel_number: formatChannelNumber(channel.channel_number || ""),
-			commercial_category: channel.commercial_category || "",
-			bumper_groups: channel.bumper_groups ?? [],
-			logo_path: channel.logo_path || "",
-			logo_title: channel.logo_title || "",
-			logo_position: normalizeLogoPosition(channel.logo_position),
-			sources: (channel.sources ?? []).map((row) => ({
-				category_id: row.category_id || "",
-				source_index: row.source_index ?? -1,
-				path: row.path || "",
-				title: row.title || "",
-				media_type: row.media_type || "",
-			})),
-		})),
+		custom_channels: (source.custom_channels ?? []).map((channel) => {
+			const bumperGroups = channel.bumper_groups ?? [];
+			return {
+				id: channel.id || slug(channel.title || "channel"),
+				title: channel.title || "Custom Channel",
+				channel_number: formatChannelNumber(channel.channel_number || ""),
+				commercials_enabled: channel.commercials_enabled ?? true,
+				commercial_category: channel.commercial_category || "",
+				bumpers_enabled: channel.bumpers_enabled ?? bumperGroups.length > 0,
+				bumper_groups: bumperGroups,
+				logo_path: channel.logo_path || "",
+				logo_title: channel.logo_title || "",
+				logo_position: normalizeLogoPosition(channel.logo_position),
+				sources: (channel.sources ?? []).map((row) => ({
+					category_id: row.category_id || "",
+					source_index: row.source_index ?? -1,
+					path: row.path || "",
+					title: row.title || "",
+					media_type: row.media_type || "",
+				})),
+			};
+		}),
 	};
 }
 
@@ -347,7 +354,9 @@ export function TubeTVConfigSection({
 					id: `custom-${count}`,
 					title: `Custom ${count}`,
 					channel_number: "",
+					commercials_enabled: false,
 					commercial_category: "",
+					bumpers_enabled: false,
 					bumper_groups: [],
 					logo_path: "",
 					logo_title: "",
@@ -493,7 +502,11 @@ export function TubeTVConfigSection({
 		const groups = new Set(channel.bumper_groups ?? []);
 		if (groups.has(groupId)) groups.delete(groupId);
 		else groups.add(groupId);
-		updateChannel(channelIndex, { bumper_groups: Array.from(groups) });
+		const bumperGroups = Array.from(groups);
+		updateChannel(channelIndex, {
+			bumpers_enabled: bumperGroups.length > 0,
+			bumper_groups: bumperGroups,
+		});
 	};
 
 	const save = async () => {
@@ -506,7 +519,9 @@ export function TubeTVConfigSection({
 					...channel,
 					id: slug(channel.id || channel.title),
 					title: channel.title.trim(),
+					commercials_enabled: channel.commercials_enabled ?? true,
 					commercial_category: slug(channel.commercial_category || ""),
+					bumpers_enabled: channel.bumpers_enabled ?? false,
 					bumper_groups: (channel.bumper_groups ?? []).map(slug).filter(Boolean),
 					logo_path: (channel.logo_path || "").trim().replace(/^\/+/, ""),
 					logo_title: (channel.logo_title || "").trim(),
@@ -1189,13 +1204,20 @@ export function TubeTVConfigSection({
 										</span>
 										<select
 											className="select select-bordered mt-2 w-full min-w-0"
-											value={channel.commercial_category || ""}
-											onChange={(event) =>
-												updateChannel(channelIndex, {
-													commercial_category: event.target.value,
-												})
+											value={
+												channel.commercials_enabled === false
+													? NO_CHANNEL_COMMERCIALS
+													: channel.commercial_category || ""
 											}
+											onChange={(event) => {
+												const value = event.target.value;
+												updateChannel(channelIndex, {
+													commercials_enabled: value !== NO_CHANNEL_COMMERCIALS,
+													commercial_category: value === NO_CHANNEL_COMMERCIALS ? "" : value,
+												});
+											}}
 										>
+											<option value={NO_CHANNEL_COMMERCIALS}>No commercials</option>
 											<option value="">Use selected categories</option>
 											{(library?.categories ?? []).map((category) => (
 												<option key={category.id} value={category.id}>
@@ -1214,6 +1236,61 @@ export function TubeTVConfigSection({
 												<ChevronDown className="h-4 w-4 shrink-0 text-base-content/50" />
 											</summary>
 											<div className="dropdown-content z-[70] mt-2 max-h-80 w-full min-w-0 overflow-y-auto rounded-xl border border-base-300 bg-base-100 p-2 shadow-2xl">
+												<button
+													type="button"
+													className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${
+														channel.bumpers_enabled === false
+															? "bg-primary/10"
+															: "hover:bg-base-200"
+													}`}
+													disabled={isReadOnly}
+													onClick={() =>
+														updateChannel(channelIndex, {
+															bumpers_enabled: false,
+															bumper_groups: [],
+														})
+													}
+												>
+													<span className="flex h-5 w-5 items-center justify-center">
+														{channel.bumpers_enabled === false && <Check className="h-4 w-4" />}
+													</span>
+													<span>
+														<span className="block font-bold text-sm">No bumpers</span>
+														<span className="block text-base-content/50 text-xs">
+															Play programming back to back
+														</span>
+													</span>
+												</button>
+												<button
+													type="button"
+													className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${
+														channel.bumpers_enabled !== false &&
+														(channel.bumper_groups ?? []).length === 0
+															? "bg-primary/10"
+															: "hover:bg-base-200"
+													}`}
+													disabled={isReadOnly}
+													onClick={() =>
+														updateChannel(channelIndex, {
+															bumpers_enabled: true,
+															bumper_groups: [],
+														})
+													}
+												>
+													<span className="flex h-5 w-5 items-center justify-center">
+														{channel.bumpers_enabled !== false &&
+															(channel.bumper_groups ?? []).length === 0 && (
+																<Check className="h-4 w-4" />
+															)}
+													</span>
+													<span>
+														<span className="block font-bold text-sm">Tater bumpers only</span>
+														<span className="block text-base-content/50 text-xs">
+															Use the built-in channel bumpers
+														</span>
+													</span>
+												</button>
+												<div className="my-1 border-base-300 border-t" />
 												{(bumperLibrary?.groups ?? []).length === 0 ? (
 													<div className="p-3 text-base-content/50 text-xs">
 														Create bumper groups in the Bumpers tab first.
