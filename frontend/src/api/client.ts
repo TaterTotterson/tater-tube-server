@@ -42,6 +42,7 @@ import type {
 	ProviderTestResponse,
 	ProviderUpdateRequest,
 	TaterAdminState,
+	TaterBumperLibrary,
 	TaterPairingCodeCreateResponse,
 	TaterPlayersConfig,
 	TranscodingHardwareDetection,
@@ -802,6 +803,29 @@ class APIClient {
 
 	async getTubeTVBumpers() {
 		return this.request<TubeTVBumperLibrary>("/tube-tv/bumpers");
+	}
+
+	async getTaterBumpers() {
+		return this.request<TaterBumperLibrary>("/tater-bumpers");
+	}
+
+	async uploadTaterBumpers(files: FileList | File[]) {
+		const formData = new FormData();
+		for (const file of Array.from(files)) {
+			formData.append("files", file);
+		}
+		return this.request<TaterBumperLibrary>("/tater-bumpers/upload", {
+			method: "POST",
+			headers: {},
+			body: formData,
+		});
+	}
+
+	async deleteTaterBumper(name: string) {
+		const params = new URLSearchParams({ name });
+		return this.request<TaterBumperLibrary>(`/tater-bumpers/file?${params}`, {
+			method: "DELETE",
+		});
 	}
 
 	async getTubeTVLocalLibrary(params?: {

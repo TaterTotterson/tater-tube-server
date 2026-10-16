@@ -38,6 +38,7 @@ type taterTVBumper struct {
 	Duration       float64 `json:"duration"`
 	FullDuration   float64 `json:"fullDuration"`
 	DurationKnown  bool    `json:"durationKnown"`
+	Size           int64   `json:"size,omitempty"`
 }
 
 type taterTVBumperGroup struct {

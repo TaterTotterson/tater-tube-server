@@ -55,7 +55,8 @@ func (s *Server) handleTaterBumperNext(c *fiber.Ctx) error {
 			"source":  source,
 		})
 	}
-	if len(taterTVBrandBumperDefinitions) == 0 {
+	bumpers := taterTVBrandBumpers(cfg)
+	if len(bumpers) == 0 {
 		return RespondSuccess(c, fiber.Map{
 			"enabled": false,
 			"source":  source,
@@ -63,18 +64,18 @@ func (s *Server) handleTaterBumperNext(c *fiber.Ctx) error {
 	}
 
 	seed := time.Now().UnixNano()
-	definition := taterTVBrandBumperDefinitions[rand.New(rand.NewSource(seed)).Intn(len(taterTVBrandBumperDefinitions))]
+	bumper := bumpers[rand.New(rand.NewSource(seed)).Intn(len(bumpers))]
 	return RespondSuccess(c, fiber.Map{
 		"enabled": true,
 		"source":  source,
 		"item": fiber.Map{
 			"type":            taterTVBrandBumperKind,
 			"mediaType":       "bumper",
-			"name":            definition.Name,
-			"title":           definition.Title,
-			"duration":        definition.Duration,
-			"durationSeconds": definition.Duration,
-			"streamUrl":       taterBumperFileURL(resolveBaseURL(c, ""), definition.Name, playerToken),
+			"name":            bumper.Name,
+			"title":           bumper.Title,
+			"duration":        bumper.Duration,
+			"durationSeconds": bumper.Duration,
+			"streamUrl":       taterBumperFileURL(resolveBaseURL(c, ""), bumper.Name, playerToken),
 		},
 	})
 }
@@ -115,7 +116,7 @@ func taterBumperFileURL(baseURL, name, playerToken string) string {
 		return ""
 	}
 	safeName := taterTVSafeFileName(name)
-	if safeName == "" || !taterTVIsBuiltInBumperName(safeName) {
+	if safeName == "" {
 		return ""
 	}
 	u, err := url.Parse(strings.TrimRight(baseURL, "/") + "/api/tater/bumpers/file/" + url.PathEscape(safeName))

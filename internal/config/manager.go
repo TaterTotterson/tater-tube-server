@@ -210,7 +210,9 @@ type TubeTVCustomChannel struct {
 	ID                 string               `yaml:"id" mapstructure:"id" json:"id"`
 	Title              string               `yaml:"title" mapstructure:"title" json:"title"`
 	ChannelNumber      string               `yaml:"channel_number,omitempty" mapstructure:"channel_number" json:"channel_number,omitempty"`
+	CommercialsEnabled *bool                `yaml:"commercials_enabled,omitempty" mapstructure:"commercials_enabled" json:"commercials_enabled,omitempty"`
 	CommercialCategory string               `yaml:"commercial_category,omitempty" mapstructure:"commercial_category" json:"commercial_category,omitempty"`
+	BumpersEnabled     *bool                `yaml:"bumpers_enabled,omitempty" mapstructure:"bumpers_enabled" json:"bumpers_enabled,omitempty"`
 	BumperGroups       []string             `yaml:"bumper_groups,omitempty" mapstructure:"bumper_groups" json:"bumper_groups,omitempty"`
 	LogoPath           string               `yaml:"logo_path,omitempty" mapstructure:"logo_path" json:"logo_path,omitempty"`
 	LogoTitle          string               `yaml:"logo_title,omitempty" mapstructure:"logo_title" json:"logo_title,omitempty"`
