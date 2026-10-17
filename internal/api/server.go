@@ -148,13 +148,15 @@ func NewServer(
 				taterTVResetGuideForConfig(newConfig)
 				taterTVResetHLS()
 			}
-			select {
-			case server.localLibraryScanWake <- struct{}{}:
-			default:
-			}
-			select {
-			case server.localLibraryMonitorWake <- struct{}{}:
-			default:
+			if taterLocalLibraryAutomationConfigChanged(oldConfig, newConfig) {
+				select {
+				case server.localLibraryScanWake <- struct{}{}:
+				default:
+				}
+				select {
+				case server.localLibraryMonitorWake <- struct{}{}:
+				default:
+				}
 			}
 		})
 		ctx, cancel := context.WithCancel(context.Background())

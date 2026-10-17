@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -2482,6 +2483,53 @@ func TestTaterTVNumberSourcesHonorsReservedCustomChannels(t *testing.T) {
 	}
 	if numbered[1].Number != "02" || numbered[1].Source.Title != "Auto Two" {
 		t.Fatalf("expected auto numbering to continue at 02, got %#v", numbered[1])
+	}
+}
+
+func TestTaterTVInterleaveAutoSourcesMixesMoviesAndSeries(t *testing.T) {
+	movie := func(title string) taterTVSource {
+		return taterTVSource{
+			Title: title, SourceType: "auto_theme",
+			Programs: []taterUsenetItem{{Title: title}},
+		}
+	}
+	series := func(title string) taterTVSource {
+		return taterTVSource{
+			Title: title, SourceType: "auto_theme",
+			Groups: []taterTVEpisodeGroup{{Title: title}},
+		}
+	}
+
+	ordered := taterTVInterleaveAutoSources([]taterTVSource{
+		{Title: "Custom 09", SourceType: "custom", ChannelNumber: "09"},
+		movie("All Movies"), movie("Action Movies"), movie("Comedy Movies"),
+		series("All Series"), series("Cartoon Channel"), series("Drama Channel"),
+	})
+	want := []string{
+		"Custom 09", "All Movies", "All Series", "Action Movies",
+		"Cartoon Channel", "Comedy Movies", "Drama Channel",
+	}
+	if len(ordered) != len(want) {
+		t.Fatalf("interleaved source count = %d, want %d", len(ordered), len(want))
+	}
+	for i, title := range want {
+		if ordered[i].Title != title {
+			t.Fatalf("interleaved source %d = %q, want %q", i, ordered[i].Title, title)
+		}
+	}
+	if ordered[0].ChannelNumber != "09" {
+		t.Fatalf("custom channel number changed: %#v", ordered[0])
+	}
+}
+
+func TestTaterTVInterleaveAutoSourcesPreservesSingleKindOrder(t *testing.T) {
+	sources := []taterTVSource{
+		{Title: "All Movies", SourceType: "auto", Programs: []taterUsenetItem{{Title: "One"}}},
+		{Title: "Action Movies", SourceType: "auto_theme", Programs: []taterUsenetItem{{Title: "Two"}}},
+	}
+	ordered := taterTVInterleaveAutoSources(sources)
+	if !reflect.DeepEqual(ordered, sources) {
+		t.Fatalf("single-kind source order changed: %#v", ordered)
 	}
 }
 

@@ -133,7 +133,7 @@ const (
 	taterTVGuidePlannerInterval = 5 * time.Minute
 	taterTVGuideRetryInterval   = 5 * time.Minute
 	taterTVGuideFutureTolerance = time.Minute
-	taterTVGuideCacheVersion    = 8
+	taterTVGuideCacheVersion    = 9
 	taterTVGuideCacheFile       = "tube-tv-guide-cache.json"
 )
 
@@ -600,7 +600,72 @@ func taterTVOrderedSources(cfg *config.Config, baseURL, playerToken string) ([]t
 			}
 		}
 	}
-	return ordered, nil
+	return taterTVInterleaveAutoSources(ordered), nil
+}
+
+// taterTVInterleaveAutoSources keeps custom channels in their configured
+// order, then alternates movie and series auto channels. The relative order
+// within each kind remains stable so the familiar general and themed channels
+// do not shuffle between guide rebuilds.
+func taterTVInterleaveAutoSources(sources []taterTVSource) []taterTVSource {
+	custom := make([]taterTVSource, 0, len(sources))
+	movies := make([]taterTVSource, 0, len(sources))
+	series := make([]taterTVSource, 0, len(sources))
+	other := make([]taterTVSource, 0, len(sources))
+	startWithMovies := true
+	foundKind := false
+
+	for _, source := range sources {
+		if source.SourceType == "custom" {
+			custom = append(custom, source)
+			continue
+		}
+		hasMovies := len(source.Programs) > 0
+		hasSeries := len(source.Groups) > 0
+		switch {
+		case hasMovies && !hasSeries:
+			if !foundKind {
+				startWithMovies = true
+				foundKind = true
+			}
+			movies = append(movies, source)
+		case hasSeries && !hasMovies:
+			if !foundKind {
+				startWithMovies = false
+				foundKind = true
+			}
+			series = append(series, source)
+		default:
+			other = append(other, source)
+		}
+	}
+
+	if len(movies) == 0 || len(series) == 0 {
+		return sources
+	}
+
+	ordered := make([]taterTVSource, 0, len(sources))
+	ordered = append(ordered, custom...)
+	movieIndex, seriesIndex := 0, 0
+	useMovies := startWithMovies
+	for movieIndex < len(movies) || seriesIndex < len(series) {
+		if useMovies && movieIndex < len(movies) {
+			ordered = append(ordered, movies[movieIndex])
+			movieIndex++
+		} else if !useMovies && seriesIndex < len(series) {
+			ordered = append(ordered, series[seriesIndex])
+			seriesIndex++
+		} else if movieIndex < len(movies) {
+			ordered = append(ordered, movies[movieIndex])
+			movieIndex++
+		} else {
+			ordered = append(ordered, series[seriesIndex])
+			seriesIndex++
+		}
+		useMovies = !useMovies
+	}
+	ordered = append(ordered, other...)
+	return ordered
 }
 
 func taterTVAutoSources(cfg *config.Config, baseURL, playerToken string) ([]taterTVSource, error) {
