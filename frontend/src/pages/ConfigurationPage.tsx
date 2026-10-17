@@ -14,6 +14,7 @@ import {
 	Shield,
 	ShieldAlert,
 	Sparkles,
+	Sun,
 	Tv,
 	Wrench,
 } from "lucide-react";
@@ -22,6 +23,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrsConfigSection } from "../components/config/ArrsConfigSection";
 import { AuthConfigSection } from "../components/config/AuthConfigSection";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
+import { HDREnhancementConfigSection } from "../components/config/HDREnhancementConfigSection";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { LocalMediaConfigSection } from "../components/config/LocalMediaConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
@@ -52,6 +54,7 @@ import type {
 	ArrsConfig,
 	AuthConfig,
 	ConfigSection,
+	HDREnhancementConfig,
 	HealthConfig,
 	ImportConfig,
 	LocalMediaConfig,
@@ -86,6 +89,7 @@ const getIconComponent = (iconName: string) => {
 		Tv,
 		Link,
 		Sparkles,
+		Sun,
 	};
 	return iconMap[iconName as keyof typeof iconMap] || Settings;
 };
@@ -102,7 +106,7 @@ const SECTION_GROUPS = [
 	},
 	{
 		title: "Processing",
-		sections: ["transcoding", "upscaling", "import", "streaming", "metadata"],
+		sections: ["transcoding", "upscaling", "hdr_enhancement", "import", "streaming", "metadata"],
 	},
 	{
 		title: "Access",
@@ -230,6 +234,11 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "upscaling",
 					config: { upscaling: data as unknown as UpscalingConfig },
+				});
+			} else if (section === "hdr_enhancement") {
+				await updateConfigSection.mutateAsync({
+					section: "hdr_enhancement",
+					config: { hdr_enhancement: data as unknown as HDREnhancementConfig },
 				});
 			} else if (section === "segment_cache") {
 				await updateConfigSection.mutateAsync({
@@ -508,6 +517,13 @@ export function ConfigurationPage() {
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
+								{activeSection === "hdr_enhancement" && (
+									<HDREnhancementConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
 								{activeSection === "system" && (
 									<SystemConfigSection
 										config={config}
@@ -590,6 +606,7 @@ export function ConfigurationPage() {
 									"streaming",
 									"transcoding",
 									"upscaling",
+									"hdr_enhancement",
 									"system",
 									"providers",
 									"sabnzbd",

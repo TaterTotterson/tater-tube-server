@@ -30,6 +30,7 @@ import type {
 	ConfigResponse,
 	ConfigSection,
 	ConfigUpdateRequest,
+	HDREnhancementCompatibilityDetection,
 	LocalMediaLibraryResponse,
 	LocalMediaMusicAlbum,
 	LocalMediaScanStatus,
@@ -1025,6 +1026,10 @@ class APIClient {
 
 	async detectUpscalingCompatibility() {
 		return this.request<UpscalingCompatibilityDetection>("/system/upscaling-detect");
+	}
+
+	async detectHDREnhancementCompatibility() {
+		return this.request<HDREnhancementCompatibilityDetection>("/system/hdr-enhancement-detect");
 	}
 
 	async getSystemStats() {

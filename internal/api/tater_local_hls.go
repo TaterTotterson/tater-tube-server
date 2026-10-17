@@ -75,18 +75,21 @@ type taterLocalHLSSession struct {
 }
 
 type taterLocalHLSCommand struct {
-	args            []string
-	profileID       string
-	profileName     string
-	effectiveAccel  string
-	hardwareDevice  string
-	videoCodec      string
-	videoMode       string
-	audioMode       string
-	audioCodec      string
-	audioChannels   int
-	upscalingMethod string
-	upscalingModel  string
+	args             []string
+	profileID        string
+	profileName      string
+	effectiveAccel   string
+	hardwareDevice   string
+	videoCodec       string
+	videoMode        string
+	audioMode        string
+	audioCodec       string
+	audioChannels    int
+	upscalingMethod  string
+	upscalingModel   string
+	sourceVideoRange string
+	outputVideoRange string
+	hdrEnhancement   string
 }
 
 var globalTaterLocalHLS = &taterLocalHLSManager{sessions: map[string]*taterLocalHLSSession{}}
@@ -258,8 +261,16 @@ func (h *LocalStreamHandler) prepareLocalHLSSession(
 		)
 		h.streamTracker.SetAudioChannelInfo(session.stream.ID, command.audioChannels)
 		applyTaterRequestedDynamicRangeInfo(h.streamTracker, session.stream.ID, r)
+		if requestedTaterHDREnhancement(r) != "" && command.outputVideoRange != "hdr10" {
+			h.streamTracker.SetDynamicRangeInfo(
+				session.stream.ID, command.sourceVideoRange, command.outputVideoRange, false,
+			)
+		}
 		applyTaterRequestedResolutionInfo(h.streamTracker, session.stream.ID, r)
 		applyTaterResolvedUpscalingInfo(h.streamTracker, session.stream.ID, r, command.upscalingMethod, command.upscalingModel)
+		h.streamTracker.SetHDREnhancementInfo(
+			session.stream.ID, command.hdrEnhancement, command.hdrEnhancement != "",
+		)
 		transcoder := &StreamHandler{configGetter: h.configGetter, streamTracker: h.streamTracker}
 		duration := transcoder.probeMediaDuration(r.Context(), path)
 		h.streamTracker.SetMediaInfo(session.stream.ID, duration, parseTranscodeStartSeconds(r.URL.Query().Get("start")))
@@ -358,12 +369,25 @@ func buildTaterLocalHLSCommand(
 			// same guarded HDR-to-SDR path as an SDR display.
 			outputVideoRange = "sdr"
 		}
+		requestedHDREnhancement := requestedTaterHDREnhancement(r)
+		hdrEnhancement := ""
+		if outputVideoRange == "hdr10" {
+			hdrEnhancement = resolveTaterHDREnhancement(
+				r.Context(), effectiveFFmpegPath(cfg.Transcoding.FFmpegPath), r,
+			)
+		}
+		if requestedHDREnhancement != "" && hdrEnhancement == "" {
+			outputVideoRange = "sdr"
+		}
 		videoCodec, _ := transcodeVideoSettingsForCodec(accel, transcodeCfg.HardwareDevice, profile, preferredCodec)
 		command.profileID = profileID
 		command.profileName = profile.Name
 		command.videoCodec = videoCodec
 		command.effectiveAccel = effectiveTranscodeHardwareAccel(videoCodec)
 		command.hardwareDevice = effectiveTranscodeHardwareDevice(command.effectiveAccel, transcodeCfg.HardwareDevice)
+		command.sourceVideoRange = sourceVideoRange
+		command.outputVideoRange = outputVideoRange
+		command.hdrEnhancement = hdrEnhancement
 		videoEncoded = true
 		toneMapSource, toneMapTarget := requestedTaterToneMap(r)
 		if sourceVideoRange != "" && sourceVideoRange != "sdr" && outputVideoRange == "sdr" {
@@ -397,6 +421,7 @@ func buildTaterLocalHLSCommand(
 					AudioChannels: command.audioChannels,
 					ToneMapSource: toneMapSource, ToneMapTarget: toneMapTarget, ToneMapFilter: toneMapFilter,
 					SourceVideoRange: sourceVideoRange, OutputVideoRange: outputVideoRange,
+					HDREnhancement:    hdrEnhancement,
 					Scaler:            scaler,
 					AIShaderPath:      aiShaderPath,
 					AIShaderCachePath: aiShaderCachePath,

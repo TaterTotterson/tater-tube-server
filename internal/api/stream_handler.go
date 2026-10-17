@@ -780,6 +780,20 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 		http.Error(w, "Tone mapping unavailable in the configured FFmpeg build", http.StatusServiceUnavailable)
 		return
 	}
+	sourceVideoRange := cleanTaterVideoRange(r.URL.Query().Get("tater_source_video_range"))
+	outputVideoRange := cleanTaterVideoRange(r.URL.Query().Get("tater_output_video_range"))
+	requestedHDREnhancement := requestedTaterHDREnhancement(r)
+	if requestedCodec == transcodeCodecHEVC && videoCodecPreference != transcodeCodecHEVC &&
+		taterVideoRangeIsHDR(outputVideoRange) {
+		outputVideoRange = "sdr"
+	}
+	hdrEnhancement := ""
+	if outputVideoRange == "hdr10" {
+		hdrEnhancement = resolveTaterHDREnhancement(r.Context(), ffmpegPath, r)
+	}
+	if requestedHDREnhancement != "" && hdrEnhancement == "" {
+		outputVideoRange = "sdr"
+	}
 	scaler, aiShaderPath, aiShaderCachePath, aiModel := resolveTaterUpscalerForRequest(r.Context(), ffmpegPath, r)
 	args := buildFFmpegTranscodeArgsWithOptions(
 		transcodeCfg, profile, accel, videoCodecPreference, transcodeOutputOptions{
@@ -788,6 +802,9 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 			AudioChannels: requestedTaterAudioChannels(r),
 			ToneMapSource: toneMapSource, ToneMapTarget: toneMapTarget,
 			ToneMapFilter:     toneMapFilter,
+			SourceVideoRange:  sourceVideoRange,
+			OutputVideoRange:  outputVideoRange,
+			HDREnhancement:    hdrEnhancement,
 			Scaler:            scaler,
 			AIShaderPath:      aiShaderPath,
 			AIShaderCachePath: aiShaderCachePath,
@@ -805,8 +822,14 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 		h.streamTracker.SetAudioChannelInfo(streamID, outputAudioChannels)
 	}
 	applyTaterRequestedDynamicRangeInfo(h.streamTracker, streamID, r)
+	if requestedHDREnhancement != "" && outputVideoRange != "hdr10" && h.streamTracker != nil {
+		h.streamTracker.SetDynamicRangeInfo(streamID, sourceVideoRange, outputVideoRange, false)
+	}
 	applyTaterRequestedResolutionInfo(h.streamTracker, streamID, r)
 	applyTaterResolvedUpscalingInfo(h.streamTracker, streamID, r, scaler, aiModel)
+	if h.streamTracker != nil {
+		h.streamTracker.SetHDREnhancementInfo(streamID, hdrEnhancement, hdrEnhancement != "")
+	}
 
 	cmd := exec.CommandContext(r.Context(), ffmpegPath, args...)
 	if inputPath == "" {
@@ -1652,6 +1675,7 @@ type transcodeOutputOptions struct {
 	ToneMapFilter     string
 	SourceVideoRange  string
 	OutputVideoRange  string
+	HDREnhancement    string
 	Scaler            string
 	AIShaderPath      string
 	AIShaderCachePath string
@@ -1691,6 +1715,9 @@ func buildFFmpegTranscodeArgsWithOptions(cfg config.TranscodingConfig, profile t
 	filters = appendTaterToneMapFilter(
 		filters, options.ToneMapSource, options.ToneMapTarget, options.ToneMapFilter,
 	)
+	if strings.TrimSpace(options.HDREnhancement) != "" {
+		filters = appendTaterHDREnhancementFilter(filters, options.HDREnhancement)
+	}
 	outputVideoRange := options.OutputVideoRange
 	if cleanTaterVideoRange(outputVideoRange) == "" {
 		// Preserve the established metadata behavior for older callers which

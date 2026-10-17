@@ -11,6 +11,23 @@ func TestDefaultConfigUsesStandardUpscaling(t *testing.T) {
 	cfg := DefaultConfig()
 	assert.Equal(t, "standard", cfg.Upscaling.Mode)
 	assert.Equal(t, "auto", cfg.Transcoding.HardwareAcceleration)
+	assert.NotNil(t, cfg.HDREnhancement.Enabled)
+	assert.False(t, *cfg.HDREnhancement.Enabled)
+	assert.Equal(t, "balanced", cfg.HDREnhancement.Strength)
+}
+
+func TestConfigValidateAcceptsHDREnhancementStrengths(t *testing.T) {
+	for _, strength := range []string{"conservative", "balanced", "vivid"} {
+		t.Run(strength, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.HDREnhancement.Strength = strength
+			assert.NoError(t, cfg.Validate())
+		})
+	}
+
+	cfg := DefaultConfig()
+	cfg.HDREnhancement.Strength = "maximum"
+	assert.EqualError(t, cfg.Validate(), "hdr enhancement strength must be one of: conservative, balanced, vivid")
 }
 
 func TestConfigValidateAcceptsSupportedUpscalingModels(t *testing.T) {

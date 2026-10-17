@@ -36,32 +36,33 @@ const (
 
 // Config represents the complete application configuration
 type Config struct {
-	Server          ServerConfig       `yaml:"server" mapstructure:"server" json:"server"`
-	API             APIConfig          `yaml:"api" mapstructure:"api" json:"api"`
-	Auth            AuthConfig         `yaml:"auth" mapstructure:"auth" json:"auth"`
-	Database        DatabaseConfig     `yaml:"database" mapstructure:"database" json:"database"`
-	Metadata        MetadataConfig     `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
-	Streaming       StreamingConfig    `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
-	Transcoding     TranscodingConfig  `yaml:"transcoding" mapstructure:"transcoding" json:"transcoding"`
-	Upscaling       UpscalingConfig    `yaml:"upscaling" mapstructure:"upscaling" json:"upscaling"`
-	Health          HealthConfig       `yaml:"health" mapstructure:"health" json:"health"`
-	RClone          RCloneConfig       `yaml:"rclone" mapstructure:"rclone" json:"-"`
-	Import          ImportConfig       `yaml:"import" mapstructure:"import" json:"import"`
-	Log             LogConfig          `yaml:"log" mapstructure:"log" json:"log"`
-	SABnzbd         SABnzbdConfig      `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
-	Arrs            ArrsConfig         `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
-	Stremio         StremioConfig      `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
-	Newznab         NewznabConfig      `yaml:"newznab" mapstructure:"newznab" json:"newznab"`
-	LocalMedia      LocalMediaConfig   `yaml:"local_media" mapstructure:"local_media" json:"local_media"`
-	TubeTV          TubeTVConfig       `yaml:"tube_tv" mapstructure:"tube_tv" json:"tube_tv"`
-	TaterBumpers    TaterBumpersConfig `yaml:"tater_bumpers" mapstructure:"tater_bumpers" json:"tater_bumpers"`
-	Players         PlayersConfig      `yaml:"players" mapstructure:"players" json:"players"`
-	Fuse            FuseConfig         `yaml:"fuse" mapstructure:"fuse" json:"-"`
-	SegmentCache    SegmentCacheConfig `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
-	Providers       []ProviderConfig   `yaml:"providers" mapstructure:"providers" json:"providers"`
-	MountPath       string             `yaml:"mount_path" mapstructure:"mount_path" json:"-"`
-	MountType       MountType          `yaml:"mount_type" mapstructure:"mount_type" json:"-"`
-	ProfilerEnabled bool               `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
+	Server          ServerConfig         `yaml:"server" mapstructure:"server" json:"server"`
+	API             APIConfig            `yaml:"api" mapstructure:"api" json:"api"`
+	Auth            AuthConfig           `yaml:"auth" mapstructure:"auth" json:"auth"`
+	Database        DatabaseConfig       `yaml:"database" mapstructure:"database" json:"database"`
+	Metadata        MetadataConfig       `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
+	Streaming       StreamingConfig      `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
+	Transcoding     TranscodingConfig    `yaml:"transcoding" mapstructure:"transcoding" json:"transcoding"`
+	Upscaling       UpscalingConfig      `yaml:"upscaling" mapstructure:"upscaling" json:"upscaling"`
+	HDREnhancement  HDREnhancementConfig `yaml:"hdr_enhancement" mapstructure:"hdr_enhancement" json:"hdr_enhancement"`
+	Health          HealthConfig         `yaml:"health" mapstructure:"health" json:"health"`
+	RClone          RCloneConfig         `yaml:"rclone" mapstructure:"rclone" json:"-"`
+	Import          ImportConfig         `yaml:"import" mapstructure:"import" json:"import"`
+	Log             LogConfig            `yaml:"log" mapstructure:"log" json:"log"`
+	SABnzbd         SABnzbdConfig        `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
+	Arrs            ArrsConfig           `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
+	Stremio         StremioConfig        `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
+	Newznab         NewznabConfig        `yaml:"newznab" mapstructure:"newznab" json:"newznab"`
+	LocalMedia      LocalMediaConfig     `yaml:"local_media" mapstructure:"local_media" json:"local_media"`
+	TubeTV          TubeTVConfig         `yaml:"tube_tv" mapstructure:"tube_tv" json:"tube_tv"`
+	TaterBumpers    TaterBumpersConfig   `yaml:"tater_bumpers" mapstructure:"tater_bumpers" json:"tater_bumpers"`
+	Players         PlayersConfig        `yaml:"players" mapstructure:"players" json:"players"`
+	Fuse            FuseConfig           `yaml:"fuse" mapstructure:"fuse" json:"-"`
+	SegmentCache    SegmentCacheConfig   `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
+	Providers       []ProviderConfig     `yaml:"providers" mapstructure:"providers" json:"providers"`
+	MountPath       string               `yaml:"mount_path" mapstructure:"mount_path" json:"-"`
+	MountType       MountType            `yaml:"mount_type" mapstructure:"mount_type" json:"-"`
+	ProfilerEnabled bool                 `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
 }
 
 // SegmentCacheConfig configures the segment-aligned disk cache shared by FUSE and Server.
@@ -321,6 +322,13 @@ type TranscodingConfig struct {
 type UpscalingConfig struct {
 	Mode  string `yaml:"mode" mapstructure:"mode" json:"mode"`
 	Model string `yaml:"model" mapstructure:"model" json:"model"`
+}
+
+// HDREnhancementConfig controls the optional SDR-to-HDR10 presentation pass
+// used for on-demand playback on HDR-capable Tater Tube TV players.
+type HDREnhancementConfig struct {
+	Enabled  *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	Strength string `yaml:"strength" mapstructure:"strength" json:"strength"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -879,6 +887,13 @@ func (c *Config) Validate() error {
 	if c.Upscaling.Model == "" {
 		c.Upscaling.Model = "fsrcnnx-8"
 	}
+	if c.HDREnhancement.Enabled == nil {
+		enabled := false
+		c.HDREnhancement.Enabled = &enabled
+	}
+	if c.HDREnhancement.Strength == "" {
+		c.HDREnhancement.Strength = "balanced"
+	}
 	if c.Newznab.Enabled == nil {
 		enabled := false
 		c.Newznab.Enabled = &enabled
@@ -1144,6 +1159,14 @@ func (c *Config) Validate() error {
 	}
 	if !validUpscalingModels[c.Upscaling.Model] {
 		return fmt.Errorf("upscaling model must be one of: fsrcnnx-8, fsrcnnx-16, anime4k-cnn-m, anime4k-cnn-l, artcnn-c4f16, artcnn-c4f16-ds, artcnn-c4f32")
+	}
+	validHDREnhancementStrengths := map[string]bool{
+		"conservative": true,
+		"balanced":     true,
+		"vivid":        true,
+	}
+	if !validHDREnhancementStrengths[c.HDREnhancement.Strength] {
+		return fmt.Errorf("hdr enhancement strength must be one of: conservative, balanced, vivid")
 	}
 
 	// Validate health configuration (always active)
@@ -1945,6 +1968,7 @@ func DefaultConfig(configDir ...string) *Config {
 	stremioEnabled := false              // Stremio endpoint disabled by default
 	segmentCacheEnabled := true          // Persist decoded Usenet segments by default
 	transcodingEnabled := false          // Direct play by default; FFmpeg transcode is opt-in
+	hdrEnhancementEnabled := false       // Experimental SDR-to-HDR10 presentation is opt-in
 	newznabEnabled := false              // Player-facing Stream catalog disabled by default
 	localMediaEnabled := false           // Server-local media catalog disabled by default
 	localMediaRealtimeMonitoring := true // Watch supported filesystems for local media changes
@@ -2088,6 +2112,10 @@ func DefaultConfig(configDir ...string) *Config {
 		Upscaling: UpscalingConfig{
 			Mode:  "standard",
 			Model: "fsrcnnx-8",
+		},
+		HDREnhancement: HDREnhancementConfig{
+			Enabled:  &hdrEnhancementEnabled,
+			Strength: "balanced",
 		},
 		SegmentCache: SegmentCacheConfig{
 			Enabled:     &segmentCacheEnabled,

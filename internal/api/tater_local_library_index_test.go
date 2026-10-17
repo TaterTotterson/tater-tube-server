@@ -260,6 +260,92 @@ EOF
 	}
 }
 
+func TestTaterLocalLibraryFailedMediaProbeDoesNotRepeatUntilFileChanges(t *testing.T) {
+	root := t.TempDir()
+	metadataRoot := filepath.Join(root, "metadata")
+	movieRoot := filepath.Join(root, "movies")
+	binDir := filepath.Join(root, "bin")
+	for _, dir := range []string{metadataRoot, movieRoot, binDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mediaPath := filepath.Join(movieRoot, "Unreadable.2026.mkv")
+	if err := os.WriteFile(mediaPath, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	probeCount := filepath.Join(root, "probe-count")
+	ffmpegPath := filepath.Join(binDir, "ffmpeg")
+	ffprobePath := filepath.Join(binDir, "ffprobe")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	probeScript := fmt.Sprintf("#!/bin/sh\nprintf x >> %q\nexit 1\n", probeCount)
+	if err := os.WriteFile(ffprobePath, []byte(probeScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	enabled := true
+	cfg := &config.Config{
+		Metadata:    config.MetadataConfig{RootPath: metadataRoot},
+		Transcoding: config.TranscodingConfig{FFmpegPath: ffmpegPath},
+		LocalMedia: config.LocalMediaConfig{
+			Enabled: &enabled,
+			Categories: []config.LocalMediaCategory{{
+				ID: "movies", Name: "Movies", LibraryType: "movies",
+				Paths: []string{movieRoot}, Enabled: &enabled,
+			}},
+		},
+	}
+
+	first, err := scanTaterLocalLibrary(context.Background(), cfg, taterLocalLibraryIndex{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Files) != 1 || !first.Files[0].MediaInfoScanned || !first.Files[0].MediaInfoProbeFailed {
+		t.Fatalf("failed probe was not persisted as attempted: %#v", first.Files)
+	}
+	if err := writeTaterJSON(taterLocalLibraryIndexPath(cfg), first); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := readTaterLocalLibraryIndex(cfg)
+	if err != nil || len(persisted.Files) != 1 || !persisted.Files[0].MediaInfoProbeFailed {
+		t.Fatalf("failed probe state did not persist: %#v error=%v", persisted.Files, err)
+	}
+	if needed, reason := taterLocalLibraryIndexNeedsMaintenance(cfg); needed {
+		t.Fatalf("failed probe should not keep the library in maintenance: %s", reason)
+	}
+
+	second, err := scanTaterLocalLibraryWithOptions(
+		context.Background(), cfg, first, nil,
+		taterLocalLibraryScanOptions{Incremental: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := os.ReadFile(probeCount); err != nil || len(count) != 1 {
+		t.Fatalf("unchanged failed media was probed again, count=%q error=%v", count, err)
+	}
+
+	if err := os.WriteFile(mediaPath, []byte("changed"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	third, err := scanTaterLocalLibraryWithOptions(
+		context.Background(), cfg, second, nil,
+		taterLocalLibraryScanOptions{Incremental: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(third.Files) != 1 || !third.Files[0].MediaInfoScanned || !third.Files[0].MediaInfoProbeFailed {
+		t.Fatalf("changed failed media did not record its new probe attempt: %#v", third.Files)
+	}
+	if count, err := os.ReadFile(probeCount); err != nil || len(count) != 2 {
+		t.Fatalf("changed failed media was not probed again, count=%q error=%v", count, err)
+	}
+}
+
 func TestTaterLocalLibraryIncrementalScanOnlyProcessesChanges(t *testing.T) {
 	root := t.TempDir()
 	metadataRoot := filepath.Join(root, "metadata")

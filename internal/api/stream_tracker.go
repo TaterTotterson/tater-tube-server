@@ -551,6 +551,18 @@ func (t *StreamTracker) SetUpscalingInfo(id, requested, method, model string, ac
 	}
 }
 
+func (t *StreamTracker) SetHDREnhancementInfo(id, strength string, active bool) {
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*streamInternal)
+		stream.HDREnhancement = cleanTaterHDREnhancementStrength(strength)
+		stream.HDREnhancementActive = active && strings.TrimSpace(strength) != ""
+		if !stream.HDREnhancementActive {
+			stream.HDREnhancement = ""
+		}
+		stream.lastReadAt = time.Now()
+	}
+}
+
 func (t *StreamTracker) SetMediaInfo(id string, durationSeconds, playbackStartSeconds float64) {
 	if val, ok := t.streams.Load(id); ok {
 		stream := val.(*streamInternal)
@@ -813,6 +825,8 @@ func mergePlaybackRecord(existing *nzbfilesystem.ActiveStream, next nzbfilesyste
 		existing.UpscalingMethod = next.UpscalingMethod
 		existing.UpscalingModel = next.UpscalingModel
 		existing.UpscalingActive = next.UpscalingActive
+		existing.HDREnhancement = next.HDREnhancement
+		existing.HDREnhancementActive = next.HDREnhancementActive
 	}
 	if next.SourceVideoRange != "" {
 		existing.SourceVideoRange = next.SourceVideoRange
@@ -981,6 +995,8 @@ func copyStreamPresentation(dst *nzbfilesystem.ActiveStream, src nzbfilesystem.A
 	dst.UpscalingMethod = src.UpscalingMethod
 	dst.UpscalingModel = src.UpscalingModel
 	dst.UpscalingActive = src.UpscalingActive
+	dst.HDREnhancement = src.HDREnhancement
+	dst.HDREnhancementActive = src.HDREnhancementActive
 	dst.SourceVideoRange = src.SourceVideoRange
 	dst.OutputVideoRange = src.OutputVideoRange
 	dst.ToneMapped = src.ToneMapped
@@ -1101,6 +1117,8 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 				existing.UpscalingMethod = s.UpscalingMethod
 				existing.UpscalingModel = s.UpscalingModel
 				existing.UpscalingActive = s.UpscalingActive
+				existing.HDREnhancement = s.HDREnhancement
+				existing.HDREnhancementActive = s.HDREnhancementActive
 				if existing.Status != "Streaming" {
 					existing.Status = s.Status
 				}

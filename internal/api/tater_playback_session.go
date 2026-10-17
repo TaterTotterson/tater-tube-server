@@ -141,6 +141,8 @@ type taterPlaybackSessionResponse struct {
 	SourceVideoRange    string                 `json:"source_video_range"`
 	OutputVideoRange    string                 `json:"output_video_range"`
 	ToneMapped          bool                   `json:"tone_mapped"`
+	HDREnhanced         bool                   `json:"hdr_enhanced"`
+	HDREnhancement      string                 `json:"hdr_enhancement,omitempty"`
 	SelectedAudioTrack  int                    `json:"selected_audio_track"`
 	OutputWidth         int                    `json:"output_width,omitempty"`
 	OutputHeight        int                    `json:"output_height,omitempty"`
@@ -273,7 +275,18 @@ func (s *Server) handleTaterPlayerPlaybackSession(c *fiber.Ctx) error {
 		}
 	}
 
-	plan := buildTaterPlaybackPlanWithUpscaling(req, source, cfg.Upscaling.Mode, cfg.Upscaling.Model)
+	hdrConfig := cfg.HDREnhancement
+	if !isTubeTV && taterPlaybackShouldEnhanceHDR(req.Capabilities, source, hdrConfig) {
+		if err := probeTaterHDREnhancement(
+			c.Context(), effectiveFFmpegPath(cfg.Transcoding.FFmpegPath), hdrConfig.Strength,
+		); err != nil {
+			enabled := false
+			hdrConfig.Enabled = &enabled
+		}
+	}
+	plan := buildTaterPlaybackPlanWithProcessing(
+		req, source, cfg.Upscaling.Mode, cfg.Upscaling.Model, hdrConfig,
+	)
 	if isTubeTV {
 		plan = buildTaterTVPlaybackPlan(req, source)
 	}
@@ -884,6 +897,18 @@ func buildTaterPlaybackPlanWithUpscaling(
 	upscalingMode string,
 	upscalingModel string,
 ) taterPlaybackSessionResponse {
+	return buildTaterPlaybackPlanWithProcessing(
+		req, source, upscalingMode, upscalingModel, config.HDREnhancementConfig{},
+	)
+}
+
+func buildTaterPlaybackPlanWithProcessing(
+	req taterPlaybackSessionRequest,
+	source taterPlaybackMediaInfo,
+	upscalingMode string,
+	upscalingModel string,
+	hdrConfig config.HDREnhancementConfig,
+) taterPlaybackSessionResponse {
 	caps := req.Capabilities
 	selectedAudioTrack := selectTaterPlaybackAudioTrack(&source, req.AudioTrack, &caps)
 	profile := strings.TrimSpace(req.Profile)
@@ -932,6 +957,17 @@ func buildTaterPlaybackPlanWithUpscaling(
 	toneMapped := false
 	rangeFallback := false
 	hdrHEVCTranscode := false
+	hdrEnhancement := cleanTaterHDREnhancementStrength(hdrConfig.Strength)
+	hdrEnhanced := taterPlaybackShouldEnhanceHDR(caps, source, hdrConfig)
+	if hdrEnhanced {
+		videoCompatible = false
+		outputRange = "hdr10"
+		hdrHEVCTranscode = true
+	}
+	appliedHDREnhancement := ""
+	if hdrEnhanced {
+		appliedHDREnhancement = hdrEnhancement
+	}
 	if sourceRange != "sdr" {
 		if !taterPlaybackCanOutputRange(caps, source) {
 			if fallbackRange := taterPlaybackHDRFallbackRange(caps, source); fallbackRange != "" {
@@ -1024,6 +1060,8 @@ func buildTaterPlaybackPlanWithUpscaling(
 		SourceVideoRange:    sourceRange,
 		OutputVideoRange:    outputRange,
 		ToneMapped:          toneMapped,
+		HDREnhanced:         hdrEnhanced,
+		HDREnhancement:      appliedHDREnhancement,
 		SelectedAudioTrack:  selectedAudioTrack,
 		OutputAudioChannels: source.AudioChannels,
 		Source:              source,
@@ -1111,6 +1149,10 @@ func buildTaterPlaybackPlanWithUpscaling(
 	} else if serverUpscale {
 		plan.Reason = "Lower-resolution video and audio are converted together to match this display and remain synchronized."
 	}
+	if hdrEnhanced {
+		plan.QualityLabel = "SDR → HDR10 Enhanced • " + strings.TrimPrefix(plan.QualityLabel, "SDR → HDR10 • ")
+		plan.Reason = "SDR video is enhanced into HDR10 for this display while audio and video are converted together."
+	}
 	plan.OutputWidth, plan.OutputHeight = source.Width, source.Height
 	if plan.VideoMode == "transcode" {
 		plan.OutputWidth, plan.OutputHeight = taterPlaybackOutputDimensions(
@@ -1133,7 +1175,42 @@ func buildTaterPlaybackPlanWithUpscaling(
 	if serverUpscale {
 		plan.StreamURL = annotateTaterPlaybackScaler(plan.StreamURL, upscalingMode, upscalingModel)
 	}
+	if hdrEnhanced {
+		plan.StreamURL = annotateTaterPlaybackHDREnhancement(plan.StreamURL, hdrEnhancement)
+	}
 	return plan
+}
+
+func taterPlaybackShouldEnhanceHDR(
+	caps taterPlaybackCapabilities,
+	source taterPlaybackMediaInfo,
+	hdrConfig config.HDREnhancementConfig,
+) bool {
+	sourceRange := cleanTaterVideoRange(source.VideoRange)
+	return hdrConfig.Enabled != nil && *hdrConfig.Enabled &&
+		sourceRange == "sdr" && taterPlaybackCanUseHDRHEVC(caps) &&
+		taterPlaybackRangeSupported(caps.VideoHDRFormats, "hdr10") &&
+		taterPlaybackRangeSupported(caps.DisplayHDRFormats, "hdr10")
+}
+
+func cleanTaterHDREnhancementStrength(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "conservative", "vivid":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "balanced"
+	}
+}
+
+func annotateTaterPlaybackHDREnhancement(rawURL, strength string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return rawURL
+	}
+	query := u.Query()
+	query.Set("tater_hdr_enhancement", cleanTaterHDREnhancementStrength(strength))
+	u.RawQuery = query.Encode()
+	return u.String()
 }
 
 func cleanTaterUpscalingMode(mode string) string {
