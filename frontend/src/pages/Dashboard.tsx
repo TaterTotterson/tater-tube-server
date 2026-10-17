@@ -16,6 +16,7 @@ import {
 import { type ReactNode, useMemo } from "react";
 import { apiClient } from "../api/client";
 import { PlaybackBufferBadge } from "../components/playback/PlaybackBufferBadge";
+import { PlaybackHDREnhancementBadge } from "../components/playback/PlaybackHDREnhancementBadge";
 import { PlaybackUpscalingBadge } from "../components/playback/PlaybackUpscalingBadge";
 import { LocalMediaScanProgress } from "../components/system/LocalMediaScanProgress";
 import {
@@ -185,7 +186,7 @@ function playbackMode(stream?: ActiveStream) {
 	const sourceRange = String(stream.source_video_range || "");
 	const outputRange = String(stream.output_video_range || sourceRange);
 	let rangeDetail = "";
-	if (sourceRange && sourceRange !== "sdr") {
+	if (sourceRange && (sourceRange !== "sdr" || outputRange !== sourceRange)) {
 		rangeDetail = rangeNames[sourceRange] || sourceRange.toUpperCase();
 		if (outputRange && outputRange !== sourceRange) {
 			rangeDetail += ` → ${rangeNames[outputRange] || outputRange.toUpperCase()}`;
@@ -429,6 +430,7 @@ export function Dashboard() {
 												)}
 												{mode && <span className={`badge ${mode.className}`}>{mode.label}</span>}
 												<PlaybackUpscalingBadge stream={stream} />
+												<PlaybackHDREnhancementBadge stream={stream} />
 												<PlaybackBufferBadge stream={stream} />
 												<span className="badge badge-primary">{stream.status || "Streaming"}</span>
 											</div>
@@ -717,6 +719,7 @@ export function Dashboard() {
 														<span className={`badge badge-sm ${mode.className}`}>{mode.label}</span>
 													)}
 													<PlaybackUpscalingBadge stream={stream} compact />
+													<PlaybackHDREnhancementBadge stream={stream} compact />
 												</div>
 											) : lastStream ? (
 												<div className="min-w-0">

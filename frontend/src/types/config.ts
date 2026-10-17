@@ -10,6 +10,7 @@ export interface ConfigResponse {
 	streaming: StreamingConfig;
 	transcoding: TranscodingConfig;
 	upscaling: UpscalingConfig;
+	hdr_enhancement: HDREnhancementConfig;
 	health: HealthConfig;
 	segment_cache: SegmentCacheConfig;
 	import: ImportConfig;
@@ -125,6 +126,22 @@ export interface UpscalingCompatibilityDetection {
 	recommended_model?: string;
 	standard: UpscalingCompatibilityOption;
 	models: UpscalingCompatibilityOption[];
+	notes?: string[];
+}
+
+export interface HDREnhancementConfig {
+	enabled: boolean | null;
+	strength: "conservative" | "balanced" | "vivid" | string;
+}
+
+export interface HDREnhancementCompatibilityDetection {
+	ffmpeg_path: string;
+	ffmpeg_available: boolean;
+	available: boolean;
+	current_enabled: boolean;
+	current_strength: string;
+	status: string;
+	details?: string;
 	notes?: string[];
 }
 
@@ -304,6 +321,7 @@ export interface ConfigUpdateRequest {
 	streaming?: StreamingUpdateRequest;
 	transcoding?: Partial<TranscodingConfig>;
 	upscaling?: Partial<UpscalingConfig>;
+	hdr_enhancement?: Partial<HDREnhancementConfig>;
 	segment_cache?: Partial<SegmentCacheConfig>;
 	health?: HealthUpdateRequest;
 	import?: ImportUpdateRequest;
@@ -443,6 +461,7 @@ export type ConfigSection =
 	| "streaming"
 	| "transcoding"
 	| "upscaling"
+	| "hdr_enhancement"
 	| "segment_cache"
 	| "health"
 	| "import"
@@ -1093,6 +1112,13 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		description:
 			"Choose how lower-resolution video is enlarged when a Tater Tube TV display has a higher resolution.",
 		icon: "Sparkles",
+		canEdit: true,
+	},
+	hdr_enhancement: {
+		title: "HDR Enhancement",
+		description:
+			"Optionally enhance SDR on-demand video into HDR10 for compatible Tater Tube TV displays.",
+		icon: "Sun",
 		canEdit: true,
 	},
 	segment_cache: {

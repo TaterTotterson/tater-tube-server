@@ -453,6 +453,8 @@ export interface ActiveStream {
 		| "artcnn-c4f32"
 		| string;
 	upscaling_active?: boolean;
+	hdr_enhancement?: "conservative" | "balanced" | "vivid" | string;
+	hdr_enhancement_active?: boolean;
 	source_video_range?: string;
 	output_video_range?: string;
 	tone_mapped?: boolean;

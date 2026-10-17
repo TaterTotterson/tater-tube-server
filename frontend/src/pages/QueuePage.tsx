@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { PlaybackBufferBadge } from "../components/playback/PlaybackBufferBadge";
+import { PlaybackHDREnhancementBadge } from "../components/playback/PlaybackHDREnhancementBadge";
 import { PlaybackUpscalingBadge } from "../components/playback/PlaybackUpscalingBadge";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
@@ -258,7 +259,7 @@ function hardwareDetail(stream: ActiveStream) {
 	const sourceRange = String(stream.source_video_range || "");
 	const outputRange = String(stream.output_video_range || sourceRange);
 	let rangeDetail = "";
-	if (sourceRange && sourceRange !== "sdr") {
+	if (sourceRange && (sourceRange !== "sdr" || outputRange !== sourceRange)) {
 		rangeDetail = rangeNames[sourceRange] || sourceRange.toUpperCase();
 		if (outputRange && outputRange !== sourceRange) {
 			rangeDetail += ` → ${rangeNames[outputRange] || outputRange.toUpperCase()}`;
@@ -587,6 +588,7 @@ export function QueuePage() {
 													</div>
 													{(resolution ||
 														stream.upscaling_active ||
+														stream.hdr_enhancement_active ||
 														stream.buffer_target_seconds) && (
 														<div className="mt-2 flex flex-wrap gap-1.5 md:justify-end">
 															{resolution && (
@@ -595,6 +597,7 @@ export function QueuePage() {
 																</span>
 															)}
 															<PlaybackUpscalingBadge stream={stream} compact />
+															<PlaybackHDREnhancementBadge stream={stream} compact />
 															<PlaybackBufferBadge stream={stream} compact />
 														</div>
 													)}

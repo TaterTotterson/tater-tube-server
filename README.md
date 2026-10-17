@@ -222,6 +222,21 @@ model, resolution, or updated graphics driver may still take longer. Docker
 stores the cache under `/config/cache/libplacebo`; the macOS app stores it in
 Application Support. Old cache entries are cleaned automatically.
 
+## HDR Enhancement
+
+Open `Configuration -> HDR Enhancement` to optionally give SDR video an HDR10
+presentation on compatible Tater Tube TV players. The feature is off by default
+and offers **Conservative**, **Balanced**, and **Vivid** strengths. Use **Auto
+Detect** to verify the configured FFmpeg and libplacebo path before enabling it.
+
+HDR Enhancement only runs when an explicitly identified SDR source is being
+transcoded for a player that reports HDR10 support. Native HDR media, SDR-only
+displays, direct play, and Tube TV channels are left unchanged. It can run
+alongside Standard or AI upscaling, uses HEVC Main 10 with BT.2020/PQ output,
+and safely returns to ordinary SDR transcoding if the enhancement path is not
+available. The Activity and Dashboard views identify enhanced streams and the
+selected strength while they are playing.
+
 ## Unraid
 
 | Setting | Value |

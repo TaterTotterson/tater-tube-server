@@ -338,6 +338,36 @@ func TestBuildFFmpegTranscodeArgsUsesP010ForVideoToolboxHDR(t *testing.T) {
 	require.Contains(t, joined, "-c:v hevc_videotoolbox")
 }
 
+func TestBuildFFmpegTranscodeArgsAddsHDREnhancementBeforeMain10Output(t *testing.T) {
+	args := buildFFmpegTranscodeArgsWithOptions(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_4k"], "videotoolbox", transcodeCodecHEVC,
+		transcodeOutputOptions{
+			OutputVideoRange: "hdr10", HDREnhancement: "balanced",
+			Scaler: "spline36", OutputWidth: 3840, OutputHeight: 2160,
+		},
+	)
+	joined := strings.Join(args, " ")
+	require.Contains(t, joined, "inverse_tonemapping=true")
+	require.Contains(t, joined, "tonemapping=spline")
+	require.Contains(t, joined, "color_trc=smpte2084")
+	require.Contains(t, joined, "libplacebo=")
+	require.Contains(t, joined, "format=p010le")
+	require.Less(t, strings.Index(joined, "libplacebo="), strings.Index(joined, "format=p010le"))
+	require.Contains(t, joined, "-c:v hevc_videotoolbox")
+	require.Contains(t, joined, "-color_primaries bt2020")
+}
+
+func TestTaterHDREnhancementStrengthChangesFilter(t *testing.T) {
+	conservative := taterHDREnhancementFilter("conservative")
+	balanced := taterHDREnhancementFilter("balanced")
+	vivid := taterHDREnhancementFilter("vivid")
+	require.Contains(t, conservative, "contrast_recovery=0.10")
+	require.Contains(t, balanced, "tonemapping_param=0.50")
+	require.Contains(t, vivid, "tonemapping_param=0.75")
+	require.NotEqual(t, conservative, balanced)
+	require.NotEqual(t, balanced, vivid)
+}
+
 func TestResolveTaterStandardUpscalerPrefersZscaleWhenAvailable(t *testing.T) {
 	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg")
 	require.NoError(t, os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf ' .SC zscale V->V Apply resizing\\n'\n"), 0o755))

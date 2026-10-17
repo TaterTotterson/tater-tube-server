@@ -51,48 +51,49 @@ type taterLocalLibraryCategoryIndex struct {
 }
 
 type taterLocalLibraryFileIndex struct {
-	Key                string   `json:"key"`
-	CategoryID         string   `json:"category_id"`
-	LibraryType        string   `json:"library_type"`
-	SourceIndex        int      `json:"source_index"`
-	Path               string   `json:"path"`
-	SizeBytes          int64    `json:"size_bytes"`
-	ModifiedUnix       int64    `json:"modified_unix"`
-	ModifiedUnixNano   int64    `json:"modified_unix_nano"`
-	AddedUnix          int64    `json:"added_unix,omitempty"`
-	Title              string   `json:"title,omitempty"`
-	Artist             string   `json:"artist,omitempty"`
-	AlbumArtist        string   `json:"album_artist,omitempty"`
-	Album              string   `json:"album,omitempty"`
-	Genres             []string `json:"genres,omitempty"`
-	Year               string   `json:"year,omitempty"`
-	Description        string   `json:"description,omitempty"`
-	OriginalTitle      string   `json:"original_title,omitempty"`
-	Tagline            string   `json:"tagline,omitempty"`
-	ContentRating      string   `json:"content_rating,omitempty"`
-	CommunityRating    float64  `json:"community_rating,omitempty"`
-	Studios            []string `json:"studios,omitempty"`
-	Countries          []string `json:"countries,omitempty"`
-	Actors             []string `json:"actors,omitempty"`
-	Directors          []string `json:"directors,omitempty"`
-	Writers            []string `json:"writers,omitempty"`
-	IMDbID             string   `json:"imdb_id,omitempty"`
-	TMDBID             int64    `json:"tmdb_id,omitempty"`
-	TVDBID             int64    `json:"tvdb_id,omitempty"`
-	Track              int      `json:"track,omitempty"`
-	Disc               int      `json:"disc,omitempty"`
-	DurationSeconds    float64  `json:"duration_seconds,omitempty"`
-	MediaInfoScanned   bool     `json:"media_info_scanned,omitempty"`
-	VideoWidth         int      `json:"video_width,omitempty"`
-	VideoHeight        int      `json:"video_height,omitempty"`
-	VideoCodec         string   `json:"video_codec,omitempty"`
-	VideoProfile       string   `json:"video_profile,omitempty"`
-	VideoRange         string   `json:"video_range,omitempty"`
-	AudioCodec         string   `json:"audio_codec,omitempty"`
-	AudioProfile       string   `json:"audio_profile,omitempty"`
-	AudioChannels      int      `json:"audio_channels,omitempty"`
-	AudioChannelLayout string   `json:"audio_channel_layout,omitempty"`
-	HasEmbeddedArtwork bool     `json:"has_embedded_artwork,omitempty"`
+	Key                  string   `json:"key"`
+	CategoryID           string   `json:"category_id"`
+	LibraryType          string   `json:"library_type"`
+	SourceIndex          int      `json:"source_index"`
+	Path                 string   `json:"path"`
+	SizeBytes            int64    `json:"size_bytes"`
+	ModifiedUnix         int64    `json:"modified_unix"`
+	ModifiedUnixNano     int64    `json:"modified_unix_nano"`
+	AddedUnix            int64    `json:"added_unix,omitempty"`
+	Title                string   `json:"title,omitempty"`
+	Artist               string   `json:"artist,omitempty"`
+	AlbumArtist          string   `json:"album_artist,omitempty"`
+	Album                string   `json:"album,omitempty"`
+	Genres               []string `json:"genres,omitempty"`
+	Year                 string   `json:"year,omitempty"`
+	Description          string   `json:"description,omitempty"`
+	OriginalTitle        string   `json:"original_title,omitempty"`
+	Tagline              string   `json:"tagline,omitempty"`
+	ContentRating        string   `json:"content_rating,omitempty"`
+	CommunityRating      float64  `json:"community_rating,omitempty"`
+	Studios              []string `json:"studios,omitempty"`
+	Countries            []string `json:"countries,omitempty"`
+	Actors               []string `json:"actors,omitempty"`
+	Directors            []string `json:"directors,omitempty"`
+	Writers              []string `json:"writers,omitempty"`
+	IMDbID               string   `json:"imdb_id,omitempty"`
+	TMDBID               int64    `json:"tmdb_id,omitempty"`
+	TVDBID               int64    `json:"tvdb_id,omitempty"`
+	Track                int      `json:"track,omitempty"`
+	Disc                 int      `json:"disc,omitempty"`
+	DurationSeconds      float64  `json:"duration_seconds,omitempty"`
+	MediaInfoScanned     bool     `json:"media_info_scanned,omitempty"`
+	MediaInfoProbeFailed bool     `json:"media_info_probe_failed,omitempty"`
+	VideoWidth           int      `json:"video_width,omitempty"`
+	VideoHeight          int      `json:"video_height,omitempty"`
+	VideoCodec           string   `json:"video_codec,omitempty"`
+	VideoProfile         string   `json:"video_profile,omitempty"`
+	VideoRange           string   `json:"video_range,omitempty"`
+	AudioCodec           string   `json:"audio_codec,omitempty"`
+	AudioProfile         string   `json:"audio_profile,omitempty"`
+	AudioChannels        int      `json:"audio_channels,omitempty"`
+	AudioChannelLayout   string   `json:"audio_channel_layout,omitempty"`
+	HasEmbeddedArtwork   bool     `json:"has_embedded_artwork,omitempty"`
 }
 
 type taterLocalMusicAlbumIndex struct {
@@ -700,8 +701,15 @@ func scanTaterLocalLibraryWithOptions(
 					file.TVDBID = item.TVDBID
 				}
 				index.Files = append(index.Files, file)
-				if category.LibraryType != "music" &&
-					(file.DurationSeconds <= 0 || !file.MediaInfoScanned) {
+				needsMediaProbe := file.DurationSeconds <= 0 || !file.MediaInfoScanned
+				// A failed probe is persisted as an attempted scan. Automatic
+				// incremental scans should not retry an unchanged unreadable file
+				// forever; a manual full scan may retry it, and any file change
+				// replaces the indexed entry and automatically tries again.
+				if options.Incremental && unchanged && file.MediaInfoScanned {
+					needsMediaProbe = false
+				}
+				if category.LibraryType != "music" && needsMediaProbe {
 					durationJobs = append(durationJobs, taterLocalDurationProbeJob{
 						FileIndex: len(index.Files) - 1,
 						Path:      path,
@@ -790,11 +798,15 @@ func probeTaterLocalLibraryDurations(
 	for result := range results {
 		if result.FileIndex >= 0 && result.FileIndex < len(index.Files) {
 			file := &index.Files[result.FileIndex]
+			// MediaInfoScanned records that the probe completed, not only that
+			// FFprobe could decode the file. This prevents a corrupt or zero-byte
+			// file from keeping the entire library in maintenance forever.
+			file.MediaInfoScanned = true
+			file.MediaInfoProbeFailed = !result.Scanned
 			if result.MediaInfo.DurationSeconds > 0 {
 				file.DurationSeconds = result.MediaInfo.DurationSeconds
 			}
 			if result.Scanned {
-				file.MediaInfoScanned = true
 				file.VideoWidth = result.MediaInfo.Width
 				file.VideoHeight = result.MediaInfo.Height
 				file.VideoCodec = result.MediaInfo.VideoCodec

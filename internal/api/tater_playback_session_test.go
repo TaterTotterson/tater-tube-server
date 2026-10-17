@@ -570,6 +570,89 @@ func TestBuildTaterPlaybackPlanUsesConfiguredAIUpscaling(t *testing.T) {
 	require.Equal(t, "fsrcnnx-16", playbackPlanQuery(t, plan.StreamURL).Get("tater_ai_model"))
 }
 
+func TestBuildTaterPlaybackPlanEnhancesSDRForHDR10Display(t *testing.T) {
+	enabled := true
+	plan := buildTaterPlaybackPlanWithProcessing(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion: 7,
+			Platform:          "android_tv",
+			VideoCodecs:       []string{"h264", "hevc"},
+			AudioCodecs:       []string{"aac"},
+			VideoHDRFormats:   []string{"hdr10"},
+			DisplayHDRFormats: []string{"hdr10"},
+			DisplayHDREnabled: true,
+			MaxVideoBitDepth:  10,
+			MaxWidth:          3840,
+			MaxHeight:         2160,
+			MaxAudioChannels:  2,
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mkv", VideoCodec: "h264", Width: 1920, Height: 1080,
+		VideoRange: "sdr", VideoBitDepth: 8, AudioCodec: "aac", AudioChannels: 2,
+	}, "off", "fsrcnnx-8", config.HDREnhancementConfig{
+		Enabled: &enabled, Strength: "vivid",
+	})
+
+	require.Equal(t, "full_transcode", plan.Mode)
+	require.Equal(t, "hevc", plan.VideoCodec)
+	require.Equal(t, "hdr10", plan.OutputVideoRange)
+	require.True(t, plan.HDREnhanced)
+	require.Equal(t, "vivid", plan.HDREnhancement)
+	require.Contains(t, plan.QualityLabel, "SDR → HDR10 Enhanced")
+	query := playbackPlanQuery(t, plan.StreamURL)
+	require.Equal(t, "vivid", query.Get("tater_hdr_enhancement"))
+	require.Equal(t, "hdr10", query.Get("tater_output_video_range"))
+}
+
+func TestBuildTaterPlaybackPlanDoesNotEnhanceNativeHDR(t *testing.T) {
+	enabled := true
+	plan := buildTaterPlaybackPlanWithProcessing(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mkv",
+		Profile:   "hdmi_4k",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion: 7, Platform: "android_tv",
+			VideoCodecs: []string{"hevc"}, AudioCodecs: []string{"aac"},
+			VideoHDRFormats: []string{"hdr10"}, DisplayHDRFormats: []string{"hdr10"},
+			DisplayHDREnabled: true, MaxVideoBitDepth: 10,
+			MaxWidth: 3840, MaxHeight: 2160, MaxAudioChannels: 2,
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mkv", VideoCodec: "hevc", Width: 3840, Height: 2160,
+		VideoRange: "hdr10", VideoBitDepth: 10, AudioCodec: "aac", AudioChannels: 2,
+	}, "off", "fsrcnnx-8", config.HDREnhancementConfig{
+		Enabled: &enabled, Strength: "balanced",
+	})
+
+	require.False(t, plan.HDREnhanced)
+	require.Empty(t, plan.HDREnhancement)
+	require.Empty(t, playbackPlanQuery(t, plan.StreamURL).Get("tater_hdr_enhancement"))
+}
+
+func TestBuildTaterPlaybackPlanDoesNotEnhanceForSDROnlyDisplay(t *testing.T) {
+	enabled := true
+	plan := buildTaterPlaybackPlanWithProcessing(taterPlaybackSessionRequest{
+		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mp4",
+		Profile:   "hdmi_1080p",
+		Capabilities: taterPlaybackCapabilities{
+			CapabilityVersion: 7, Platform: "android_tv",
+			VideoCodecs: []string{"h264", "hevc"}, AudioCodecs: []string{"aac"},
+			MaxVideoBitDepth: 10, MaxWidth: 1920, MaxHeight: 1080, MaxAudioChannels: 2,
+		},
+	}, taterPlaybackMediaInfo{
+		Container: "mp4", VideoCodec: "h264", Width: 1920, Height: 1080,
+		VideoRange: "sdr", VideoBitDepth: 8, AudioCodec: "aac", AudioChannels: 2,
+	}, "off", "fsrcnnx-8", config.HDREnhancementConfig{
+		Enabled: &enabled, Strength: "balanced",
+	})
+
+	require.Equal(t, "direct", plan.Mode)
+	require.False(t, plan.HDREnhanced)
+	require.Equal(t, "sdr", plan.OutputVideoRange)
+	require.Empty(t, playbackPlanQuery(t, plan.StreamURL).Get("tater_hdr_enhancement"))
+}
+
 func TestBuildTaterPlaybackPlanCanDisableUpscaling(t *testing.T) {
 	plan := buildTaterPlaybackPlanWithUpscaling(taterPlaybackSessionRequest{
 		StreamURL: "http://tube.local/api/tater/local/stream?path=movie.mp4",

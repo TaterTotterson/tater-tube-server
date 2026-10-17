@@ -42,6 +42,12 @@ upscaling:
   # artcnn-c4f16, artcnn-c4f16-ds, or artcnn-c4f32
   model: 'fsrcnnx-8'
 
+# Experimental SDR-to-HDR10 enhancement for compatible Tater Tube TV players.
+hdr_enhancement:
+  enabled: false
+  # conservative, balanced, or vivid
+  strength: 'balanced'
+
 newznab:
   enabled: false
   url: ''
