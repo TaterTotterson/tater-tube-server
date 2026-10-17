@@ -3,10 +3,24 @@ package api
 import (
 	"context"
 	"log/slog"
+	"reflect"
 	"time"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
 )
+
+// taterLocalLibraryAutomationConfigChanged limits scanner and watcher
+// restarts to settings that can actually affect local-library discovery.
+// Player heartbeats persist last_seen_at through the shared config manager,
+// so treating every config write as a library change creates a scan loop.
+func taterLocalLibraryAutomationConfigChanged(oldConfig, newConfig *config.Config) bool {
+	if oldConfig == nil || newConfig == nil {
+		return true
+	}
+	return !reflect.DeepEqual(oldConfig.LocalMedia, newConfig.LocalMedia) ||
+		oldConfig.Transcoding.FFmpegPath != newConfig.Transcoding.FFmpegPath ||
+		oldConfig.Metadata.RootPath != newConfig.Metadata.RootPath
+}
 
 const (
 	taterLocalLibraryAutoScanStartupDelay = 30 * time.Second

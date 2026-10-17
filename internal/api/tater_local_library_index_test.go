@@ -390,6 +390,44 @@ func TestTaterLocalLibraryAutoScanSettings(t *testing.T) {
 	}
 }
 
+func TestTaterLocalLibraryAutomationConfigIgnoresPlayerHeartbeat(t *testing.T) {
+	before := config.DefaultConfig(t.TempDir())
+	before.Players.Paired = []config.PlayerConfig{{
+		ID: "living-room", Name: "Living Room", LastSeenAt: "2026-10-17T18:00:00Z",
+	}}
+	after := before.DeepCopy()
+	after.Players.Paired[0].LastSeenAt = "2026-10-17T18:01:00Z"
+
+	if taterLocalLibraryAutomationConfigChanged(before, after) {
+		t.Fatal("player last-seen heartbeat must not restart local-library automation")
+	}
+}
+
+func TestTaterLocalLibraryAutomationConfigDetectsRelevantChanges(t *testing.T) {
+	before := config.DefaultConfig(t.TempDir())
+
+	tests := map[string]func(*config.Config){
+		"local media": func(cfg *config.Config) {
+			cfg.LocalMedia.AutoScanIntervalMinutes++
+		},
+		"ffmpeg path": func(cfg *config.Config) {
+			cfg.Transcoding.FFmpegPath += "-updated"
+		},
+		"metadata root": func(cfg *config.Config) {
+			cfg.Metadata.RootPath += "-updated"
+		},
+	}
+	for name, change := range tests {
+		t.Run(name, func(t *testing.T) {
+			after := before.DeepCopy()
+			change(after)
+			if !taterLocalLibraryAutomationConfigChanged(before, after) {
+				t.Fatal("relevant config change did not restart local-library automation")
+			}
+		})
+	}
+}
+
 func TestTaterLocalLibraryWatcherReportsPerPathFallback(t *testing.T) {
 	root := t.TempDir()
 	nested := filepath.Join(root, "Show", "Season 01")
