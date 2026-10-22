@@ -1487,10 +1487,7 @@ func (s *Server) handleLocalMediaScan(c *fiber.Ctx) error {
 	}
 	go func() {
 		if _, err := runTaterLocalLibraryScan(cfg, request); err == nil {
-			taterTVResetGuideForConfig(cfg)
-			if _, guideErr := taterTVEnsureGuide(cfg, "", time.Now()); guideErr != nil {
-				slog.Warn("Failed to rebuild Tube TV guide after local media scan", "error", guideErr)
-			}
+			taterTVRefreshGuideAfterLibraryChange(cfg)
 		}
 	}()
 	return RespondSuccess(c, s.getTaterLocalLibraryScanStatusWithMonitor(cfg))

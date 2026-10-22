@@ -527,7 +527,7 @@ func (s *Server) runTVGuidePlanner(ctx context.Context) {
 				slog.WarnContext(ctx, "Failed to maintain local media index", "error", err)
 				return
 			}
-			taterTVResetGuideForConfig(scanCfg)
+			taterTVMarkGuideForLibraryRefresh(scanCfg, time.Now())
 			cfg = scanCfg
 		}
 		if _, err := taterTVEnsureGuide(cfg, "", time.Now()); err != nil {

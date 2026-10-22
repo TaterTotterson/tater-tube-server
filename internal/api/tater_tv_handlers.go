@@ -133,7 +133,7 @@ const (
 	taterTVGuidePlannerInterval = 5 * time.Minute
 	taterTVGuideRetryInterval   = 5 * time.Minute
 	taterTVGuideFutureTolerance = time.Minute
-	taterTVGuideCacheVersion    = 9
+	taterTVGuideCacheVersion    = 10
 	taterTVGuideCacheFile       = "tube-tv-guide-cache.json"
 )
 
@@ -487,13 +487,17 @@ func taterBuildTVLineupUntil(cfg *config.Config, baseURL, playerToken string, mi
 		number := numbered.Number
 		source := numbered.Source
 		var schedule []map[string]any
+		var history []map[string]any
 		total := 0.0
 		if existingChannel, ok := existingByNumber[number]; ok &&
 			strings.EqualFold(existingChannel.Title, source.Title) {
 			schedule = append(schedule, existingChannel.Schedule...)
+			history = existingChannel.Schedule
 			total = existingChannel.TotalDuration
 		}
-		added, nextTotal := taterTVBuildScheduleUntilWithBumpers(cfg, source, commercials, bumpers, rng, total, minDurationSeconds)
+		added, nextTotal := taterTVBuildScheduleUntilWithBumpersAndHistory(
+			cfg, source, commercials, bumpers, history, rng, total, minDurationSeconds,
+		)
 		schedule = append(schedule, added...)
 		total = nextTotal
 		if len(schedule) == 0 || total <= 0 {
@@ -960,9 +964,15 @@ func taterTVBuildScheduleUntil(cfg *config.Config, source taterTVSource, commerc
 }
 
 func taterTVBuildScheduleUntilWithBumpers(cfg *config.Config, source taterTVSource, commercialCategories []taterTVCommercialCategory, bumperGroups []taterTVBumperGroup, rng *rand.Rand, start, minEnd float64) ([]map[string]any, float64) {
+	return taterTVBuildScheduleUntilWithBumpersAndHistory(
+		cfg, source, commercialCategories, bumperGroups, nil, rng, start, minEnd,
+	)
+}
+
+func taterTVBuildScheduleUntilWithBumpersAndHistory(cfg *config.Config, source taterTVSource, commercialCategories []taterTVCommercialCategory, bumperGroups []taterTVBumperGroup, history []map[string]any, rng *rand.Rand, start, minEnd float64) ([]map[string]any, float64) {
 	schedule := []map[string]any{}
 	total := start
-	decks := taterTVNewScheduleDecks(cfg, source, commercialCategories, bumperGroups)
+	decks := taterTVNewScheduleDecksWithHistory(cfg, source, commercialCategories, bumperGroups, history)
 	for total < minEnd {
 		before := total
 		var added []map[string]any
@@ -983,6 +993,7 @@ func taterTVBuildSchedulePass(cfg *config.Config, source taterTVSource, commerci
 }
 
 type taterTVScheduleDecks struct {
+	programs                 *taterTVProgramDeck
 	commercials              []taterTVCommercial
 	commercialDeck           []taterTVCommercial
 	beforeBumpers            []taterTVBumper
@@ -998,6 +1009,10 @@ type taterTVScheduleDecks struct {
 }
 
 func taterTVNewScheduleDecks(cfg *config.Config, source taterTVSource, commercialCategories []taterTVCommercialCategory, bumperGroups []taterTVBumperGroup) *taterTVScheduleDecks {
+	return taterTVNewScheduleDecksWithHistory(cfg, source, commercialCategories, bumperGroups, nil)
+}
+
+func taterTVNewScheduleDecksWithHistory(cfg *config.Config, source taterTVSource, commercialCategories []taterTVCommercialCategory, bumperGroups []taterTVBumperGroup, history []map[string]any) *taterTVScheduleDecks {
 	beforeBumpers := []taterTVBumper{}
 	afterBumpers := []taterTVBumper{}
 	if !source.BumpersDisabled {
@@ -1018,6 +1033,7 @@ func taterTVNewScheduleDecks(cfg *config.Config, source taterTVSource, commercia
 		(cfg.TubeTV.CommercialsEnabled == nil || *cfg.TubeTV.CommercialsEnabled) &&
 		!source.CommercialsDisabled
 	return &taterTVScheduleDecks{
+		programs:      taterTVNewProgramDeck(source, history),
 		commercials:   commercials,
 		beforeBumpers: beforeBumpers,
 		afterBumpers:  afterBumpers,
@@ -1030,7 +1046,9 @@ func taterTVNewScheduleDecks(cfg *config.Config, source taterTVSource, commercia
 func taterTVBuildSchedulePassWithDecks(cfg *config.Config, source taterTVSource, decks *taterTVScheduleDecks, rng *rand.Rand, start, maxEnd float64) ([]map[string]any, float64) {
 	schedule := []map[string]any{}
 	total := start
-	if len(source.Groups) > 0 && len(source.Programs) == 0 {
+	if decks != nil && decks.programs != nil {
+		total = taterTVAppendCustomProgramSchedule(cfg, &schedule, total, maxEnd, decks, rng)
+	} else if len(source.Groups) > 0 && len(source.Programs) == 0 {
 		total = taterTVAppendEpisodeSchedule(cfg, schedule, &schedule, total, maxEnd, source.Groups, decks, rng)
 	} else if len(source.Groups) > 0 {
 		total = taterTVAppendMixedSchedule(cfg, schedule, &schedule, total, maxEnd, source.Programs, source.Groups, decks, rng)
@@ -1038,6 +1056,162 @@ func taterTVBuildSchedulePassWithDecks(cfg *config.Config, source taterTVSource,
 		total = taterTVAppendMovieSchedule(cfg, schedule, &schedule, total, maxEnd, source.Programs, decks, rng)
 	}
 	return schedule, total
+}
+
+type taterTVProgramDeckItem struct {
+	Item taterUsenetItem
+	Kind string
+	Key  string
+}
+
+type taterTVProgramDeck struct {
+	pool      []taterTVProgramDeckItem
+	remaining []taterTVProgramDeckItem
+	lastKey   string
+}
+
+func taterTVNewProgramDeck(source taterTVSource, history []map[string]any) *taterTVProgramDeck {
+	if source.SourceType != "custom" {
+		return nil
+	}
+	pool := taterTVProgramPool(source)
+	if len(pool) == 0 {
+		return nil
+	}
+	eligible := make(map[string]bool, len(pool))
+	for _, program := range pool {
+		eligible[program.Key] = true
+	}
+
+	// The guide itself is the durable cursor. Replaying its program starts
+	// reconstructs the current cycle after guide extension or server restart,
+	// without introducing a second state file that can drift from the schedule.
+	used := make(map[string]bool, len(pool))
+	lastKey := ""
+	for _, row := range history {
+		if taterTVIsInterstitial(rowString(row, "kind")) || rowFloat(row, "mediaOffset") > 0 {
+			continue
+		}
+		key := taterTVProgramRowKey(row)
+		if key == "" || !eligible[key] {
+			continue
+		}
+		// A duplicate indicates the next cycle. New guides never reach this
+		// branch early; retaining it makes recovery safe if an older cache is
+		// encountered or a source changes unexpectedly.
+		if used[key] {
+			clear(used)
+		}
+		used[key] = true
+		lastKey = key
+		if len(used) == len(pool) {
+			clear(used)
+		}
+	}
+
+	remaining := make([]taterTVProgramDeckItem, 0, len(pool)-len(used))
+	for _, program := range pool {
+		if !used[program.Key] {
+			remaining = append(remaining, program)
+		}
+	}
+	return &taterTVProgramDeck{pool: pool, remaining: remaining, lastKey: lastKey}
+}
+
+func taterTVProgramPool(source taterTVSource) []taterTVProgramDeckItem {
+	pool := make([]taterTVProgramDeckItem, 0, len(source.Programs))
+	seen := map[string]bool{}
+	appendProgram := func(item taterUsenetItem, kind string) {
+		if strings.TrimSpace(item.StreamURL) == "" || taterTVDuration(item, kind) <= 0 {
+			return
+		}
+		key := taterTVProgramItemKey(item, kind)
+		if key == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		pool = append(pool, taterTVProgramDeckItem{Item: item, Kind: kind, Key: key})
+	}
+	for _, item := range source.Programs {
+		appendProgram(item, "movie")
+	}
+	for _, group := range source.Groups {
+		for _, episode := range group.Episodes {
+			appendProgram(episode, "episode")
+		}
+	}
+	return pool
+}
+
+func taterTVProgramItemKey(item taterUsenetItem, kind string) string {
+	return taterTVProgramIdentity(item.CategoryID, item.SourceIndex, item.Path, kind, item.Title)
+}
+
+func taterTVProgramRowKey(row map[string]any) string {
+	return taterTVProgramIdentity(
+		rowString(row, "categoryId"),
+		rowInt(row, "sourceIndex", 0),
+		rowString(row, "path"),
+		rowString(row, "kind"),
+		rowString(row, "title"),
+	)
+}
+
+func taterTVProgramIdentity(categoryID string, sourceIndex int, path, kind, title string) string {
+	categoryID = strings.ToLower(strings.TrimSpace(categoryID))
+	path = strings.ReplaceAll(strings.TrimSpace(path), "\\", "/")
+	if path != "" {
+		return "path\x00" + categoryID + "\x00" + strconv.Itoa(sourceIndex) + "\x00" + path
+	}
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	title = strings.ToLower(cleanTaterText(title))
+	if title == "" {
+		return ""
+	}
+	return "title\x00" + kind + "\x00" + title
+}
+
+func (deck *taterTVProgramDeck) prepareCycle(rng *rand.Rand) int {
+	if deck == nil || len(deck.pool) == 0 {
+		return 0
+	}
+	if len(deck.remaining) == 0 {
+		deck.remaining = append([]taterTVProgramDeckItem{}, deck.pool...)
+	}
+	rng.Shuffle(len(deck.remaining), func(i, j int) {
+		deck.remaining[i], deck.remaining[j] = deck.remaining[j], deck.remaining[i]
+	})
+	if len(deck.remaining) > 1 && deck.remaining[0].Key == deck.lastKey {
+		deck.remaining[0], deck.remaining[1] = deck.remaining[1], deck.remaining[0]
+	}
+	return len(deck.remaining)
+}
+
+func (deck *taterTVProgramDeck) next() (taterTVProgramDeckItem, bool) {
+	if deck == nil || len(deck.remaining) == 0 {
+		return taterTVProgramDeckItem{}, false
+	}
+	next := deck.remaining[0]
+	deck.remaining = deck.remaining[1:]
+	deck.lastKey = next.Key
+	return next, true
+}
+
+func taterTVAppendCustomProgramSchedule(cfg *config.Config, schedule *[]map[string]any, start, maxEnd float64, decks *taterTVScheduleDecks, rng *rand.Rand) float64 {
+	total := start
+	cycleRemaining := decks.programs.prepareCycle(rng)
+	for slot := 0; slot < cycleRemaining && total < maxEnd; slot++ {
+		program, ok := decks.programs.next()
+		if !ok {
+			break
+		}
+		before := total
+		total = taterTVAppendProgram(cfg, schedule, total, program.Item, program.Kind, decks, rng)
+		if total > before {
+			total = taterTVAppendCommercialBreak(cfg, schedule, total, decks, rng)
+		}
+	}
+	return total
 }
 
 func taterTVAppendMovieSchedule(cfg *config.Config, _ []map[string]any, schedule *[]map[string]any, start, maxEnd float64, programs []taterUsenetItem, decks *taterTVScheduleDecks, rng *rand.Rand) float64 {
@@ -1769,6 +1943,50 @@ func taterTVResetGuide() {
 func taterTVResetGuideForConfig(cfg *config.Config) {
 	taterTVResetGuide()
 	taterTVDeleteGuideCache(cfg)
+}
+
+// taterTVMarkGuideForLibraryRefresh preserves the schedule that is currently
+// on air while asking the planner to extend it from the updated library index.
+// A local-library scan must not randomize the live channel underneath viewers.
+func taterTVMarkGuideForLibraryRefresh(cfg *config.Config, now time.Time) {
+	if cfg == nil {
+		return
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	taterTVGuideMu.Lock()
+	defer taterTVGuideMu.Unlock()
+
+	fingerprint := taterTVGuideFingerprint(cfg)
+	if taterTVGuideCache == nil {
+		if cached, ok := taterTVLoadGuideCache(cfg, fingerprint); ok {
+			taterTVGuideCache = cached
+		}
+	}
+	if taterTVGuideCache == nil || taterTVGuideCache.Fingerprint != fingerprint ||
+		taterTVGuideCache.StartedAt.IsZero() || len(taterTVGuideCache.Channels) == 0 {
+		return
+	}
+
+	// Expire only the planning horizon. EnsureGuide will pass the existing
+	// channels back into the builder, retaining every scheduled item and adding
+	// newly discovered media after the established lineup.
+	taterTVGuideCache.PlannedUntil = now
+	taterTVGuideCache.UpdatedAt = time.Time{}
+	taterTVSaveGuideCache(cfg, *taterTVGuideCache)
+}
+
+func taterTVRefreshGuideAfterLibraryChange(cfg *config.Config) {
+	now := time.Now()
+	taterTVMarkGuideForLibraryRefresh(cfg, now)
+	if cfg == nil || !taterTubeTVEnabled(cfg) {
+		return
+	}
+	if _, err := taterTVEnsureGuide(cfg, "", now); err != nil {
+		slog.Warn("Failed to refresh Tube TV guide after local media scan", "error", err)
+	}
 }
 
 type taterTVGuideDiskCache struct {
