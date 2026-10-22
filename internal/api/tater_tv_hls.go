@@ -29,13 +29,19 @@ const (
 	taterTVHLSInitialSegments   = 6
 	taterTVHLSLiveStartSegments = 2
 	taterTVHLSRunWindow         = 12 * time.Hour
-	taterTVHLSPlaylistLimit     = 12
+	// Keep a full minute in the live manifest. TV clients may temporarily stop
+	// polling while they refill their own decoder buffer; a twelve-segment
+	// window left too little room for them to resume without jumping forward.
+	taterTVHLSPlaylistLimit = 30
 	// Retain one extra playlist window on disk so a client fetching from the
 	// previous manifest can finish without allowing a long-running channel to
 	// accumulate every segment it has ever produced.
 	taterTVHLSSegmentFileLimit = taterTVHLSPlaylistLimit * 2
 	taterTVHLSFirstWait        = 30 * time.Second
-	taterTVHLSIdleTimeout      = 15 * time.Second
+	// Guide maintenance and brief client/network stalls must not tear down an
+	// otherwise healthy live channel. Player ownership still stops a session
+	// immediately when the user changes channels or ends playback.
+	taterTVHLSIdleTimeout = 90 * time.Second
 	// Leave slightly more than one 48 kHz AAC/video frame between independently
 	// muxed items so encoder padding cannot make the next DTS overlap the last.
 	taterTVHLSTimestampGuardSeconds = 0.050
@@ -215,6 +221,16 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 	if !taterTubeTVEnabled(cfg) {
 		http.Error(w, "Tube TV is not enabled", http.StatusServiceUnavailable)
 		return nil, "", false
+	}
+	// A live playlist must never wait behind guide generation. Library changes
+	// can take several seconds to fold into a twelve-hour guide; the player is
+	// already bound to a stable channel encoder, so return it before touching the
+	// guide lock. This also keeps the current program and its normal bumper
+	// boundary intact while future programming is refreshed in the background.
+	if session := globalTaterTVHLS.activeSessionForPlayer(player.ID, number); session != nil {
+		session.touch()
+		h.recordHLSPlayback(r, session, player, 0)
+		return session, playerToken, true
 	}
 	baseURL := taterHTTPRequestBaseURL(r)
 	guide, err := taterTVEnsureGuide(cfg, baseURL, time.Now())
@@ -436,6 +452,27 @@ func (m *taterTVHLSManager) get(key string) *taterTVHLSSession {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	session := m.sessions[key]
+	return session
+}
+
+// activeSessionForPlayer returns the stable encoder already owned by this
+// player when it is still tuned to the requested channel. In particular, this
+// lookup does not consult or lock the guide: an in-progress guide refresh must
+// never interrupt playback that has already been planned.
+func (m *taterTVHLSManager) activeSessionForPlayer(playerID, channelNumber string) *taterTVHLSSession {
+	playerID = strings.TrimSpace(playerID)
+	channelNumber = strings.TrimSpace(channelNumber)
+	if playerID == "" || channelNumber == "" {
+		return nil
+	}
+
+	m.mu.Lock()
+	key := m.playerSessions[playerID]
+	session := m.sessions[key]
+	m.mu.Unlock()
+	if session == nil || session.number != channelNumber || session.finished() {
+		return nil
+	}
 	return session
 }
 

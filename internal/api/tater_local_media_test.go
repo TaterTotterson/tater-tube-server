@@ -1600,6 +1600,122 @@ func TestTaterTVCustomChannelCanDisableCommercialsAndBumpers(t *testing.T) {
 	}
 }
 
+func TestTaterTVCustomChannelExhaustsEveryProgramBeforeRepeating(t *testing.T) {
+	cfg := config.DefaultConfig(t.TempDir())
+	cfg.TubeTV.CommercialsEnabled = boolPtr(false)
+	cfg.TaterBumpers.LiveTV = boolPtr(false)
+	media := func(title, mediaType, path string) taterUsenetItem {
+		return taterUsenetItem{
+			Title: title, MediaType: mediaType, CategoryID: "local:library", SourceIndex: 0,
+			Path: path, StreamURL: "http://server/" + path, DurationSeconds: 60,
+		}
+	}
+	source := taterTVSource{
+		Title: "Everything Once", SourceType: "custom",
+		CommercialsDisabled: true, BumpersDisabled: true,
+		Programs: []taterUsenetItem{
+			media("Movie One", "movie", "movies/movie-1.mkv"),
+			media("Movie Two", "movie", "movies/movie-2.mkv"),
+		},
+		Groups: []taterTVEpisodeGroup{
+			{Title: "Show One", Episodes: []taterUsenetItem{
+				media("Show One - Episode 1", "episode", "shows/one/s01e01.mkv"),
+				media("Show One - Episode 2", "episode", "shows/one/s01e02.mkv"),
+			}},
+			{Title: "Show Two", Episodes: []taterUsenetItem{
+				media("Show Two - Episode 1", "episode", "shows/two/s01e01.mkv"),
+				media("Show Two - Episode 2", "episode", "shows/two/s01e02.mkv"),
+				media("Show Two - Episode 3", "episode", "shows/two/s01e03.mkv"),
+			}},
+		},
+	}
+	poolSize := len(source.Programs) + len(source.Groups[0].Episodes) + len(source.Groups[1].Episodes)
+
+	for seed := int64(0); seed < 25; seed++ {
+		schedule, _ := taterTVBuildScheduleUntil(
+			cfg, source, nil, rand.New(rand.NewSource(seed)), 0, float64(poolSize+1)*60,
+		)
+		keys := taterTVTestProgramKeys(schedule)
+		if len(keys) != poolSize+1 {
+			t.Fatalf("seed %d: expected one complete cycle and one repeated item, got %d: %#v", seed, len(keys), schedule)
+		}
+		seen := map[string]bool{}
+		for _, key := range keys[:poolSize] {
+			if seen[key] {
+				t.Fatalf("seed %d: program %q repeated before the %d-item deck was exhausted: %#v", seed, key, poolSize, keys)
+			}
+			seen[key] = true
+		}
+		if !seen[keys[poolSize]] {
+			t.Fatalf("seed %d: expected the next cycle to reuse the same program pool: %#v", seed, keys)
+		}
+		if keys[poolSize-1] == keys[poolSize] {
+			t.Fatalf("seed %d: program repeated immediately across the cycle boundary: %#v", seed, keys)
+		}
+	}
+}
+
+func TestTaterTVCustomChannelRotationSurvivesGuideRefillAndJSONCache(t *testing.T) {
+	cfg := config.DefaultConfig(t.TempDir())
+	cfg.TubeTV.CommercialsEnabled = boolPtr(false)
+	cfg.TaterBumpers.LiveTV = boolPtr(false)
+	source := taterTVSource{
+		Title: "Persistent Rotation", SourceType: "custom",
+		CommercialsDisabled: true, BumpersDisabled: true,
+	}
+	for index := 1; index <= 6; index++ {
+		source.Programs = append(source.Programs, taterUsenetItem{
+			Title:           fmt.Sprintf("Feature %d", index),
+			MediaType:       "movie",
+			CategoryID:      "local:movies",
+			SourceIndex:     0,
+			Path:            fmt.Sprintf("feature-%d.mkv", index),
+			StreamURL:       fmt.Sprintf("http://server/feature-%d", index),
+			DurationSeconds: 60,
+		})
+	}
+
+	first, firstTotal := taterTVBuildScheduleUntilWithBumpersAndHistory(
+		cfg, source, nil, nil, nil, rand.New(rand.NewSource(11)), 0, 2*60,
+	)
+	encoded, err := json.Marshal(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored []map[string]any
+	if err := json.Unmarshal(encoded, &restored); err != nil {
+		t.Fatal(err)
+	}
+	second, _ := taterTVBuildScheduleUntilWithBumpersAndHistory(
+		cfg, source, nil, nil, restored, rand.New(rand.NewSource(29)), firstTotal, 4*60,
+	)
+
+	keys := taterTVTestProgramKeys(append(restored, second...))
+	if len(keys) != 4 {
+		t.Fatalf("expected four programs across the initial guide and refill, got %#v", keys)
+	}
+	seen := map[string]bool{}
+	for _, key := range keys {
+		if seen[key] {
+			t.Fatalf("program %q repeated after guide cache restore before the deck was exhausted: %#v", key, keys)
+		}
+		seen[key] = true
+	}
+}
+
+func taterTVTestProgramKeys(schedule []map[string]any) []string {
+	keys := []string{}
+	for _, row := range schedule {
+		if taterTVIsInterstitial(rowString(row, "kind")) || rowFloat(row, "mediaOffset") > 0 {
+			continue
+		}
+		if key := taterTVProgramRowKey(row); key != "" {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
 func TestTaterTVCustomChannelBumpersPlayWithoutCommercials(t *testing.T) {
 	cfg := config.DefaultConfig(t.TempDir())
 	cfg.TubeTV.CommercialsEnabled = boolPtr(true)
@@ -1993,6 +2109,46 @@ func TestTaterTVGuideBuildsAndExtendsSharedSchedule(t *testing.T) {
 	}
 	if extended.Channels[0].TotalDuration <= firstDuration {
 		t.Fatalf("expected guide extension beyond %f, got %f", firstDuration, extended.Channels[0].TotalDuration)
+	}
+}
+
+func TestTaterTVLibraryRefreshPreservesCurrentSchedule(t *testing.T) {
+	taterTVResetGuide()
+	cfg := config.DefaultConfig(t.TempDir())
+	defer taterTVResetGuideForConfig(cfg)
+
+	startedAt := time.Now().Add(-time.Hour).Truncate(time.Second)
+	originalSchedule := []map[string]any{
+		{"title": "Already On Air", "kind": "episode", "start": 0.0, "end": 3600.0},
+		{"title": "Already Planned", "kind": "episode", "start": 3600.0, "end": 7200.0},
+	}
+	taterTVGuideCache = &taterTVGuideCacheEntry{
+		Channels: []taterTVChannel{{
+			Number: "03", Title: "Stable Channel", Schedule: originalSchedule, TotalDuration: 7200,
+		}},
+		StartedAt: startedAt, GeneratedAt: startedAt, UpdatedAt: startedAt,
+		PlannedUntil: startedAt.Add(2 * time.Hour),
+		Fingerprint:  taterTVGuideFingerprint(cfg),
+	}
+
+	now := time.Now().Truncate(time.Second)
+	taterTVMarkGuideForLibraryRefresh(cfg, now)
+
+	guide, ok := taterTVCachedGuide(cfg)
+	if !ok {
+		t.Fatal("expected the current guide to remain available during a library refresh")
+	}
+	if !guide.StartedAt.Equal(startedAt) {
+		t.Fatalf("library refresh changed the live guide start: got %s want %s", guide.StartedAt, startedAt)
+	}
+	if !reflect.DeepEqual(guide.Channels[0].Schedule, originalSchedule) {
+		t.Fatalf("library refresh replaced the current schedule: %#v", guide.Channels[0].Schedule)
+	}
+	if !guide.PlannedUntil.Equal(now) || !guide.UpdatedAt.IsZero() {
+		t.Fatalf("expected only the planning horizon to expire, got planned=%s updated=%s", guide.PlannedUntil, guide.UpdatedAt)
+	}
+	if _, err := os.Stat(taterTVGuideCachePath(cfg)); err != nil {
+		t.Fatalf("expected the preserved guide to remain durable: %v", err)
 	}
 }
 
@@ -2720,6 +2876,29 @@ func TestTaterTVHLSInitialPlaylistRequiresSixSegments(t *testing.T) {
 	}
 }
 
+func TestTaterTVHLSReusesPlayerSessionWithoutConsultingGuide(t *testing.T) {
+	manager := &taterTVHLSManager{
+		sessions:       map[string]*taterTVHLSSession{},
+		playerSessions: map[string]string{},
+	}
+	session := &taterTVHLSSession{
+		key: "stable-session", number: "03", accessed: time.Now(),
+	}
+	manager.sessions[session.key] = session
+	manager.playerSessions["office-tv"] = session.key
+
+	if got := manager.activeSessionForPlayer("office-tv", "03"); got != session {
+		t.Fatalf("expected the player to retain its active channel session, got %#v", got)
+	}
+	if got := manager.activeSessionForPlayer("office-tv", "04"); got != nil {
+		t.Fatalf("a different channel must not reuse the old encoder: %#v", got)
+	}
+	session.done = true
+	if got := manager.activeSessionForPlayer("office-tv", "03"); got != nil {
+		t.Fatalf("a completed channel session must not be reused: %#v", got)
+	}
+}
+
 func TestTaterTVClientLogoOverlayUsesSeparateHLSSession(t *testing.T) {
 	serverKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecH264, false, nil, 2, "", "")
 	clientKey := taterTVHLSKey("7", "guide", "hdmi_4k", "qsv", transcodeCodecH264, true, nil, 2, "", "")
@@ -3058,7 +3237,7 @@ func TestTaterTVHLSPlaylistUsesSmallLiveWindow(t *testing.T) {
 		requestedAccel: "auto",
 		accessed:       time.Now(),
 	}
-	for i := 0; i < 20; i++ {
+	for i := 0; i < taterTVHLSPlaylistLimit+8; i++ {
 		session.segments = append(session.segments, taterTVHLSSegment{
 			Sequence:      int64(i),
 			Duration:      2,

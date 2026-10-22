@@ -166,9 +166,10 @@ func (s *Server) runLocalLibraryScanner(ctx context.Context) {
 		} else {
 			slog.InfoContext(ctx, "Automatic local media scan completed")
 			if previousErr != nil || taterLocalLibraryFilesChanged(previous, index) {
-				// Tube TV observes the updated local index and rebuilds on its own
-				// planner cycle; invalidate only when the media set changed.
-				taterTVResetGuideForConfig(scanCfg)
+				// Preserve anything currently on air and extend future programming
+				// from the updated index. Replacing the guide here used to make a
+				// recovering player jump into a newly randomized episode.
+				taterTVRefreshGuideAfterLibraryChange(scanCfg)
 			}
 			delay = taterLocalLibraryNextScheduledDelay(cfg)
 		}
