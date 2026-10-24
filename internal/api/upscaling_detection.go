@@ -117,7 +117,7 @@ func detectUpscalingCompatibility(
 	}
 	result.Notes = append(result.Notes,
 		"Compatibility confirms that a model can initialize; playback speed still depends on resolution and current GPU load.",
-		"AI remains limited to compatible SDR upscales between 1.3x and 2x and falls back safely when media is not eligible.",
+		"AI uses one native x2 pass for compatible SDR media. Larger targets up to 4K finish with Standard scaling and fall back safely when media is not eligible.",
 	)
 	return result
 }

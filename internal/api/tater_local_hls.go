@@ -425,6 +425,8 @@ func buildTaterLocalHLSCommand(
 					Scaler:            scaler,
 					AIShaderPath:      aiShaderPath,
 					AIShaderCachePath: aiShaderCachePath,
+					SourceWidth:       requestedTaterVideoDimension(r, "tater_source_width"),
+					SourceHeight:      requestedTaterVideoDimension(r, "tater_source_height"),
 					OutputWidth:       requestedTaterVideoDimension(r, "tater_output_width"),
 					OutputHeight:      requestedTaterVideoDimension(r, "tater_output_height"),
 				},

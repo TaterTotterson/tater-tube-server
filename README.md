@@ -208,11 +208,14 @@ AI model choices:
   animated lines without moving to the heavier C4F32 tier.
 - **ArtCNN Quality** uses the heavier C4F32 animation model on faster GPUs.
 
-AI currently targets compatible SDR upscales up to 2×. It needs an FFmpeg build
-with libplacebo plus a working Vulkan device. Docker images include the pinned
-AI shaders; the macOS app also includes MoltenVK so Apple Silicon can run the
-same models through Metal. If a selected model cannot initialize, Tater Tube
-tries its compatible AI fallback chain before continuing with Standard
+AI gives compatible SDR media one native 2× pass. When a smaller source needs
+more enlargement to reach a target up to 4K, Tater Tube keeps that AI result and
+uses Standard Spline scaling for the remaining distance. For example, 720p is
+enhanced to 1440p by the AI model before being finished at 4K. It needs an
+FFmpeg build with libplacebo plus a working Vulkan device. Docker images include
+the pinned AI shaders; the macOS app also includes MoltenVK so Apple Silicon can
+run the same models through Metal. If a selected model cannot initialize, Tater
+Tube tries its compatible AI fallback chain before continuing with Standard
 upscaling.
 
 On compatible FFmpeg builds, Tater Tube keeps libplacebo's compiled shaders in
