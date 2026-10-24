@@ -434,7 +434,7 @@ func applyTaterResolvedUpscalingInfo(tracker *StreamTracker, streamID string, r 
 	sourceHeight := requestedTaterVideoDimension(r, "tater_source_height")
 	outputWidth := requestedTaterVideoDimension(r, "tater_output_width")
 	outputHeight := requestedTaterVideoDimension(r, "tater_output_height")
-	method = strings.ToLower(strings.TrimSpace(method))
+	method = reportedTaterUpscalingMethod(method)
 	model = strings.ToLower(strings.TrimSpace(model))
 	active := method != "" && sourceWidth > 0 && sourceHeight > 0 &&
 		outputWidth > sourceWidth && outputHeight > sourceHeight
@@ -808,6 +808,8 @@ func (h *StreamHandler) serveTranscoded(w http.ResponseWriter, r *http.Request, 
 			Scaler:            scaler,
 			AIShaderPath:      aiShaderPath,
 			AIShaderCachePath: aiShaderCachePath,
+			SourceWidth:       requestedTaterVideoDimension(r, "tater_source_width"),
+			SourceHeight:      requestedTaterVideoDimension(r, "tater_source_height"),
 			OutputWidth:       requestedTaterVideoDimension(r, "tater_output_width"),
 			OutputHeight:      requestedTaterVideoDimension(r, "tater_output_height"),
 		},
@@ -1679,6 +1681,8 @@ type transcodeOutputOptions struct {
 	Scaler            string
 	AIShaderPath      string
 	AIShaderCachePath string
+	SourceWidth       int
+	SourceHeight      int
 	OutputWidth       int
 	OutputHeight      int
 }
@@ -1710,7 +1714,8 @@ func buildFFmpegTranscodeArgsWithOptions(cfg config.TranscodingConfig, profile t
 
 	videoCodec, filters := transcodeVideoSettingsForCodecAndUpscaler(
 		accel, cfg.HardwareDevice, profile, preferredCodec,
-		options.Scaler, options.AIShaderPath, options.AIShaderCachePath, options.OutputWidth, options.OutputHeight,
+		options.Scaler, options.AIShaderPath, options.AIShaderCachePath,
+		options.SourceWidth, options.SourceHeight, options.OutputWidth, options.OutputHeight,
 	)
 	filters = appendTaterToneMapFilter(
 		filters, options.ToneMapSource, options.ToneMapTarget, options.ToneMapFilter,
@@ -2130,7 +2135,7 @@ func transcodeVideoSettingsForCodecAndScaler(
 	outputWidth, outputHeight int,
 ) (codec string, filters string) {
 	return transcodeVideoSettingsForCodecAndUpscaler(
-		accel, device, profile, preferredCodec, scaler, "", "", outputWidth, outputHeight,
+		accel, device, profile, preferredCodec, scaler, "", "", 0, 0, outputWidth, outputHeight,
 	)
 }
 
@@ -2138,11 +2143,18 @@ func transcodeVideoSettingsForCodecAndUpscaler(
 	accel, device string,
 	profile transcodeProfile,
 	preferredCodec, scaler, aiShaderPath, aiShaderCachePath string,
-	outputWidth, outputHeight int,
+	sourceWidth, sourceHeight, outputWidth, outputHeight int,
 ) (codec string, filters string) {
 	scaleFilter := "scale=w=" + strconv.Itoa(profile.MaxWidth) + ":h=" + strconv.Itoa(profile.MaxHeight) + ":force_original_aspect_ratio=decrease:force_divisible_by=2"
-	if strings.EqualFold(strings.TrimSpace(scaler), "ai") && strings.TrimSpace(aiShaderPath) != "" && outputWidth > 0 && outputHeight > 0 {
+	cleanScaler := strings.ToLower(strings.TrimSpace(scaler))
+	if cleanScaler == "ai" && strings.TrimSpace(aiShaderPath) != "" && outputWidth > 0 && outputHeight > 0 {
 		scaleFilter = taterAIUpscaleFilter(outputWidth, outputHeight, aiShaderPath, aiShaderCachePath)
+	} else if strings.HasPrefix(cleanScaler, "ai-") && strings.TrimSpace(aiShaderPath) != "" &&
+		sourceWidth > 0 && sourceHeight > 0 && outputWidth > 0 && outputHeight > 0 {
+		scaleFilter = taterAIHybridUpscaleFilter(
+			sourceWidth, sourceHeight, outputWidth, outputHeight,
+			aiShaderPath, aiShaderCachePath, strings.TrimPrefix(cleanScaler, "ai-"),
+		)
 	} else if strings.EqualFold(strings.TrimSpace(scaler), "spline36") && outputWidth > 0 && outputHeight > 0 {
 		scaleFilter = "zscale=w=" + strconv.Itoa(outputWidth) + ":h=" + strconv.Itoa(outputHeight) + ":filter=spline36"
 	} else if strings.EqualFold(strings.TrimSpace(scaler), "spline") {

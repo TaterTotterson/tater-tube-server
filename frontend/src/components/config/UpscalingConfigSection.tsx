@@ -657,10 +657,11 @@ export function UpscalingConfigSection({
 				<div className="min-w-0 flex-1">
 					<div className="font-bold text-info text-xs uppercase tracking-wider">When it runs</div>
 					<div className="mt-1 text-[11px] leading-relaxed opacity-80">
-						AI targets compatible SDR upscales between 1.3× and 2×. HDR, unusually large source
-						frames, unsupported GPU paths, and failed model checks automatically use Standard
-						instead. ArtCNN and Anime4K are designed for animation and line art; FSRCNNX is the
-						safer choice for general video.
+						AI gives compatible SDR media one native 2× pass. Larger targets up to 4K finish with
+						Standard scaling, so 720p and smaller sources still receive AI detail on a 4K display.
+						HDR sources, unusually large source frames, unsupported GPU paths, and failed model
+						checks automatically use Standard instead. ArtCNN and Anime4K are designed for animation
+						and line art; FSRCNNX is the safer choice for general video.
 					</div>
 				</div>
 			</div>

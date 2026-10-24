@@ -392,6 +392,62 @@ func TestBuildFFmpegTranscodeArgsUsesAIUpscalerForRequestedUpscale(t *testing.T)
 	require.NotContains(t, joined, "zscale=w=3840:h=2160:filter=spline36")
 }
 
+func TestBuildFFmpegTranscodeArgsUsesHybridAIFor720pTo4K(t *testing.T) {
+	args := buildFFmpegTranscodeArgsWithOptions(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_4k"], "nvenc", transcodeCodecH264,
+		transcodeOutputOptions{
+			Scaler: "ai-spline36", AIShaderPath: "/tmp/tater-ai/FSRCNNX.glsl", AIShaderCachePath: "/tmp/tater-ai/cache/",
+			SourceWidth: 1280, SourceHeight: 720, OutputWidth: 3840, OutputHeight: 2160,
+		},
+	)
+	joined := strings.Join(args, " ")
+	require.Contains(t, joined, "libplacebo=w=2560:h=1440")
+	require.Contains(t, joined, "custom_shader_path='/tmp/tater-ai/FSRCNNX.glsl'")
+	require.Contains(t, joined, "zscale=w=3840:h=2160:filter=spline36")
+	require.Less(t, strings.Index(joined, "libplacebo=w=2560:h=1440"), strings.Index(joined, "zscale=w=3840:h=2160"))
+}
+
+func TestBuildFFmpegTranscodeArgsUsesPortableHybridAIWhenZscaleIsUnavailable(t *testing.T) {
+	args := buildFFmpegTranscodeArgsWithOptions(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_4k"], "videotoolbox", transcodeCodecH264,
+		transcodeOutputOptions{
+			Scaler: "ai-spline", AIShaderPath: "/tmp/tater-ai/FSRCNNX.glsl",
+			SourceWidth: 720, SourceHeight: 480, OutputWidth: 3240, OutputHeight: 2160,
+		},
+	)
+	joined := strings.Join(args, " ")
+	require.Contains(t, joined, "libplacebo=w=1440:h=960")
+	require.Contains(t, joined, "scale=w=3240:h=2160:flags=spline")
+	require.NotContains(t, joined, "zscale")
+}
+
+func TestHybridAICompletesBeforeHDREnhancement(t *testing.T) {
+	args := buildFFmpegTranscodeArgsWithOptions(
+		config.TranscodingConfig{}, transcodeProfiles["hdmi_4k"], "nvenc", transcodeCodecHEVC,
+		transcodeOutputOptions{
+			OutputVideoRange: "hdr10", HDREnhancement: "balanced",
+			Scaler: "ai-spline36", AIShaderPath: "/tmp/tater-ai/FSRCNNX.glsl",
+			SourceWidth: 1280, SourceHeight: 720, OutputWidth: 3840, OutputHeight: 2160,
+		},
+	)
+	joined := strings.Join(args, " ")
+	aiIndex := strings.Index(joined, "custom_shader_path='/tmp/tater-ai/FSRCNNX.glsl'")
+	standardIndex := strings.Index(joined, "zscale=w=3840:h=2160:filter=spline36")
+	hdrIndex := strings.Index(joined, "inverse_tonemapping=true")
+	require.GreaterOrEqual(t, aiIndex, 0)
+	require.Greater(t, standardIndex, aiIndex)
+	require.Greater(t, hdrIndex, standardIndex)
+	require.Contains(t, joined, "format=p010le")
+}
+
+func TestTaterAIScaleStrategyUsesOneAIPassForLarger4KTargets(t *testing.T) {
+	require.Equal(t, taterAIScaleDirect, taterAIScaleStrategy(1280, 720, 1920, 1080))
+	require.Equal(t, taterAIScaleDirect, taterAIScaleStrategy(1920, 1080, 3840, 2160))
+	require.Equal(t, taterAIScaleHybrid, taterAIScaleStrategy(1280, 720, 3840, 2160))
+	require.Equal(t, taterAIScaleHybrid, taterAIScaleStrategy(720, 480, 3240, 2160))
+	require.Empty(t, taterAIScaleStrategy(1280, 720, 7680, 4320))
+}
+
 func TestBuildFFmpegTranscodeArgsForcesEightBitH264NVENC(t *testing.T) {
 	args := buildFFmpegTranscodeArgsWithOptions(
 		config.TranscodingConfig{}, transcodeProfiles["hdmi_4k"], "nvenc", transcodeCodecH264,
@@ -418,12 +474,12 @@ func TestAIUpscalerFallsBackBeforeHardwareProbeForUnsupportedMedia(t *testing.T)
 	require.Empty(t, shaderCachePath)
 	require.Empty(t, model)
 
-	largeScaleRequest := httptest.NewRequest(
+	eightKRequest := httptest.NewRequest(
 		"GET",
-		"http://tube.local/stream?tater_scaler=auto&tater_source_video_range=sdr&tater_source_width=1280&tater_source_height=720&tater_output_width=3840&tater_output_height=2160",
+		"http://tube.local/stream?tater_scaler=auto&tater_source_video_range=sdr&tater_source_width=1280&tater_source_height=720&tater_output_width=7680&tater_output_height=4320",
 		nil,
 	)
-	scaler, shaderPath, shaderCachePath, model = resolveTaterUpscalerForRequest(t.Context(), "missing-ffmpeg", largeScaleRequest)
+	scaler, shaderPath, shaderCachePath, model = resolveTaterUpscalerForRequest(t.Context(), "missing-ffmpeg", eightKRequest)
 	require.Equal(t, "spline", scaler)
 	require.Empty(t, shaderPath)
 	require.Empty(t, shaderCachePath)
@@ -467,6 +523,25 @@ func TestApplyTaterResolvedUpscalingInfoReportsResolvedAIModel(t *testing.T) {
 	require.Equal(t, "ai", recorded.UpscalingRequested)
 	require.Equal(t, "ai", recorded.UpscalingMethod)
 	require.Equal(t, "artcnn-c4f16", recorded.UpscalingModel)
+	require.True(t, recorded.UpscalingActive)
+}
+
+func TestApplyTaterResolvedUpscalingInfoReportsHybridAsAI(t *testing.T) {
+	tracker := NewStreamTracker(nil)
+	defer tracker.Stop()
+	stream := tracker.AddStream("/shows/episode.mkv", "Local", "Living Room", "127.0.0.1", "TestAgent", 1000)
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"http://tube.local/stream?tater_scaler=ai&tater_ai_model=fsrcnnx-8&tater_source_width=1280&tater_source_height=720&tater_output_width=3840&tater_output_height=2160",
+		nil,
+	)
+
+	applyTaterResolvedUpscalingInfo(tracker, stream.ID, request, "ai-spline36", "fsrcnnx-8")
+
+	recorded := tracker.GetStream(stream.ID)
+	require.NotNil(t, recorded)
+	require.Equal(t, "ai", recorded.UpscalingMethod)
+	require.Equal(t, "fsrcnnx-8", recorded.UpscalingModel)
 	require.True(t, recorded.UpscalingActive)
 }
 

@@ -26,6 +26,14 @@ const (
 	taterAIShaderCacheNamespace    = "v1"
 	taterAIShaderCacheMaxSize      = 256 * 1024 * 1024
 	taterAIShaderCacheMaxAge       = 180 * 24 * time.Hour
+	taterAIHybridMaxOutputWidth    = 4096
+	taterAIHybridMaxOutputHeight   = 2160
+	taterAIDirectMaxScale          = 2.01
+)
+
+const (
+	taterAIScaleDirect = "direct"
+	taterAIScaleHybrid = "hybrid"
 )
 
 type taterAIUpscalerModel struct {
@@ -225,16 +233,45 @@ func resolveTaterUpscalerForRequest(ctx context.Context, ffmpegPath string, requ
 	sourceHeight := requestedTaterVideoDimension(request, "tater_source_height")
 	outputWidth := requestedTaterVideoDimension(request, "tater_output_width")
 	outputHeight := requestedTaterVideoDimension(request, "tater_output_height")
-	if sourceWidth <= 0 || sourceHeight <= 0 || outputWidth <= sourceWidth || outputHeight <= sourceHeight ||
-		sourceWidth > 1920 || sourceHeight > 1080 {
+	strategy := taterAIScaleStrategy(sourceWidth, sourceHeight, outputWidth, outputHeight)
+	if strategy == "" {
 		return resolveTaterUpscaler(ctx, ffmpegPath, "standard", requestedModel)
+	}
+	scaler, shaderPath, shaderCachePath, resolvedModel = resolveTaterUpscaler(
+		ctx, ffmpegPath, requested, requestedModel,
+	)
+	if strategy == taterAIScaleHybrid && scaler == "ai" {
+		scaler += "-" + resolveTaterStandardUpscaler(ctx, ffmpegPath)
+	}
+	return scaler, shaderPath, shaderCachePath, resolvedModel
+}
+
+// taterAIScaleStrategy keeps neural work to one native x2 pass. Targets above
+// that limit use the AI result as an intermediate frame and finish at the
+// requested 4K-or-smaller resolution with the server's Standard scaler.
+func taterAIScaleStrategy(sourceWidth, sourceHeight, outputWidth, outputHeight int) string {
+	if sourceWidth <= 0 || sourceHeight <= 0 || outputWidth <= sourceWidth || outputHeight <= sourceHeight ||
+		sourceWidth > 1920 || sourceHeight > 1080 ||
+		outputWidth > taterAIHybridMaxOutputWidth || outputHeight > taterAIHybridMaxOutputHeight {
+		return ""
 	}
 	widthScale := float64(outputWidth) / float64(sourceWidth)
 	heightScale := float64(outputHeight) / float64(sourceHeight)
-	if widthScale < 1.3 || heightScale < 1.3 || widthScale > 2.01 || heightScale > 2.01 {
-		return resolveTaterUpscaler(ctx, ffmpegPath, "standard", requestedModel)
+	if widthScale < 1.3 || heightScale < 1.3 {
+		return ""
 	}
-	return resolveTaterUpscaler(ctx, ffmpegPath, requested, requestedModel)
+	if widthScale <= taterAIDirectMaxScale && heightScale <= taterAIDirectMaxScale {
+		return taterAIScaleDirect
+	}
+	return taterAIScaleHybrid
+}
+
+func reportedTaterUpscalingMethod(method string) string {
+	method = strings.ToLower(strings.TrimSpace(method))
+	if strings.HasPrefix(method, "ai-") {
+		return "ai"
+	}
+	return method
 }
 
 func requestedTaterAIUpscalerModel(request *http.Request) string {
@@ -543,6 +580,21 @@ func taterAIUpscaleFilter(outputWidth, outputHeight int, shaderPath, shaderCache
 	}
 	parts = append(parts, "custom_shader_path="+path)
 	return strings.Join(parts, ":")
+}
+
+func taterAIHybridUpscaleFilter(
+	sourceWidth, sourceHeight, outputWidth, outputHeight int,
+	shaderPath, shaderCachePath, standardScaler string,
+) string {
+	intermediateWidth := min(outputWidth, sourceWidth*2)
+	intermediateHeight := min(outputHeight, sourceHeight*2)
+	filter := taterAIUpscaleFilter(
+		intermediateWidth, intermediateHeight, shaderPath, shaderCachePath,
+	)
+	if standardScaler == "spline36" {
+		return filter + fmt.Sprintf(",zscale=w=%d:h=%d:filter=spline36", outputWidth, outputHeight)
+	}
+	return filter + fmt.Sprintf(",scale=w=%d:h=%d:flags=spline", outputWidth, outputHeight)
 }
 
 func escapeTaterFilterValue(value string) string {

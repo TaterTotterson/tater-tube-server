@@ -49,12 +49,21 @@ export function playbackUpscalingPresentation(stream?: ActiveStream): UpscalingP
 		detail: model || "AI model",
 	};
 	const fellBack = (requested === "auto" || requested === "ai") && method !== "ai";
+	const widthScale =
+		stream.source_width && stream.output_width ? stream.output_width / stream.source_width : 0;
+	const heightScale =
+		stream.source_height && stream.output_height ? stream.output_height / stream.source_height : 0;
+	const hybrid = method === "ai" && Math.max(widthScale, heightScale) > 2.01;
 
 	switch (method) {
 		case "ai":
 			return {
-				label: `AI · ${modelPresentation.label}`,
-				detail: `AI upscaling with the ${modelPresentation.detail}`,
+				label: hybrid
+					? `AI + Spline36 · ${modelPresentation.label}`
+					: `AI · ${modelPresentation.label}`,
+				detail: hybrid
+					? `Native AI x2 with the ${modelPresentation.detail}, then Spline36 to the final resolution`
+					: `AI upscaling with the ${modelPresentation.detail}`,
 				className: "border-secondary/45 bg-secondary/10 text-secondary",
 			};
 		case "spline36":
