@@ -84,6 +84,7 @@ type Server struct {
 	localLibraryMonitorStatus      taterLocalLibraryMonitorStatus
 	taterPlayerHomeCacheMu         sync.RWMutex
 	taterPlayerHomeCache           map[string]taterPlayerHomeCacheEntry
+	taterCorePlaybackGrants        sync.Map
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -245,6 +246,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/tater/core/pair", s.handleTaterPairCore)
 	api.Get("/tater/core/context", s.handleTaterCoreContext)
 	api.Get("/tater/core/candidates", s.handleTaterCoreCandidates)
+	api.Post("/tater/core/playback/resolve", s.handleTaterCoreResolvePlayback)
+	api.Post("/tater/core/playback/state", s.handleTaterCorePlaybackState)
 	api.Post("/tater/core/recommendations", s.handleTaterCoreSaveRecommendations)
 	api.Get("/tater/core/tts/requests", s.handleTaterCoreClaimTTSRequests)
 	api.Post("/tater/core/tts/requests/:id/complete", s.handleTaterCoreCompleteTTSRequest)

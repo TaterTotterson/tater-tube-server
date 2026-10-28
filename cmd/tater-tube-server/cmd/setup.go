@@ -343,7 +343,9 @@ func createHTTPServer(apiServer *api.Server, app *fiber.App, streamHandler *api.
 
 	// Convert Fiber app to HTTP handler for all other routes
 	fiberHTTPHandler := adaptor.FiberApp(app)
-	localStreamHTTPHandler := api.NewLocalStreamHandler(configGetter, streamTracker).GetHTTPHandler()
+	localStreamHTTPHandler := api.NewLocalStreamHandler(
+		configGetter, streamTracker, apiServer.AuthorizeTaterCorePlaybackStream,
+	).GetHTTPHandler()
 	taterTVStreamHTTPHandler := api.NewTaterTVStreamHandler(configGetter, streamTracker).GetHTTPHandler()
 	taterBumperStreamHTTPHandler := api.NewTaterBumperStreamHandler(configGetter, streamTracker).GetHTTPHandler()
 

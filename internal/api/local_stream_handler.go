@@ -16,12 +16,19 @@ import (
 
 // LocalStreamHandler serves configured host media folders to paired Tater Tube players.
 type LocalStreamHandler struct {
-	configGetter  config.ConfigGetter
-	streamTracker *StreamTracker
+	configGetter   config.ConfigGetter
+	streamTracker  *StreamTracker
+	coreAuthorizer CorePlaybackStreamAuthorizer
 }
 
-func NewLocalStreamHandler(configGetter config.ConfigGetter, streamTracker *StreamTracker) *LocalStreamHandler {
-	return &LocalStreamHandler{configGetter: configGetter, streamTracker: streamTracker}
+type CorePlaybackStreamAuthorizer func(context.Context, string, string, int, string) (*config.PlayerConfig, bool)
+
+func NewLocalStreamHandler(configGetter config.ConfigGetter, streamTracker *StreamTracker, coreAuthorizer ...CorePlaybackStreamAuthorizer) *LocalStreamHandler {
+	handler := &LocalStreamHandler{configGetter: configGetter, streamTracker: streamTracker}
+	if len(coreAuthorizer) > 0 {
+		handler.coreAuthorizer = coreAuthorizer[0]
+	}
+	return handler
 }
 
 func (h *LocalStreamHandler) GetHTTPHandler() http.Handler {
@@ -44,9 +51,20 @@ func (h *LocalStreamHandler) GetHTTPHandler() http.Handler {
 			token = strings.TrimSpace(r.Header.Get("X-Tater-Player-Token"))
 		}
 		player, ok := findTaterPlayerByToken(cfg, token)
+		if !ok && h.coreAuthorizer != nil {
+			coreToken := strings.TrimSpace(r.URL.Query().Get("core_stream_token"))
+			if coreToken != "" {
+				player, ok = h.coreAuthorizer(
+					r.Context(), coreToken,
+					strings.TrimSpace(r.URL.Query().Get("category_id")),
+					parseTaterInt(r.URL.Query().Get("source"), 0),
+					taterLocalPathFromQuery(r.URL.Query()),
+				)
+			}
+		}
 		if !ok {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="Tater Local Stream"`)
-			http.Error(w, "Unauthorized: valid player_token required", http.StatusUnauthorized)
+			http.Error(w, "Unauthorized: valid playback token required", http.StatusUnauthorized)
 			return
 		}
 
