@@ -541,6 +541,7 @@ type transcodeProfile struct {
 	Name         string
 	MaxWidth     int
 	MaxHeight    int
+	MaxFrameRate int
 	VideoBitrate string
 	MaxRate      string
 	BufferSize   string
@@ -609,6 +610,39 @@ var transcodeProfiles = map[string]transcodeProfile{
 		BufferSize:   "70000k",
 		AudioBitrate: "256k",
 		Level:        "5.1",
+	},
+	"echo_show_720p": {
+		Name:         "Echo Show 720p",
+		MaxWidth:     1280,
+		MaxHeight:    720,
+		MaxFrameRate: 30,
+		VideoBitrate: "2500k",
+		MaxRate:      "3500k",
+		BufferSize:   "7000k",
+		AudioBitrate: "128k",
+		Level:        "3.1",
+	},
+	"echo_checkers_480p": {
+		Name:         "Echo Show 5 480p",
+		MaxWidth:     854,
+		MaxHeight:    480,
+		MaxFrameRate: 30,
+		VideoBitrate: "1500k",
+		MaxRate:      "2100k",
+		BufferSize:   "4200k",
+		AudioBitrate: "112k",
+		Level:        "3.0",
+	},
+	"echo_rook_480p": {
+		Name:         "Echo Spot 480p",
+		MaxWidth:     480,
+		MaxHeight:    480,
+		MaxFrameRate: 30,
+		VideoBitrate: "900k",
+		MaxRate:      "1300k",
+		BufferSize:   "2600k",
+		AudioBitrate: "96k",
+		Level:        "3.0",
 	},
 }
 
@@ -2165,6 +2199,9 @@ func transcodeVideoSettingsForCodecAndUpscaler(
 			// Keep them inside the fixed channel frame without stretching the picture.
 			scaleFilter += ":flags=spline"
 		}
+	}
+	if profile.MaxFrameRate > 0 {
+		scaleFilter += ",fps=" + strconv.Itoa(profile.MaxFrameRate)
 	}
 
 	if normalizeTranscodeCodec(preferredCodec) == transcodeCodecHEVC {

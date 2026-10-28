@@ -239,7 +239,8 @@ export function TaterConfigSection() {
 							<p className="text-base-content/65 text-sm leading-relaxed">
 								Create a short-lived PIN, then enter this server address and the PIN in the Tater
 								Tube Core settings. Core receives a dedicated token that can read viewing context
-								and publish recommendations, but cannot stream media or administer the server.
+								and publish recommendations. For Echo-screen playback it can create temporary,
+								path-scoped streams, but it cannot act as a general player or administer the server.
 							</p>
 							<div className="mt-3 rounded-lg bg-base-100/80 px-3 py-2 font-mono text-xs">
 								{window.location.origin}
