@@ -330,3 +330,7 @@ uses [tv-logo/tv-logos](https://github.com/tv-logo/tv-logos).
 
 The server is licensed under the [GNU AGPL v3](LICENSE). Portions derived from
 AltMount retain the upstream MIT notice in [NOTICE](NOTICE).
+
+## Trademarks
+
+The Tater name and logo are governed by the [Tater Trademark Policy](TRADEMARKS.md).
