@@ -30,6 +30,7 @@ type taterCorePlaybackResolveRequest struct {
 	CandidateID      string `json:"candidate_id"`
 	ProfileID        string `json:"profile"`
 	ProfileID2       string `json:"transcode_profile"`
+	OutputContainer  string `json:"output_container"`
 	ViewingProfileID string `json:"viewing_profile_id"`
 }
 
@@ -69,6 +70,13 @@ func taterCorePlaybackProfile(values ...string) string {
 		}
 	}
 	return "echo_show_720p"
+}
+
+func taterCorePlaybackOutputContainer(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), "hls") {
+		return "hls"
+	}
+	return "mpegts"
 }
 
 func selectTaterCorePlaybackCandidate(candidates []taterCandidate, candidateID, query string) (taterCandidate, bool) {
@@ -198,7 +206,7 @@ func probeTaterCorePlaybackItem(ctx context.Context, cfg *config.Config, item *t
 	item.AudioLayout = info.ChannelLayout
 }
 
-func taterCorePlaybackStreamURL(baseURL, streamToken, profile string, item taterUsenetItem) string {
+func taterCorePlaybackStreamURL(baseURL, streamToken, profile, outputContainer string, item taterUsenetItem) string {
 	u, err := url.Parse(strings.TrimRight(baseURL, "/") + "/api/tater/local/stream")
 	if err != nil {
 		return ""
@@ -215,6 +223,7 @@ func taterCorePlaybackStreamURL(baseURL, streamToken, profile string, item tater
 	query.Set("codec", "h264")
 	query.Set("tater_audio_channels", "2")
 	query.Set("tater_output_video_range", "sdr")
+	query.Set("tater_output_container", taterCorePlaybackOutputContainer(outputContainer))
 	if taterVideoRangeIsHDR(item.VideoRange) {
 		query.Set("tater_tone_map", "1")
 		query.Set("tater_source_video_range", cleanTaterVideoRange(item.VideoRange))
@@ -274,6 +283,7 @@ func (s *Server) handleTaterCoreResolvePlayback(c *fiber.Ctx) error {
 		return RespondValidationError(c, "Invalid playback request", err.Error())
 	}
 	profileID := taterCorePlaybackProfile(req.ProfileID, req.ProfileID2)
+	outputContainer := taterCorePlaybackOutputContainer(req.OutputContainer)
 	viewingProfileID := cleanTaterProfileID(req.ViewingProfileID)
 	candidates := s.taterRecommendationCandidates(c.Context(), cfg, resolveBaseURL(c, ""), viewingProfileID)
 	candidate, found := selectTaterCorePlaybackCandidate(candidates, req.CandidateID, req.Query)
@@ -308,10 +318,12 @@ func (s *Server) handleTaterCoreResolvePlayback(c *fiber.Ctx) error {
 	return RespondSuccess(c, fiber.Map{
 		"playback_id": playbackID, "candidate_id": candidate.ID,
 		"title": item.Title, "subtitle": subtitle, "media_type": item.MediaType,
-		"stream_url":  taterCorePlaybackStreamURL(resolveBaseURL(c, ""), streamToken, profileID, item),
+		"stream_url":  taterCorePlaybackStreamURL(resolveBaseURL(c, ""), streamToken, profileID, outputContainer, item),
 		"position_ms": max(item.ViewOffset, int64(0)), "duration_ms": max(durationMS, int64(0)),
 		"fps": 30, "transcode_profile": profileID, "transcode_name": profile.Name,
-		"output_width": profile.MaxWidth, "output_height": profile.MaxHeight,
+		"output_container":  outputContainer,
+		"stream_media_type": map[string]string{"hls": "application/vnd.apple.mpegurl", "mpegts": "video/mp2t"}[outputContainer],
+		"output_width":      profile.MaxWidth, "output_height": profile.MaxHeight,
 		"expires_at": expiresAt,
 	})
 }

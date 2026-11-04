@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,11 +99,11 @@ func TestCorePlaybackStreamGrantIsScopedToResolvedPath(t *testing.T) {
 		t.Fatal("grant authorized a different media path")
 	}
 	streamURL := taterCorePlaybackStreamURL(
-		"http://tube.local", "stream-secret", "echo_show_720p", item,
+		"http://tube.local", "stream-secret", "echo_show_720p", "mpegts", item,
 	)
 	for _, expected := range []string{
 		"core_stream_token=stream-secret", "profile=echo_show_720p", "transcode=1",
-		"codec=h264", "tater_audio_channels=2", "tater_tone_map=1",
+		"codec=h264", "tater_audio_channels=2", "tater_tone_map=1", "tater_output_container=mpegts",
 	} {
 		if !strings.Contains(streamURL, expected) {
 			t.Fatalf("stream URL %q missing %q", streamURL, expected)
@@ -110,5 +111,40 @@ func TestCorePlaybackStreamGrantIsScopedToResolvedPath(t *testing.T) {
 	}
 	if strings.Contains(streamURL, "player_token=") {
 		t.Fatalf("core stream exposed a player token: %s", streamURL)
+	}
+	hlsURL := taterCorePlaybackStreamURL(
+		"http://tube.local", "stream-secret", "echo_show_720p", "hls", item,
+	)
+	if !strings.Contains(hlsURL, "tater_output_container=hls") {
+		t.Fatalf("HLS stream URL did not request HLS: %s", hlsURL)
+	}
+}
+
+func TestCoreHLSPlaylistKeepsScopedAuthorizationOnSegments(t *testing.T) {
+	request, err := http.NewRequest(
+		http.MethodGet,
+		"http://tube.local/api/tater/local/stream?core_stream_token=secret&category_id=movies&source=1&path=Movie%2FMovie.mkv&tater_path_ref=ref-1",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := &taterLocalHLSSession{
+		id:          "hls-1",
+		playerToken: "",
+		segmentAuth: taterLocalHLSSegmentAuthQuery(request),
+		playlistURL: "/api/tater/local/stream",
+	}
+	segmentURL := session.authenticatedSegmentURL("segment-000001.ts")
+	for _, expected := range []string{
+		"core_stream_token=secret", "category_id=movies", "source=1", "path=Movie%2FMovie.mkv",
+		"tater_path_ref=ref-1", "tater_hls_session=hls-1", "tater_hls_segment=segment-000001.ts",
+	} {
+		if !strings.Contains(segmentURL, expected) {
+			t.Fatalf("segment URL %q missing %q", segmentURL, expected)
+		}
+	}
+	if strings.Contains(segmentURL, "player_token=") {
+		t.Fatalf("core HLS segment leaked an empty player token: %s", segmentURL)
 	}
 }

@@ -271,6 +271,9 @@ func (s *Server) handleTaterSaveViewingEvent(c *fiber.Ctx) error {
 	if err := s.queueRepo.UpsertTaterViewingEvent(c.Context(), item); err != nil {
 		return RespondInternalError(c, "Failed to save viewing event", err.Error())
 	}
+	if state == "stopped" || state == "completed" {
+		stopTaterPlaybackForPlayer(player.ID, taterPlayerDisplayName(player), s.streamTracker)
+	}
 	return RespondSuccess(c, fiber.Map{"event_id": item.EventID})
 }
 

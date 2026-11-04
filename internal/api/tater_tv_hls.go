@@ -42,6 +42,10 @@ const (
 	// otherwise healthy live channel. Player ownership still stops a session
 	// immediately when the user changes channels or ends playback.
 	taterTVHLSIdleTimeout = 90 * time.Second
+	// Keep a short player-level tombstone after an explicit stop. AVPlayer can
+	// issue one last playlist reload while it is tearing down; without this
+	// guard that request creates a brand-new encoder after the player has left.
+	taterTVHLSStoppedPlayerTTL = 2 * time.Minute
 	// Leave slightly more than one 48 kHz AAC/video frame between independently
 	// muxed items so encoder padding cannot make the next DTS overlap the last.
 	taterTVHLSTimestampGuardSeconds = 0.050
@@ -51,10 +55,16 @@ var errTaterTVHLSIdle = errors.New("Tube TV HLS session idle")
 
 var taterTVFFmpegFilterCache sync.Map
 
+// Every playback plan carries the server process generation that created it.
+// A cached playlist URL from before a quick restart must not be able to start a
+// channel encoder in the new process.
+var taterTVHLSBootID = strconv.FormatInt(time.Now().UnixNano(), 36) + "-" + strconv.Itoa(os.Getpid())
+
 type taterTVHLSManager struct {
 	mu             sync.Mutex
 	sessions       map[string]*taterTVHLSSession
 	playerSessions map[string]string
+	stoppedPlayers map[string]time.Time
 }
 
 type taterTVHLSSession struct {
@@ -113,6 +123,7 @@ type taterTVParsedHLSSegment struct {
 var globalTaterTVHLS = &taterTVHLSManager{
 	sessions:       map[string]*taterTVHLSSession{},
 	playerSessions: map[string]string{},
+	stoppedPlayers: map[string]time.Time{},
 }
 
 func taterTVResetHLS() {
@@ -123,6 +134,7 @@ func taterTVResetHLS() {
 	}
 	globalTaterTVHLS.sessions = map[string]*taterTVHLSSession{}
 	globalTaterTVHLS.playerSessions = map[string]string{}
+	globalTaterTVHLS.stoppedPlayers = map[string]time.Time{}
 }
 
 func (h *TaterTVStreamHandler) serveHLSPlaylist(w http.ResponseWriter, r *http.Request) {
@@ -211,6 +223,16 @@ func (h *TaterTVStreamHandler) serveHLSSegment(w http.ResponseWriter, r *http.Re
 func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.Request) (*taterTVHLSSession, string, bool) {
 	cfg, playerToken, player, ok := h.authorizeTaterTVRequest(w, r)
 	if !ok {
+		return nil, "", false
+	}
+	if !taterTVHLSRequestMatchesCurrentBoot(r) {
+		w.Header().Set("Cache-Control", "no-store")
+		http.Error(w, "Tube TV playback session expired", http.StatusGone)
+		return nil, "", false
+	}
+	if globalTaterTVHLS.playerRecentlyStopped(player.ID) {
+		w.Header().Set("Cache-Control", "no-store")
+		http.Error(w, "Tube TV playback has stopped", http.StatusGone)
 		return nil, "", false
 	}
 	number := taterTVChannelNumberFromPath(r.URL.Path)
@@ -303,7 +325,11 @@ func (h *TaterTVStreamHandler) prepareHLSSession(w http.ResponseWriter, r *http.
 			globalTaterTVHLS.removeIfSame(key, session)
 		}
 	}
-	globalTaterTVHLS.bindPlayer(player.ID, key)
+	if !globalTaterTVHLS.bindPlayer(player.ID, key) {
+		w.Header().Set("Cache-Control", "no-store")
+		http.Error(w, "Tube TV playback has stopped", http.StatusGone)
+		return nil, "", false
+	}
 
 	session = globalTaterTVHLS.get(key)
 	if session != nil {
@@ -502,22 +528,27 @@ func (m *taterTVHLSManager) removeIfSame(key string, session *taterTVHLSSession)
 // bindPlayer assigns one Tube TV session to a paired player. When that player
 // changes channels, the previous encoder is stopped immediately unless another
 // player is still sharing it.
-func (m *taterTVHLSManager) bindPlayer(playerID, key string) {
+func (m *taterTVHLSManager) bindPlayer(playerID, key string) bool {
 	playerID = strings.TrimSpace(playerID)
 	key = strings.TrimSpace(key)
 	if playerID == "" || key == "" {
-		return
+		return false
 	}
 
 	var stopped *taterTVHLSSession
 	m.mu.Lock()
+	m.pruneStoppedPlayersLocked(time.Now())
+	if _, explicitlyStopped := m.stoppedPlayers[strings.ToLower(playerID)]; explicitlyStopped {
+		m.mu.Unlock()
+		return false
+	}
 	if m.playerSessions == nil {
 		m.playerSessions = map[string]string{}
 	}
 	oldKey := m.playerSessions[playerID]
 	if oldKey == key {
 		m.mu.Unlock()
-		return
+		return true
 	}
 	m.playerSessions[playerID] = key
 	if oldKey != "" && !m.keyInUseLocked(oldKey) {
@@ -528,16 +559,21 @@ func (m *taterTVHLSManager) bindPlayer(playerID, key string) {
 	if stopped != nil {
 		stopped.stop()
 	}
+	return true
 }
 
-func (m *taterTVHLSManager) unbindPlayer(playerID string) {
+func (m *taterTVHLSManager) unbindPlayer(playerID string) bool {
 	playerID = strings.TrimSpace(playerID)
 	if playerID == "" {
-		return
+		return false
 	}
 
 	var stopped *taterTVHLSSession
 	m.mu.Lock()
+	if m.stoppedPlayers == nil {
+		m.stoppedPlayers = map[string]time.Time{}
+	}
+	m.stoppedPlayers[strings.ToLower(playerID)] = time.Now()
 	oldKey := m.playerSessions[playerID]
 	delete(m.playerSessions, playerID)
 	if oldKey != "" && !m.keyInUseLocked(oldKey) {
@@ -548,6 +584,31 @@ func (m *taterTVHLSManager) unbindPlayer(playerID string) {
 	if stopped != nil {
 		stopped.stop()
 	}
+	return oldKey != ""
+}
+
+// allowPlayer clears an explicit-stop tombstone only when the player asks the
+// playback-session endpoint for a deliberate new Tube TV plan.
+func (m *taterTVHLSManager) allowPlayer(playerID string) {
+	playerID = strings.ToLower(strings.TrimSpace(playerID))
+	if playerID == "" {
+		return
+	}
+	m.mu.Lock()
+	delete(m.stoppedPlayers, playerID)
+	m.mu.Unlock()
+}
+
+func (m *taterTVHLSManager) playerRecentlyStopped(playerID string) bool {
+	playerID = strings.ToLower(strings.TrimSpace(playerID))
+	if playerID == "" {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pruneStoppedPlayersLocked(time.Now())
+	_, stopped := m.stoppedPlayers[playerID]
+	return stopped
 }
 
 func (m *taterTVHLSManager) playerBoundTo(playerID, key string) bool {
@@ -575,11 +636,20 @@ func (m *taterTVHLSManager) removeBindingsLocked(key string) {
 
 func (m *taterTVHLSManager) pruneLocked() {
 	now := time.Now()
+	m.pruneStoppedPlayersLocked(now)
 	for key, session := range m.sessions {
 		if now.Sub(session.lastAccessed()) > taterTVHLSIdleTimeout || session.finishedAndIdle(now) {
 			session.stop()
 			delete(m.sessions, key)
 			m.removeBindingsLocked(key)
+		}
+	}
+}
+
+func (m *taterTVHLSManager) pruneStoppedPlayersLocked(now time.Time) {
+	for playerID, stoppedAt := range m.stoppedPlayers {
+		if now.Sub(stoppedAt) >= taterTVHLSStoppedPlayerTTL {
+			delete(m.stoppedPlayers, playerID)
 		}
 	}
 }
@@ -1394,6 +1464,27 @@ func taterTVHLSRoot(cfg *config.Config) string {
 		root = "/config/metadata"
 	}
 	return filepath.Join(root, "tube-tv-hls")
+}
+
+func taterTVHLSRequestMatchesCurrentBoot(r *http.Request) bool {
+	if r == nil || r.URL == nil {
+		return true
+	}
+	session := strings.TrimSpace(r.URL.Query().Get("tv_session"))
+	// Continue accepting legacy player URLs that predate process generations.
+	// Current players always receive a generation-tagged playback plan.
+	return session == "" || session == taterTVHLSBootID
+}
+
+func annotateTaterTVHLSSession(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return rawURL
+	}
+	query := parsed.Query()
+	query.Set("tv_session", taterTVHLSBootID)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 func taterTVHLSPublicID(r *http.Request, guideStartedAt time.Time) string {

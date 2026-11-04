@@ -53,6 +53,7 @@ type taterLocalHLSSession struct {
 	slot         string
 	playerID     string
 	playerToken  string
+	segmentAuth  url.Values
 	playlistURL  string
 	root         string
 	playlistPath string
@@ -226,6 +227,7 @@ func (h *LocalStreamHandler) prepareLocalHLSSession(
 		slot:         taterLocalHLSSlot(player.ID),
 		playerID:     player.ID,
 		playerToken:  playerToken,
+		segmentAuth:  taterLocalHLSSegmentAuthQuery(r),
 		playlistURL:  "/api/tater/local/stream",
 		root:         root,
 		playlistPath: playlistPath,
@@ -879,8 +881,10 @@ func (s *taterLocalHLSSession) authenticatedSegmentURL(name string) string {
 	if name == "." || name == "" {
 		return ""
 	}
-	query := url.Values{}
-	query.Set("player_token", s.playerToken)
+	query := cloneTaterURLValues(s.segmentAuth)
+	if strings.TrimSpace(query.Get("core_stream_token")) == "" {
+		query.Set("player_token", s.playerToken)
+	}
 	query.Set(taterLocalHLSSessionQuery, s.id)
 	query.Set(taterLocalHLSSegmentQuery, name)
 	playlistURL := strings.TrimSpace(s.playlistURL)
@@ -888,6 +892,30 @@ func (s *taterLocalHLSSession) authenticatedSegmentURL(name string) string {
 		playlistURL = "/api/tater/local/stream"
 	}
 	return playlistURL + "?" + query.Encode()
+}
+
+func cloneTaterURLValues(source url.Values) url.Values {
+	cloned := url.Values{}
+	for key, values := range source {
+		cloned[key] = append([]string(nil), values...)
+	}
+	return cloned
+}
+
+func taterLocalHLSSegmentAuthQuery(r *http.Request) url.Values {
+	query := url.Values{}
+	if r == nil || r.URL == nil || strings.TrimSpace(r.URL.Query().Get("core_stream_token")) == "" {
+		return query
+	}
+	source := r.URL.Query()
+	for _, key := range []string{
+		"core_stream_token", "category_id", "source", "path", taterLocalPathRefQuery,
+	} {
+		for _, value := range source[key] {
+			query.Add(key, value)
+		}
+	}
+	return query
 }
 
 func rewriteTaterHLSMapURI(line string, rewrite func(string) string) string {
