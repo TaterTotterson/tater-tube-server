@@ -317,15 +317,12 @@ func (s *Server) handleTaterStopActiveStreams(c *fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
-	if s.streamTracker == nil {
-		return RespondSuccess(c, fiber.Map{"stopped": 0})
-	}
 
 	player, ok := findTaterPlayerByToken(cfg, token)
 	if !ok {
 		return RespondUnauthorized(c, "Invalid player token", "")
 	}
-	stopped := s.streamTracker.KillStreamsForPlayer(player.ID, taterPlayerDisplayName(player))
+	stopped := stopTaterPlaybackForPlayer(player.ID, taterPlayerDisplayName(player), s.streamTracker)
 	return RespondSuccess(c, fiber.Map{"stopped": stopped})
 }
 

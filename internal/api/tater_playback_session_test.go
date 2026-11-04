@@ -1313,6 +1313,7 @@ func TestBuildTaterTVPlaybackPlanUsesHEVCFMP4ForHDRCapableTVOS(t *testing.T) {
 	require.Equal(t, "hdr10,hlg,dolby_vision", query.Get("tater_hdr_formats"))
 	require.Equal(t, "hls", query.Get("tater_output_container"))
 	require.Equal(t, "6", query.Get("tater_audio_channels"))
+	require.Equal(t, taterTVHLSBootID, query.Get("tv_session"))
 	require.Empty(t, query.Get("tater_scaler"))
 	require.Empty(t, query.Get("tater_ai_model"))
 }

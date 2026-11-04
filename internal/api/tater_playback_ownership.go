@@ -19,6 +19,8 @@ func stopTaterFilePlaybackForPlayer(playerID, playerName string, tracker *Stream
 // plan or explicitly reports that playback stopped/completed.
 func stopTaterPlaybackForPlayer(playerID, playerName string, tracker *StreamTracker) int {
 	stopped := stopTaterFilePlaybackForPlayer(playerID, playerName, tracker)
-	globalTaterTVHLS.unbindPlayer(playerID)
+	if globalTaterTVHLS.unbindPlayer(playerID) {
+		stopped++
+	}
 	return stopped
 }

@@ -292,6 +292,9 @@ func (s *Server) handleTaterPlayerPlaybackSession(c *fiber.Ctx) error {
 	}
 	if player, found := findTaterPlayerByToken(cfg, playerToken); found {
 		stopTaterPlaybackForPlayer(player.ID, taterPlayerDisplayName(player), s.streamTracker)
+		if isTubeTV {
+			globalTaterTVHLS.allowPlayer(player.ID)
+		}
 	}
 	return RespondSuccess(c, plan)
 }
@@ -594,6 +597,7 @@ func buildTaterTVPlaybackPlan(req taterPlaybackSessionRequest, source taterPlayb
 		plan.QualityLabel = display + " • Video " + taterPlaybackVideoCodecLabel(videoCodec) +
 			" • Audio AAC" + taterPlaybackAudioChannelsSuffix(outputAudioChannels)
 	}
+	plan.StreamURL = annotateTaterTVHLSSession(plan.StreamURL)
 	return plan
 }
 

@@ -84,6 +84,66 @@ func TestTaterPicksTTSUsesDedicatedGroupBriefing(t *testing.T) {
 	}
 }
 
+func TestTaterStoppedViewingEventReleasesTubeTVPlayback(t *testing.T) {
+	configDir := t.TempDir()
+	cfg := config.DefaultConfig(configDir)
+	cfg.Players.Paired = []config.PlayerConfig{{
+		ID: "living-room", Name: "Living Room", TokenHash: hashTaterSecret("player-token"),
+	}}
+	queueDB, err := database.NewDB(database.Config{
+		Type: "sqlite", DatabasePath: filepath.Join(configDir, "viewing-events.db"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = queueDB.Close() })
+	repo := database.NewRepository(queueDB.Connection(), database.DialectSQLite)
+
+	playbackCtx, cancelPlayback := context.WithCancel(context.Background())
+	defer cancelPlayback()
+	manager := &taterTVHLSManager{
+		sessions: map[string]*taterTVHLSSession{
+			"channel-09": {key: "channel-09", cancel: cancelPlayback, accessed: time.Now()},
+		},
+		playerSessions: map[string]string{"living-room": "channel-09"},
+		stoppedPlayers: map[string]time.Time{},
+	}
+	previousManager := globalTaterTVHLS
+	globalTaterTVHLS = manager
+	t.Cleanup(func() { globalTaterTVHLS = previousManager })
+
+	server := &Server{configManager: &mockConfigManager{cfg: cfg}, queueRepo: repo}
+	app := fiber.New()
+	app.Post("/api/tater/viewing/events", server.handleTaterSaveViewingEvent)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/tater/viewing/events",
+		strings.NewReader(`{"event_id":"stop-channel-09","media_id":"tube-tv:09","title":"Channel 09","source":"tube_tv","media_type":"live","state":"stopped"}`),
+	)
+	request.Header.Set("Authorization", "Bearer player-token")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.StatusCode)
+	}
+
+	select {
+	case <-playbackCtx.Done():
+	default:
+		t.Fatal("stopped viewing event did not cancel the Tube TV encoder")
+	}
+	if manager.get("channel-09") != nil {
+		t.Fatal("stopped Tube TV session remains registered")
+	}
+	if !manager.playerRecentlyStopped("living-room") {
+		t.Fatal("late playlist requests are not guarded after the stop event")
+	}
+}
+
 func TestTaterOTACandidatesBuildSafeLaunchTargetsFromHistory(t *testing.T) {
 	now := time.Now().UTC()
 	metadata, err := json.Marshal(map[string]string{

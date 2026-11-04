@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -81,11 +83,51 @@ func TestTaterTVHLSManagerRetainsSharedSessionUntilLastPlayerLeaves(t *testing.T
 	if manager.get("old-channel") != nil {
 		t.Fatal("unused old channel remains registered")
 	}
+	if !manager.playerRecentlyStopped("bedroom") {
+		t.Fatal("explicitly stopped player was not protected from a late playlist reload")
+	}
+	if manager.bindPlayer("bedroom", "new-channel") {
+		t.Fatal("a late playlist request rebound an explicitly stopped player")
+	}
+	manager.allowPlayer("bedroom")
+	if manager.playerRecentlyStopped("bedroom") {
+		t.Fatal("a deliberate new playback plan did not clear the stop guard")
+	}
 
 	manager.unbindPlayer("living-room")
 	select {
 	case <-newCtx.Done():
 	default:
 		t.Fatal("new channel was not stopped after its player left")
+	}
+}
+
+func TestTaterTVHLSPlaybackPlanRejectsPreviousServerGeneration(t *testing.T) {
+	annotated := annotateTaterTVHLSSession(
+		"http://tube.local/api/tater/tv/channel/08/playlist.m3u8?player_token=secret",
+	)
+	parsed, err := url.Parse(annotated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := parsed.Query().Get("tv_session"); got != taterTVHLSBootID {
+		t.Fatalf("tv_session = %q, want %q", got, taterTVHLSBootID)
+	}
+	if !taterTVHLSRequestMatchesCurrentBoot(httptest.NewRequest("GET", annotated, nil)) {
+		t.Fatal("current process generation was rejected")
+	}
+	if taterTVHLSRequestMatchesCurrentBoot(httptest.NewRequest(
+		"GET",
+		"http://tube.local/api/tater/tv/channel/08/playlist.m3u8?tv_session=previous-process",
+		nil,
+	)) {
+		t.Fatal("playlist URL from a previous server process was accepted")
+	}
+	if !taterTVHLSRequestMatchesCurrentBoot(httptest.NewRequest(
+		"GET",
+		"http://tube.local/api/tater/tv/channel/08/playlist.m3u8",
+		nil,
+	)) {
+		t.Fatal("legacy untagged playlist URL should remain compatible")
 	}
 }
