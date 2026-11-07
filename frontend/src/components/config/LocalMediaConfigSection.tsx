@@ -21,6 +21,7 @@ import {
 	RadioTower,
 	RefreshCw,
 	Save,
+	ScanSearch,
 	Search,
 	Trash2,
 	Tv,
@@ -479,6 +480,27 @@ export function LocalMediaConfigSection({
 		}
 	};
 
+	const beginMarkerScan = async () => {
+		try {
+			await startScan.mutateAsync({
+				scrapeMissingArtwork: false,
+				scanMediaMarkers: true,
+			});
+			showToast({
+				type: "info",
+				title: "Media marker scan started",
+				message:
+					"Tater Tube will verify sidecar write access first, then analyze only videos without a valid marker sidecar.",
+			});
+		} catch (error) {
+			showToast({
+				type: "error",
+				title: "Could not start marker scan",
+				message: error instanceof Error ? error.message : "Unknown error",
+			});
+		}
+	};
+
 	const handleTMDBTest = async () => {
 		try {
 			const result = await testTMDBKey.mutateAsync(formData.tmdb_api_key?.trim() ?? "");
@@ -590,6 +612,15 @@ export function LocalMediaConfigSection({
 						>
 							<RefreshCw className={`h-4 w-4 ${scanRunning ? "animate-spin" : ""}`} />
 							Scan Libraries
+						</button>
+						<button
+							type="button"
+							className="btn btn-outline"
+							disabled={isReadOnly || hasChanges || scanRunning || startScan.isPending}
+							onClick={beginMarkerScan}
+						>
+							<ScanSearch className="h-4 w-4" />
+							Find Breaks & Credits
 						</button>
 					</div>
 				</div>
@@ -765,6 +796,31 @@ export function LocalMediaConfigSection({
 							</span>
 						</div>
 					)}
+				{scanStatus?.phase === "complete" && (scanStatus.markers_total ?? 0) > 0 && (
+					<div className="alert alert-success mt-5 py-3 text-sm">
+						<CircleCheck className="h-4 w-4" />
+						<span>
+							{(scanStatus.marker_sidecars ?? 0).toLocaleString()} sidecars created ·{" "}
+							{(scanStatus.marker_sidecars_reused ?? 0).toLocaleString()} reused ·{" "}
+							{(scanStatus.commercial_breaks_found ?? 0).toLocaleString()} commercial spots ·{" "}
+							{(scanStatus.credits_found ?? 0).toLocaleString()} credits markers
+						</span>
+					</div>
+				)}
+				{(scanStatus?.marker_files_failed ?? 0) > 0 && (
+					<div className="alert alert-warning mt-5 items-start py-3 text-sm">
+						<AlertTriangle className="mt-0.5 h-4 w-4" />
+						<div className="min-w-0">
+							<div className="font-bold">
+								{scanStatus?.marker_files_failed.toLocaleString()} media files were skipped
+							</div>
+							<p className="mt-1 break-all text-xs opacity-75">
+								{scanStatus?.marker_errors?.[0] ||
+									"Tater Tube could not create marker sidecars beside these files."}
+							</p>
+						</div>
+					</div>
+				)}
 			</section>
 
 			<section className="space-y-5 rounded-2xl border border-base-300 bg-base-100/60 p-4 sm:p-5">

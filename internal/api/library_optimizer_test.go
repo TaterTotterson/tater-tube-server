@@ -48,6 +48,29 @@ func TestOptimizerActionOnlyTranscodesDolbyVisionWhenCodecNeedsIt(t *testing.T) 
 	assert.Equal(t, "cleanup", optimizerActionForMedia("hevc", "dolby_vision", cfg))
 }
 
+func TestBuildOptimizerCandidatesNeverTranscodesUnknownCodec(t *testing.T) {
+	configDir := t.TempDir()
+	cfg := config.DefaultConfig(configDir)
+	cfg.LibraryOptimizer.TargetCodec = "hevc"
+	index := taterLocalLibraryIndex{
+		Schema: taterLocalLibraryIndexSchema,
+		Files: []taterLocalLibraryFileIndex{
+			{LibraryType: "movies", Path: "Already AV1.mkv", VideoCodec: "av1", SizeBytes: 200},
+			{LibraryType: "movies", Path: "Not Probed.mkv", SizeBytes: 100},
+		},
+	}
+	assert.NoError(t, writeTaterJSON(taterLocalLibraryIndexPath(cfg), index))
+
+	candidates, analysis, err := buildOptimizerCandidates(cfg, libraryOptimizerStore{Records: map[string]libraryOptimizerRecord{}})
+
+	assert.NoError(t, err)
+	assert.Empty(t, candidates)
+	assert.Equal(t, 2, analysis.TotalFiles)
+	assert.Equal(t, 1, analysis.AlreadyEfficient)
+	assert.Equal(t, 1, analysis.MediaDetailsMissing)
+	assert.Zero(t, analysis.EligibleFiles)
+}
+
 func TestOptimizerDolbyVisionVideoArgsProduceHDR10(t *testing.T) {
 	args := optimizerVideoArgs(
 		"libx265",

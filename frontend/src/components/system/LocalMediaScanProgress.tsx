@@ -16,12 +16,17 @@ function phaseLabel(phase: string) {
 			return "Reading video details";
 		case "artwork":
 			return "Matching artwork & metadata";
+		case "markers":
+			return "Finding breaks & credits";
 		default:
 			return "Updating local library";
 	}
 }
 
 function progressDetail(status: LocalMediaScanStatus) {
+	if (status.phase === "markers") {
+		return `${status.markers_processed.toLocaleString()} of ${status.markers_total.toLocaleString()} videos checked`;
+	}
 	if (status.phase === "artwork") {
 		if (status.videos_total > 0) {
 			return `${status.videos_processed.toLocaleString()} of ${status.videos_total.toLocaleString()} movies/shows checked`;
@@ -72,6 +77,12 @@ export function LocalMediaScanProgress({ status, compact = false }: LocalMediaSc
 							<span>
 								{status.artwork_found.toLocaleString()} images ·{" "}
 								{status.metadata_found.toLocaleString()} NFO files found
+							</span>
+						)}
+						{status.phase === "markers" && (
+							<span>
+								{status.commercial_breaks_found.toLocaleString()} breaks ·{" "}
+								{status.credits_found.toLocaleString()} credits markers
 							</span>
 						)}
 					</div>

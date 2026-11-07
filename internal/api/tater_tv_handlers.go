@@ -1334,16 +1334,13 @@ func taterTVAppendProgram(cfg *config.Config, schedule *[]map[string]any, start 
 	if cfg.TubeTV.MidrollCommercials == nil || !*cfg.TubeTV.MidrollCommercials || len(decks.commercials) == 0 || duration < 1200 {
 		return taterTVAppendScheduleItem(schedule, item, kind, start, duration, 0, false)
 	}
-	count := 1
-	if duration >= 7200 {
-		count = 3
-	} else if duration >= 3600 {
-		count = 2
+	offsets := taterTVMidrollOffsets(item, duration)
+	if len(offsets) == 0 {
+		return taterTVAppendScheduleItem(schedule, item, kind, start, duration, 0, false)
 	}
 	total := start
 	cursor := 0.0
-	for i := 1; i <= count; i++ {
-		offset := duration * float64(i) / float64(count+1)
+	for _, offset := range offsets {
 		segment := math.Max(5, offset-cursor)
 		total = taterTVAppendScheduleItem(schedule, item, kind, total, segment, cursor, true)
 		total = taterTVAppendMidrollCommercialBreak(cfg, schedule, total, decks, rng)
@@ -1353,6 +1350,40 @@ func taterTVAppendProgram(cfg *config.Config, schedule *[]map[string]any, start 
 		total = taterTVAppendScheduleItem(schedule, item, kind, total, duration-cursor, cursor, false)
 	}
 	return total
+}
+
+func taterTVMidrollOffsets(item taterUsenetItem, duration float64) []float64 {
+	detected := append([]float64(nil), item.CommercialBreaks...)
+	sort.Float64s(detected)
+	offsets := make([]float64, 0, len(detected))
+	last := -600.0
+	for _, offset := range detected {
+		if offset < 120 || offset > duration-120 || offset-last < 300 {
+			continue
+		}
+		offsets = append(offsets, offset)
+		last = offset
+		if len(offsets) >= 8 {
+			break
+		}
+	}
+	if len(offsets) > 0 {
+		return offsets
+	}
+
+	// Media without a marker sidecar retains the established evenly spaced
+	// fallback so enabling marker scans never removes existing Tube TV breaks.
+	count := 1
+	if duration >= 7200 {
+		count = 3
+	} else if duration >= 3600 {
+		count = 2
+	}
+	offsets = make([]float64, 0, count)
+	for i := 1; i <= count; i++ {
+		offsets = append(offsets, duration*float64(i)/float64(count+1))
+	}
+	return offsets
 }
 
 func taterTVAppendScheduleItem(schedule *[]map[string]any, item taterUsenetItem, kind string, start, duration, mediaOffset float64, forceAdvance bool) float64 {

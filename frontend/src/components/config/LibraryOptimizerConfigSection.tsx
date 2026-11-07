@@ -337,6 +337,21 @@ export function LibraryOptimizerConfigSection({
 		capabilities?.ffprobe_available === true &&
 		capabilities?.library_writable === true &&
 		targetReady;
+	const startBlockedReason = (() => {
+		if (isReadOnly) return "Configuration is read-only.";
+		if (hasChanges) return "Save the optimization recipe before analyzing or starting.";
+		if (!data.enabled) return "Enable Library Optimization under Setup, then save the recipe.";
+		if (!capabilities) return "Waiting for the server capability check.";
+		if (!capabilities.ffmpeg_available || !capabilities.ffprobe_available) {
+			return "FFmpeg and FFprobe must be available.";
+		}
+		if (!capabilities.library_writable)
+			return "Every enabled movie and series library must be writable.";
+		if (!targetReady) return `No usable ${data.target_codec.toUpperCase()} encoder was detected.`;
+		if (!analysis?.eligible_files)
+			return "Analyze the library and confirm that at least one file is ready.";
+		return "";
+	})();
 	const progress = status?.total
 		? Math.min(100, Math.round((status.current / status.total) * 100))
 		: 0;
@@ -773,7 +788,8 @@ export function LibraryOptimizerConfigSection({
 							<button
 								type="button"
 								className="btn btn-outline btn-sm"
-								disabled={isWorking || status?.running}
+								disabled={isWorking || status?.running || hasChanges}
+								title={hasChanges ? "Save the optimization recipe before analyzing." : undefined}
 								onClick={analyze}
 							>
 								<RefreshCw className={`h-4 w-4 ${isWorking ? "animate-spin" : ""}`} />
@@ -814,6 +830,7 @@ export function LibraryOptimizerConfigSection({
 										!systemReady ||
 										!analysis?.eligible_files
 									}
+									title={startBlockedReason || undefined}
 									onClick={() => perform(() => apiClient.startLibraryOptimizer())}
 								>
 									<Play className="h-4 w-4" />
@@ -823,32 +840,81 @@ export function LibraryOptimizerConfigSection({
 						</div>
 					</div>
 
+					{!status?.running && startBlockedReason && (
+						<div className="mt-4 flex items-start gap-2 rounded-xl border border-info/20 bg-info/5 px-4 py-3 text-base-content/65 text-sm">
+							<Info className="mt-0.5 h-4 w-4 shrink-0 text-info" />
+							<span>{startBlockedReason}</span>
+						</div>
+					)}
+
 					{analysis && (
-						<div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-							<CapabilityTile
-								label="Scanned"
-								value={`${analysis.total_files} files`}
-								ready={true}
-								detail={bytes(analysis.source_bytes)}
-							/>
-							<CapabilityTile
-								label="Ready"
-								value={`${analysis.eligible_files} files`}
-								ready={analysis.eligible_files > 0}
-								detail={`${analysis.video_conversions} transcodes · ${analysis.track_cleanup_only} cleanup`}
-							/>
-							<CapabilityTile
-								label="Already efficient"
-								value={`${analysis.already_efficient} files`}
-								ready={true}
-								detail={`${analysis.previously_handled} previously handled`}
-							/>
-							<CapabilityTile
-								label="Eligible size"
-								value={bytes(analysis.eligible_bytes)}
-								ready={analysis.eligible_files > 0}
-								detail={`${analysis.dolby_vision_skipped} Dolby Vision preserved · ${analysis.dolby_vision_hdr10} need HDR10 conversion`}
-							/>
+						<>
+							<div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+								<CapabilityTile
+									label="Scanned"
+									value={`${analysis.total_files} files`}
+									ready={true}
+									detail={bytes(analysis.source_bytes)}
+								/>
+								<CapabilityTile
+									label="Ready"
+									value={`${analysis.eligible_files} files`}
+									ready={analysis.eligible_files > 0}
+									detail={`${analysis.video_conversions} transcodes · ${analysis.track_cleanup_only} cleanup`}
+								/>
+								<CapabilityTile
+									label="Already efficient"
+									value={`${analysis.already_efficient} files`}
+									ready={true}
+									detail={`${analysis.previously_handled} previously handled`}
+								/>
+								<CapabilityTile
+									label="Eligible size"
+									value={bytes(analysis.eligible_bytes)}
+									ready={analysis.eligible_files > 0}
+									detail={`${analysis.dolby_vision_skipped} Dolby Vision preserved · ${analysis.dolby_vision_hdr10} need HDR10 conversion`}
+								/>
+							</div>
+							{Object.keys(analysis.codecs).length > 0 && (
+								<div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-base-300 bg-base-100/45 px-4 py-3">
+									<span className="mr-1 font-semibold text-base-content/55 text-xs">
+										Detected video
+									</span>
+									{Object.entries(analysis.codecs)
+										.sort((left, right) => right[1] - left[1])
+										.map(([codec, count]) => (
+											<span
+												key={codec}
+												className="badge badge-outline badge-sm font-mono uppercase"
+											>
+												{codec} · {count.toLocaleString()}
+											</span>
+										))}
+								</div>
+							)}
+						</>
+					)}
+
+					{analysis && (analysis.media_details_missing > 0 || analysis.unavailable_files > 0) && (
+						<div className="alert alert-warning mt-4 items-start py-3 text-sm">
+							<AlertTriangle className="mt-0.5 h-4 w-4" />
+							<div>
+								<div className="font-semibold">Some files were excluded for safety</div>
+								<div className="mt-1 text-xs opacity-75">
+									{analysis.media_details_missing > 0 && (
+										<span>
+											{analysis.media_details_missing.toLocaleString()} need codec details. Run Scan
+											Libraries, then analyze again.
+										</span>
+									)}
+									{analysis.media_details_missing > 0 && analysis.unavailable_files > 0 && " · "}
+									{analysis.unavailable_files > 0 && (
+										<span>
+											{analysis.unavailable_files.toLocaleString()} files are unavailable.
+										</span>
+									)}
+								</div>
+							</div>
 						</div>
 					)}
 

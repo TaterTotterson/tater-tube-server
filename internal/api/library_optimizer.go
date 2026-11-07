@@ -60,19 +60,20 @@ type libraryOptimizerCapabilities struct {
 }
 
 type libraryOptimizerAnalysis struct {
-	GeneratedAt        time.Time      `json:"generated_at"`
-	TotalFiles         int            `json:"total_files"`
-	EligibleFiles      int            `json:"eligible_files"`
-	VideoConversions   int            `json:"video_conversions"`
-	TrackCleanupOnly   int            `json:"track_cleanup_only"`
-	AlreadyEfficient   int            `json:"already_efficient"`
-	PreviouslyHandled  int            `json:"previously_handled"`
-	DolbyVisionSkipped int            `json:"dolby_vision_skipped"`
-	DolbyVisionHDR10   int            `json:"dolby_vision_hdr10"`
-	UnavailableFiles   int            `json:"unavailable_files"`
-	SourceBytes        int64          `json:"source_bytes"`
-	EligibleBytes      int64          `json:"eligible_bytes"`
-	Codecs             map[string]int `json:"codecs"`
+	GeneratedAt         time.Time      `json:"generated_at"`
+	TotalFiles          int            `json:"total_files"`
+	EligibleFiles       int            `json:"eligible_files"`
+	VideoConversions    int            `json:"video_conversions"`
+	TrackCleanupOnly    int            `json:"track_cleanup_only"`
+	AlreadyEfficient    int            `json:"already_efficient"`
+	PreviouslyHandled   int            `json:"previously_handled"`
+	DolbyVisionSkipped  int            `json:"dolby_vision_skipped"`
+	DolbyVisionHDR10    int            `json:"dolby_vision_hdr10"`
+	MediaDetailsMissing int            `json:"media_details_missing"`
+	UnavailableFiles    int            `json:"unavailable_files"`
+	SourceBytes         int64          `json:"source_bytes"`
+	EligibleBytes       int64          `json:"eligible_bytes"`
+	Codecs              map[string]int `json:"codecs"`
 }
 
 type libraryOptimizerStatus struct {
@@ -702,6 +703,14 @@ func buildOptimizerCandidates(cfg *config.Config, store libraryOptimizerStore) (
 			codec = "unknown"
 		}
 		analysis.Codecs[codec]++
+		// Never guess that an unprobed file needs transcoding. An older or
+		// incomplete library index may not have codec details yet; treating
+		// "unknown" as a conversion candidate could queue an entire efficient
+		// AV1/HEVC library. A normal library scan safely fills this information.
+		if codec == "unknown" {
+			analysis.MediaDetailsMissing++
+			continue
+		}
 		dolbyVision := strings.Contains(strings.ToLower(file.VideoRange), "dolby")
 		action := optimizerActionForMedia(codec, file.VideoRange, cfg.LibraryOptimizer)
 		if action == "skip-dolby-vision" {

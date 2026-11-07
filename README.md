@@ -337,9 +337,17 @@ Finish the library setup in the dashboard:
 
 The scanned library will appear on every paired Tater Tube Player.
 
-Read-only (`:ro`) mounts support scanning and playback. Use a writable mount if
-you want the server to save artwork or NFO metadata beside the media, or to use
-Library Optimization. Optional TMDB matching uses the API key you provide.
+Read-only (`:ro`) mounts support ordinary library scanning and playback. Use a
+writable mount if you want the server to save artwork, NFO metadata, or detected
+break and ending-credit markers beside the media, or to use Library
+Optimization. Optional TMDB matching uses the API key you provide.
+
+After the normal library scan, select **Find Breaks & Credits** to analyze video
+transitions. Tater Tube saves a portable `.tater-markers.json` sidecar beside
+each video and reuses valid sidecars on later scans, including after the media is
+moved with its sidecar. Before analyzing a video, the server verifies that its
+folder can accept the sidecar. If the folder is read-only, that video is skipped
+with a **no write access** error; marker data never falls back to `/config`.
 
 ## Tube TV
 

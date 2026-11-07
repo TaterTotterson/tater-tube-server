@@ -198,26 +198,34 @@ type taterMusicArtworkStore struct {
 }
 
 type taterLocalLibraryScanStatus struct {
-	Running         bool                            `json:"running"`
-	Phase           string                          `json:"phase"`
-	Message         string                          `json:"message,omitempty"`
-	StartedAt       time.Time                       `json:"started_at,omitempty"`
-	FinishedAt      time.Time                       `json:"finished_at,omitempty"`
-	ProgressCurrent int                             `json:"progress_current"`
-	ProgressTotal   int                             `json:"progress_total"`
-	ProgressPercent int                             `json:"progress_percent"`
-	FilesScanned    int                             `json:"files_scanned"`
-	FilesTotal      int                             `json:"files_total"`
-	AlbumsProcessed int                             `json:"albums_processed"`
-	AlbumsTotal     int                             `json:"albums_total"`
-	VideosProcessed int                             `json:"videos_processed"`
-	VideosTotal     int                             `json:"videos_total"`
-	ArtworkFound    int                             `json:"artwork_found"`
-	MetadataFound   int                             `json:"metadata_found"`
-	GenreMatches    int                             `json:"genre_matches"`
-	GenreUnmatched  int                             `json:"genre_unmatched"`
-	Error           string                          `json:"error,omitempty"`
-	Monitor         *taterLocalLibraryMonitorStatus `json:"monitor,omitempty"`
+	Running               bool                            `json:"running"`
+	Phase                 string                          `json:"phase"`
+	Message               string                          `json:"message,omitempty"`
+	StartedAt             time.Time                       `json:"started_at,omitempty"`
+	FinishedAt            time.Time                       `json:"finished_at,omitempty"`
+	ProgressCurrent       int                             `json:"progress_current"`
+	ProgressTotal         int                             `json:"progress_total"`
+	ProgressPercent       int                             `json:"progress_percent"`
+	FilesScanned          int                             `json:"files_scanned"`
+	FilesTotal            int                             `json:"files_total"`
+	AlbumsProcessed       int                             `json:"albums_processed"`
+	AlbumsTotal           int                             `json:"albums_total"`
+	VideosProcessed       int                             `json:"videos_processed"`
+	VideosTotal           int                             `json:"videos_total"`
+	ArtworkFound          int                             `json:"artwork_found"`
+	MetadataFound         int                             `json:"metadata_found"`
+	GenreMatches          int                             `json:"genre_matches"`
+	GenreUnmatched        int                             `json:"genre_unmatched"`
+	MarkersProcessed      int                             `json:"markers_processed"`
+	MarkersTotal          int                             `json:"markers_total"`
+	MarkerSidecars        int                             `json:"marker_sidecars"`
+	MarkerSidecarsReused  int                             `json:"marker_sidecars_reused"`
+	MarkerFilesFailed     int                             `json:"marker_files_failed"`
+	CommercialBreaksFound int                             `json:"commercial_breaks_found"`
+	CreditsFound          int                             `json:"credits_found"`
+	MarkerErrors          []string                        `json:"marker_errors,omitempty"`
+	Error                 string                          `json:"error,omitempty"`
+	Monitor               *taterLocalLibraryMonitorStatus `json:"monitor,omitempty"`
 }
 
 type taterLocalLibraryScanProgress struct {
@@ -232,6 +240,7 @@ type taterLocalLibraryScanProgress struct {
 type taterLocalLibraryScanRequest struct {
 	ScrapeMissingArtwork bool     `json:"scrape_missing_artwork"`
 	ArtworkLibraryType   string   `json:"artwork_library_type,omitempty"`
+	ScanMediaMarkers     bool     `json:"scan_media_markers,omitempty"`
 	Incremental          bool     `json:"-"`
 	CategoryIDs          []string `json:"-"`
 	RefreshMetadata      bool     `json:"-"`
@@ -1364,6 +1373,9 @@ func runTaterLocalLibraryScan(
 	cfg *config.Config,
 	request taterLocalLibraryScanRequest,
 ) (taterLocalLibraryIndex, error) {
+	if request.ScanMediaMarkers {
+		return runTaterMediaMarkerScan(cfg)
+	}
 	previous, _ := readTaterLocalLibraryIndex(cfg)
 	categoryIDs := make(map[string]struct{}, len(request.CategoryIDs))
 	for _, categoryID := range request.CategoryIDs {
@@ -1481,7 +1493,11 @@ func (s *Server) handleLocalMediaScan(c *fiber.Ctx) error {
 		}
 	}
 	cfg := s.configManager.GetConfig().DeepCopy()
-	if !beginTaterLocalLibraryScan(cfg, "Starting local media scan") {
+	message := "Starting local media scan"
+	if request.ScanMediaMarkers {
+		message = "Checking media marker sidecars"
+	}
+	if !beginTaterLocalLibraryScan(cfg, message) {
 		status := s.getTaterLocalLibraryScanStatusWithMonitor(cfg)
 		return RespondConflict(c, "A local media scan is already running", status.Message)
 	}
