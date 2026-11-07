@@ -62,12 +62,15 @@ library_optimizer:
   audio_format: 'copy'
   # forced_english, english, remove, or all
   subtitle_policy: 'forced_english'
-  convert_hevc_to_av1: false
-  clean_efficient_files: false
   pause_during_playback: true
   skip_dolby_vision: true
   minimum_savings_percent: 15
   quarantine_days: 7
+
+# Automatically detect commercial transitions and ending credits in new or
+# changed local videos. Portable sidecars are written beside each media file.
+media_markers:
+  enabled: true
 
 newznab:
   enabled: false

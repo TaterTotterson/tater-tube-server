@@ -585,6 +585,24 @@ export const useLocalMediaScanStatus = () => {
 	});
 };
 
+export const useMediaMarkerStatus = () => {
+	return useQuery({
+		queryKey: ["media-markers", "status"],
+		queryFn: () => apiClient.getMediaMarkerStatus(),
+		refetchInterval: 1500,
+	});
+};
+
+export const useScanMediaMarkers = () => {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: () => apiClient.scanMediaMarkers(),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["media-markers", "status"] });
+		},
+	});
+};
+
 export const useStartLocalMediaScan = () => {
 	const queryClient = useQueryClient();
 	return useMutation({

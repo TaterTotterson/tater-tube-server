@@ -46,6 +46,7 @@ type Config struct {
 	Upscaling        UpscalingConfig        `yaml:"upscaling" mapstructure:"upscaling" json:"upscaling"`
 	HDREnhancement   HDREnhancementConfig   `yaml:"hdr_enhancement" mapstructure:"hdr_enhancement" json:"hdr_enhancement"`
 	LibraryOptimizer LibraryOptimizerConfig `yaml:"library_optimizer" mapstructure:"library_optimizer" json:"library_optimizer"`
+	MediaMarkers     MediaMarkersConfig     `yaml:"media_markers" mapstructure:"media_markers" json:"media_markers"`
 	Health           HealthConfig           `yaml:"health" mapstructure:"health" json:"health"`
 	RClone           RCloneConfig           `yaml:"rclone" mapstructure:"rclone" json:"-"`
 	Import           ImportConfig           `yaml:"import" mapstructure:"import" json:"import"`
@@ -344,12 +345,17 @@ type LibraryOptimizerConfig struct {
 	AudioPolicy           string `yaml:"audio_policy" mapstructure:"audio_policy" json:"audio_policy"`
 	AudioFormat           string `yaml:"audio_format" mapstructure:"audio_format" json:"audio_format"`
 	SubtitlePolicy        string `yaml:"subtitle_policy" mapstructure:"subtitle_policy" json:"subtitle_policy"`
-	ConvertHEVCToAV1      *bool  `yaml:"convert_hevc_to_av1" mapstructure:"convert_hevc_to_av1" json:"convert_hevc_to_av1"`
-	CleanEfficientFiles   *bool  `yaml:"clean_efficient_files" mapstructure:"clean_efficient_files" json:"clean_efficient_files"`
 	PauseDuringPlayback   *bool  `yaml:"pause_during_playback" mapstructure:"pause_during_playback" json:"pause_during_playback"`
 	SkipDolbyVision       *bool  `yaml:"skip_dolby_vision" mapstructure:"skip_dolby_vision" json:"skip_dolby_vision"`
 	MinimumSavingsPercent *int   `yaml:"minimum_savings_percent" mapstructure:"minimum_savings_percent" json:"minimum_savings_percent"`
 	QuarantineDays        *int   `yaml:"quarantine_days" mapstructure:"quarantine_days" json:"quarantine_days"`
+}
+
+// MediaMarkersConfig controls automatic commercial-break and ending-credit
+// detection for local video. Marker sidecars are always portable beside the
+// media; disabling this only stops automatic background discovery.
+type MediaMarkersConfig struct {
+	Enabled *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -938,14 +944,6 @@ func (c *Config) Validate() error {
 	if c.LibraryOptimizer.SubtitlePolicy == "" {
 		c.LibraryOptimizer.SubtitlePolicy = "forced_english"
 	}
-	if c.LibraryOptimizer.ConvertHEVCToAV1 == nil {
-		value := false
-		c.LibraryOptimizer.ConvertHEVCToAV1 = &value
-	}
-	if c.LibraryOptimizer.CleanEfficientFiles == nil {
-		value := false
-		c.LibraryOptimizer.CleanEfficientFiles = &value
-	}
 	if c.LibraryOptimizer.PauseDuringPlayback == nil {
 		value := true
 		c.LibraryOptimizer.PauseDuringPlayback = &value
@@ -961,6 +959,10 @@ func (c *Config) Validate() error {
 	if c.LibraryOptimizer.QuarantineDays == nil {
 		value := 7
 		c.LibraryOptimizer.QuarantineDays = &value
+	}
+	if c.MediaMarkers.Enabled == nil {
+		value := true
+		c.MediaMarkers.Enabled = &value
 	}
 	if c.Newznab.Enabled == nil {
 		enabled := false
@@ -2058,17 +2060,16 @@ func DefaultConfig(configDir ...string) *Config {
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 	fuseEnabled := false
-	loginRequired := false               // Login disabled by default for local appliance-style setup
-	stremioEnabled := false              // Stremio endpoint disabled by default
-	segmentCacheEnabled := true          // Persist decoded Usenet segments by default
-	transcodingEnabled := false          // Direct play by default; FFmpeg transcode is opt-in
-	hdrEnhancementEnabled := false       // Experimental SDR-to-HDR10 presentation is opt-in
-	libraryOptimizerEnabled := false     // Library files are never modified until explicitly enabled
-	libraryOptimizerAutomatic := false   // Background optimization is opt-in
-	libraryOptimizerConvertHEVC := false // Efficient HEVC sources are preserved by default
-	libraryOptimizerCleanEfficient := false
+	loginRequired := false             // Login disabled by default for local appliance-style setup
+	stremioEnabled := false            // Stremio endpoint disabled by default
+	segmentCacheEnabled := true        // Persist decoded Usenet segments by default
+	transcodingEnabled := false        // Direct play by default; FFmpeg transcode is opt-in
+	hdrEnhancementEnabled := false     // Experimental SDR-to-HDR10 presentation is opt-in
+	libraryOptimizerEnabled := false   // Library files are never modified until explicitly enabled
+	libraryOptimizerAutomatic := false // Background optimization is opt-in
 	libraryOptimizerPausePlayback := true
 	libraryOptimizerSkipDolbyVision := true
+	mediaMarkersEnabled := true
 	newznabEnabled := false              // Player-facing Stream catalog disabled by default
 	localMediaEnabled := false           // Server-local media catalog disabled by default
 	localMediaRealtimeMonitoring := true // Watch supported filesystems for local media changes
@@ -2225,12 +2226,13 @@ func DefaultConfig(configDir ...string) *Config {
 			AudioPolicy:           "best_english",
 			AudioFormat:           "copy",
 			SubtitlePolicy:        "forced_english",
-			ConvertHEVCToAV1:      &libraryOptimizerConvertHEVC,
-			CleanEfficientFiles:   &libraryOptimizerCleanEfficient,
 			PauseDuringPlayback:   &libraryOptimizerPausePlayback,
 			SkipDolbyVision:       &libraryOptimizerSkipDolbyVision,
 			MinimumSavingsPercent: func() *int { value := 15; return &value }(),
 			QuarantineDays:        func() *int { value := 7; return &value }(),
+		},
+		MediaMarkers: MediaMarkersConfig{
+			Enabled: &mediaMarkersEnabled,
 		},
 		SegmentCache: SegmentCacheConfig{
 			Enabled:     &segmentCacheEnabled,

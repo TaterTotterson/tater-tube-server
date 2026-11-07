@@ -9,6 +9,7 @@ import {
 	Link,
 	Radio,
 	RefreshCw,
+	ScanSearch,
 	Server,
 	Settings,
 	Shield,
@@ -27,6 +28,7 @@ import { HDREnhancementConfigSection } from "../components/config/HDREnhancement
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { LibraryOptimizerConfigSection } from "../components/config/LibraryOptimizerConfigSection";
 import { LocalMediaConfigSection } from "../components/config/LocalMediaConfigSection";
+import { MediaMarkersConfigSection } from "../components/config/MediaMarkersConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { NewznabConfigSection } from "../components/config/NewznabConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
@@ -61,6 +63,7 @@ import type {
 	LibraryOptimizerConfig,
 	LocalMediaConfig,
 	LogFormData,
+	MediaMarkersConfig,
 	MetadataConfig,
 	NewznabConfig,
 	ProviderConfig,
@@ -92,6 +95,7 @@ const getIconComponent = (iconName: string) => {
 		Link,
 		Sparkles,
 		Sun,
+		ScanSearch,
 	};
 	return iconMap[iconName as keyof typeof iconMap] || Settings;
 };
@@ -113,6 +117,7 @@ const SECTION_GROUPS = [
 			"upscaling",
 			"hdr_enhancement",
 			"library_optimizer",
+			"media_markers",
 			"import",
 			"streaming",
 			"metadata",
@@ -254,6 +259,11 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "library_optimizer",
 					config: { library_optimizer: data as unknown as LibraryOptimizerConfig },
+				});
+			} else if (section === "media_markers") {
+				await updateConfigSection.mutateAsync({
+					section: "media_markers",
+					config: { media_markers: data as unknown as MediaMarkersConfig },
 				});
 			} else if (section === "segment_cache") {
 				await updateConfigSection.mutateAsync({
@@ -546,6 +556,13 @@ export function ConfigurationPage() {
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
+								{activeSection === "media_markers" && (
+									<MediaMarkersConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
 								{activeSection === "system" && (
 									<SystemConfigSection
 										config={config}
@@ -630,6 +647,7 @@ export function ConfigurationPage() {
 									"upscaling",
 									"hdr_enhancement",
 									"library_optimizer",
+									"media_markers",
 									"system",
 									"providers",
 									"sabnzbd",

@@ -251,8 +251,10 @@ you enable the feature. Library Optimization is off by default.
 
 - **HEVC** is the recommended target for broad compatibility and responsive
   encoding. **AV1** can save more space when the server and players support it.
-- Existing HEVC and AV1 video is skipped by default, so it is not needlessly
-  converted again. HEVC-to-AV1 conversion and track-only cleanup are optional.
+- Existing video that already meets the selected codec policy is copied without
+  re-encoding while the chosen audio and subtitle policy is applied. Selecting
+  AV1 automatically converts HEVC sources to AV1; AV1 is never converted back
+  to HEVC.
 - **Best English main track** favors the highest-quality English audio while
   excluding commentary and descriptive tracks. Audio may be copied at original
   quality or converted to E-AC-3/AAC.
@@ -342,12 +344,18 @@ writable mount if you want the server to save artwork, NFO metadata, or detected
 break and ending-credit markers beside the media, or to use Library
 Optimization. Optional TMDB matching uses the API key you provide.
 
-After the normal library scan, select **Find Breaks & Credits** to analyze video
-transitions. Tater Tube saves a portable `.tater-markers.json` sidecar beside
-each video and reuses valid sidecars on later scans, including after the media is
-moved with its sidecar. Before analyzing a video, the server verifies that its
-folder can accept the sidecar. If the folder is read-only, that video is skipped
-with a **no write access** error; marker data never falls back to `/config`.
+Configure marker detection under `Configuration -> Breaks & Credits` in the
+**Processing** group. When automatic scanning is enabled, the initial pass fills
+in missing markers and normal library monitoring queues only new or changed
+videos afterward. The page shows completed and queued videos, created and reused
+sidecars, failures, commercial transitions, and credits markers. **Scan missing
+now** is available for an on-demand check.
+
+Tater Tube saves a portable `.tater-markers.json` sidecar beside each video and
+reuses valid sidecars after server updates or when media moves with its sidecar.
+Before analyzing a video, the server verifies that its folder can accept the
+sidecar. If the folder is read-only, that video is skipped with a **no write
+access** error; marker data never falls back to `/config`.
 
 ## Tube TV
 

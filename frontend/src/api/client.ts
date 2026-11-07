@@ -39,6 +39,7 @@ import type {
 	LocalMediaMusicAlbum,
 	LocalMediaScanStatus,
 	LocalMediaVideo,
+	MediaMarkerStatus,
 	PipelineTuneResponse,
 	ProviderConfig,
 	ProviderCreateRequest,
@@ -980,6 +981,16 @@ class APIClient {
 
 	async getLocalMediaScanStatus() {
 		return this.request<LocalMediaScanStatus>("/local-media/scan");
+	}
+
+	async getMediaMarkerStatus() {
+		return this.request<MediaMarkerStatus>("/media-markers/status");
+	}
+
+	async scanMediaMarkers() {
+		return this.request<MediaMarkerStatus>("/media-markers/scan", {
+			method: "POST",
+		});
 	}
 
 	async startLocalMediaScan(

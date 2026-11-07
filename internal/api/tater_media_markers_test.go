@@ -83,6 +83,43 @@ func TestTaterMediaMarkersForIndexedFileReadsPortableSidecar(t *testing.T) {
 	assert.Equal(t, 1700.0, credits)
 }
 
+func TestTaterMediaMarkerChangedKeysOnlyQueuesNewOrChangedVideo(t *testing.T) {
+	before := taterLocalLibraryIndex{Files: []taterLocalLibraryFileIndex{
+		{Key: "movie:one", LibraryType: "movies", SizeBytes: 100, ModifiedUnixNano: 10},
+		{Key: "episode:one", LibraryType: "tv", SizeBytes: 200, ModifiedUnixNano: 20},
+		{Key: "song:one", LibraryType: "music", SizeBytes: 10, ModifiedUnixNano: 10},
+	}}
+	after := taterLocalLibraryIndex{Files: []taterLocalLibraryFileIndex{
+		{Key: "movie:one", LibraryType: "movies", SizeBytes: 100, ModifiedUnixNano: 10},
+		{Key: "episode:one", LibraryType: "tv", SizeBytes: 200, ModifiedUnixNano: 21},
+		{Key: "movie:two", LibraryType: "movies", SizeBytes: 300, ModifiedUnixNano: 30},
+		{Key: "song:two", LibraryType: "music", SizeBytes: 10, ModifiedUnixNano: 10},
+	}}
+
+	assert.Equal(t, []string{"episode:one", "movie:two"}, taterMediaMarkerChangedKeys(before, after))
+}
+
+func TestTaterMediaMarkerBatchKeepsOnlyQueuedVideo(t *testing.T) {
+	index := taterLocalLibraryIndex{Files: []taterLocalLibraryFileIndex{
+		{Key: "movie:one", LibraryType: "movies"},
+		{Key: "episode:one", LibraryType: "tv"},
+		{Key: "song:one", LibraryType: "music"},
+	}}
+
+	batch := taterMediaMarkerBatch(index, false, map[string]struct{}{"episode:one": {}})
+	require.Len(t, batch.Files, 1)
+	assert.Equal(t, "episode:one", batch.Files[0].Key)
+
+	all := taterMediaMarkerBatch(index, true, nil)
+	require.Len(t, all.Files, 2)
+}
+
+func TestMediaMarkersEnabledByDefault(t *testing.T) {
+	cfg := config.DefaultConfig(t.TempDir())
+	require.NotNil(t, cfg.MediaMarkers.Enabled)
+	assert.True(t, *cfg.MediaMarkers.Enabled)
+}
+
 func TestTaterTVMidrollOffsetsUsesDetectedBreaks(t *testing.T) {
 	item := taterUsenetItem{CommercialBreaks: []float64{600, 1200, 1800}}
 	assert.Equal(t, []float64{600, 1200, 1800}, taterTVMidrollOffsets(item, 2400))

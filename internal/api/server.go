@@ -77,6 +77,8 @@ type Server struct {
 	localLibraryScanCancel         context.CancelFunc
 	libraryOptimizerCancel         context.CancelFunc
 	libraryOptimizer               *libraryOptimizerService
+	mediaMarkerCancel              context.CancelFunc
+	mediaMarkers                   *taterMediaMarkerService
 	localLibraryScanWake           chan struct{}
 	localLibraryMonitorWake        chan struct{}
 	localLibraryRealtimeScanWake   chan struct{}
@@ -153,6 +155,7 @@ func NewServer(
 
 	if configManager != nil {
 		server.libraryOptimizer = newLibraryOptimizerService(server)
+		server.mediaMarkers = newTaterMediaMarkerService(server)
 		configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 			if taterTVGuideConfigChanged(oldConfig, newConfig) {
 				taterTVResetGuideForConfig(oldConfig)
@@ -169,6 +172,10 @@ func NewServer(
 				default:
 				}
 			}
+			if oldConfig == nil || newConfig == nil ||
+				boolValue(oldConfig.MediaMarkers.Enabled, true) != boolValue(newConfig.MediaMarkers.Enabled, true) {
+				server.mediaMarkers.configChanged(newConfig)
+			}
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		server.tvGuidePlannerCancel = cancel
@@ -180,6 +187,9 @@ func NewServer(
 		optimizerCtx, optimizerCancel := context.WithCancel(context.Background())
 		server.libraryOptimizerCancel = optimizerCancel
 		go server.libraryOptimizer.runAutomatic(optimizerCtx)
+		markerCtx, markerCancel := context.WithCancel(context.Background())
+		server.mediaMarkerCancel = markerCancel
+		go server.mediaMarkers.run(markerCtx)
 	}
 
 	return server
@@ -465,6 +475,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/library-optimizer/start", s.handleLibraryOptimizerStart)
 	api.Patch("/library-optimizer/pause", s.handleLibraryOptimizerPause)
 	api.Delete("/library-optimizer", s.handleLibraryOptimizerCancel)
+	api.Get("/media-markers/status", s.handleMediaMarkerStatus)
+	api.Post("/media-markers/scan", s.handleMediaMarkerScan)
 
 	// Provider management endpoints
 	api.Post("/providers/test", s.handleTestProvider)
@@ -525,6 +537,9 @@ func (s *Server) Shutdown(ctx context.Context) {
 	if s.libraryOptimizerCancel != nil {
 		s.libraryOptimizerCancel()
 	}
+	if s.mediaMarkerCancel != nil {
+		s.mediaMarkerCancel()
+	}
 	if s.libraryOptimizer != nil {
 		_ = s.libraryOptimizer.stop()
 	}
@@ -549,14 +564,17 @@ func (s *Server) runTVGuidePlanner(ctx context.Context) {
 		// scanner and does not depend on Tube TV being enabled.
 		if needed, message := taterLocalLibraryIndexNeedsMaintenance(cfg); needed {
 			scanCfg := cfg.DeepCopy()
+			previous, _ := readTaterLocalLibraryIndex(scanCfg)
 			if !beginTaterLocalLibraryScan(scanCfg, message) {
 				return
 			}
 			slog.InfoContext(ctx, "Maintaining local media index before refreshing Tube TV guide", "reason", message)
-			if _, err := runTaterLocalLibraryScan(scanCfg, taterLocalLibraryScanRequest{}); err != nil {
+			index, err := runTaterLocalLibraryScan(scanCfg, taterLocalLibraryScanRequest{})
+			if err != nil {
 				slog.WarnContext(ctx, "Failed to maintain local media index", "error", err)
 				return
 			}
+			s.mediaMarkers.requestFiles(taterMediaMarkerChangedKeys(previous, index))
 			taterTVMarkGuideForLibraryRefresh(scanCfg, time.Now())
 			cfg = scanCfg
 		}

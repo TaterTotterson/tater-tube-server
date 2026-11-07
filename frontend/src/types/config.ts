@@ -12,6 +12,7 @@ export interface ConfigResponse {
 	upscaling: UpscalingConfig;
 	hdr_enhancement: HDREnhancementConfig;
 	library_optimizer: LibraryOptimizerConfig;
+	media_markers: MediaMarkersConfig;
 	health: HealthConfig;
 	segment_cache: SegmentCacheConfig;
 	import: ImportConfig;
@@ -154,8 +155,6 @@ export interface LibraryOptimizerConfig {
 	audio_policy: "best_english" | "all_english" | "all" | string;
 	audio_format: "copy" | "eac3" | "aac" | string;
 	subtitle_policy: "forced_english" | "english" | "remove" | "all" | string;
-	convert_hevc_to_av1: boolean;
-	clean_efficient_files: boolean;
 	pause_during_playback: boolean;
 	skip_dolby_vision: boolean;
 	minimum_savings_percent: number;
@@ -199,7 +198,6 @@ export interface LibraryOptimizerAnalysis {
 	eligible_files: number;
 	video_conversions: number;
 	track_cleanup_only: number;
-	already_efficient: number;
 	previously_handled: number;
 	dolby_vision_skipped: number;
 	dolby_vision_hdr10: number;
@@ -229,6 +227,30 @@ export interface LibraryOptimizerStatus {
 	saved_bytes: number;
 	last_error?: string;
 	analysis?: LibraryOptimizerAnalysis;
+}
+
+export interface MediaMarkersConfig {
+	enabled: boolean;
+}
+
+export interface MediaMarkerStatus {
+	enabled: boolean;
+	running: boolean;
+	state: "idle" | "scanning" | "waiting" | "warning" | "error" | "disabled" | string;
+	message?: string;
+	started_at?: string;
+	finished_at?: string;
+	current_file?: string;
+	library_videos: number;
+	completed: number;
+	queued: number;
+	checked: number;
+	created: number;
+	reused: number;
+	failed: number;
+	commercial_breaks: number;
+	credits: number;
+	errors?: string[];
 }
 
 export interface LibraryOptimizerHistoryRecord {
@@ -440,6 +462,7 @@ export interface ConfigUpdateRequest {
 	upscaling?: Partial<UpscalingConfig>;
 	hdr_enhancement?: Partial<HDREnhancementConfig>;
 	library_optimizer?: Partial<LibraryOptimizerConfig>;
+	media_markers?: Partial<MediaMarkersConfig>;
 	segment_cache?: Partial<SegmentCacheConfig>;
 	health?: HealthUpdateRequest;
 	import?: ImportUpdateRequest;
@@ -581,6 +604,7 @@ export type ConfigSection =
 	| "upscaling"
 	| "hdr_enhancement"
 	| "library_optimizer"
+	| "media_markers"
 	| "segment_cache"
 	| "health"
 	| "import"
@@ -1269,6 +1293,13 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		description:
 			"Safely reduce local-library storage with HEVC or AV1, curated audio, and subtitle cleanup.",
 		icon: "HardDrive",
+		canEdit: true,
+	},
+	media_markers: {
+		title: "Breaks & Credits",
+		description:
+			"Automatically detect natural commercial transitions and ending credits in local video.",
+		icon: "ScanSearch",
 		canEdit: true,
 	},
 	segment_cache: {
