@@ -65,7 +65,6 @@ type libraryOptimizerAnalysis struct {
 	EligibleFiles       int            `json:"eligible_files"`
 	VideoConversions    int            `json:"video_conversions"`
 	TrackCleanupOnly    int            `json:"track_cleanup_only"`
-	AlreadyEfficient    int            `json:"already_efficient"`
 	PreviouslyHandled   int            `json:"previously_handled"`
 	DolbyVisionSkipped  int            `json:"dolby_vision_skipped"`
 	DolbyVisionHDR10    int            `json:"dolby_vision_hdr10"`
@@ -627,8 +626,6 @@ func optimizerFingerprint(path string, info os.FileInfo, cfg config.LibraryOptim
 	payload := strings.Join([]string{
 		filepath.Clean(path), strconv.FormatInt(info.Size(), 10), strconv.FormatInt(info.ModTime().UnixNano(), 10),
 		cfg.TargetCodec, cfg.Quality, cfg.AudioPolicy, cfg.AudioFormat, cfg.SubtitlePolicy,
-		strconv.FormatBool(boolValue(cfg.ConvertHEVCToAV1, false)),
-		strconv.FormatBool(boolValue(cfg.CleanEfficientFiles, false)),
 		strconv.FormatBool(boolValue(cfg.SkipDolbyVision, true)),
 		strconv.Itoa(intValue(cfg.MinimumSavingsPercent, 15)),
 	}, "\x00")
@@ -652,17 +649,12 @@ func normalizeOptimizerCodec(codec string) string {
 func optimizerAction(codec string, cfg config.LibraryOptimizerConfig) string {
 	codec = normalizeOptimizerCodec(codec)
 	target := normalizeOptimizerCodec(cfg.TargetCodec)
-	if codec == "av1" || (codec == "hevc" && (target == "hevc" || !boolValue(cfg.ConvertHEVCToAV1, false))) {
-		if boolValue(cfg.CleanEfficientFiles, false) {
-			return "cleanup"
-		}
-		return "skip-efficient"
-	}
-	if codec == target {
-		if boolValue(cfg.CleanEfficientFiles, false) {
-			return "cleanup"
-		}
-		return "skip-efficient"
+	// AV1 is never converted back to HEVC. When the video already meets or
+	// exceeds the selected codec policy, copy it unchanged while applying the
+	// configured audio and subtitle policy. HEVC is converted when AV1 is the
+	// selected target; no separate expert toggles are required.
+	if codec == "av1" || codec == target {
+		return "cleanup"
 	}
 	return "transcode"
 }
@@ -715,13 +707,6 @@ func buildOptimizerCandidates(cfg *config.Config, store libraryOptimizerStore) (
 		action := optimizerActionForMedia(codec, file.VideoRange, cfg.LibraryOptimizer)
 		if action == "skip-dolby-vision" {
 			analysis.DolbyVisionSkipped++
-			continue
-		}
-		if action == "skip-efficient" {
-			if dolbyVision {
-				analysis.DolbyVisionSkipped++
-			}
-			analysis.AlreadyEfficient++
 			continue
 		}
 		absPath, pathErr := optimizerAbsolutePath(cfg, file)

@@ -1493,6 +1493,7 @@ func (s *Server) handleLocalMediaScan(c *fiber.Ctx) error {
 		}
 	}
 	cfg := s.configManager.GetConfig().DeepCopy()
+	previous, _ := readTaterLocalLibraryIndex(cfg)
 	message := "Starting local media scan"
 	if request.ScanMediaMarkers {
 		message = "Checking media marker sidecars"
@@ -1502,8 +1503,11 @@ func (s *Server) handleLocalMediaScan(c *fiber.Ctx) error {
 		return RespondConflict(c, "A local media scan is already running", status.Message)
 	}
 	go func() {
-		if _, err := runTaterLocalLibraryScan(cfg, request); err == nil {
+		if index, err := runTaterLocalLibraryScan(cfg, request); err == nil {
 			taterTVRefreshGuideAfterLibraryChange(cfg)
+			if !request.ScanMediaMarkers {
+				s.mediaMarkers.requestFiles(taterMediaMarkerChangedKeys(previous, index))
+			}
 		}
 	}()
 	return RespondSuccess(c, s.getTaterLocalLibraryScanStatusWithMonitor(cfg))

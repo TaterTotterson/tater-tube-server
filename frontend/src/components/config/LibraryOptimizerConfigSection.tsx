@@ -49,8 +49,6 @@ const DEFAULTS: LibraryOptimizerConfig = {
 	audio_policy: "best_english",
 	audio_format: "copy",
 	subtitle_policy: "forced_english",
-	convert_hevc_to_av1: false,
-	clean_efficient_files: false,
 	pause_during_playback: true,
 	skip_dolby_vision: true,
 	minimum_savings_percent: 15,
@@ -605,6 +603,13 @@ export function LibraryOptimizerConfigSection({
 								);
 							})}
 						</div>
+						<div className="flex items-start gap-2 rounded-xl border border-info/20 bg-info/5 px-4 py-3 text-base-content/65 text-sm">
+							<Info className="mt-0.5 h-4 w-4 shrink-0 text-info" />
+							<span>
+								Video handling is automatic. AV1 converts HEVC sources; video that already meets the
+								selected target is copied unchanged while the audio and subtitle policy is applied.
+							</span>
+						</div>
 
 						<div className="grid gap-4 md:grid-cols-2">
 							<SelectField
@@ -688,20 +693,6 @@ export function LibraryOptimizerConfigSection({
 								checked={data.automatic}
 								disabled={isReadOnly || !data.enabled}
 								onChange={(automatic) => updateData({ ...data, automatic })}
-							/>
-							<ToggleRow
-								label="Convert HEVC to AV1"
-								description="Normally HEVC is already efficient and skipped. Enable only when AV1 is selected."
-								checked={data.convert_hevc_to_av1}
-								disabled={isReadOnly || data.target_codec !== "av1"}
-								onChange={(convert_hevc_to_av1) => updateData({ ...data, convert_hevc_to_av1 })}
-							/>
-							<ToggleRow
-								label="Clean tracks in efficient files"
-								description="Remux existing HEVC/AV1 files to apply the audio and subtitle policy without re-encoding video."
-								checked={data.clean_efficient_files}
-								disabled={isReadOnly}
-								onChange={(clean_efficient_files) => updateData({ ...data, clean_efficient_files })}
 							/>
 						</div>
 
@@ -863,10 +854,10 @@ export function LibraryOptimizerConfigSection({
 									detail={`${analysis.video_conversions} transcodes · ${analysis.track_cleanup_only} cleanup`}
 								/>
 								<CapabilityTile
-									label="Already efficient"
-									value={`${analysis.already_efficient} files`}
+									label="Previously handled"
+									value={`${analysis.previously_handled} files`}
 									ready={true}
-									detail={`${analysis.previously_handled} previously handled`}
+									detail="No repeat work needed"
 								/>
 								<CapabilityTile
 									label="Eligible size"

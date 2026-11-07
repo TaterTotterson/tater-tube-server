@@ -165,6 +165,11 @@ func (s *Server) runLocalLibraryScanner(ctx context.Context) {
 			delay = taterLocalLibraryAutoScanRetryDelay
 		} else {
 			slog.InfoContext(ctx, "Automatic local media scan completed")
+			changedKeys := taterMediaMarkerChangedKeys(previous, index)
+			if previousErr != nil {
+				changedKeys = taterMediaMarkerChangedKeys(taterLocalLibraryIndex{}, index)
+			}
+			s.mediaMarkers.requestFiles(changedKeys)
 			if previousErr != nil || taterLocalLibraryFilesChanged(previous, index) {
 				// Preserve anything currently on air and extend future programming
 				// from the updated index. Replacing the guide here used to make a

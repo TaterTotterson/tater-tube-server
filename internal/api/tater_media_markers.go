@@ -16,9 +16,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
+	"github.com/gofiber/fiber/v2"
 )
 
 const (
@@ -79,6 +81,207 @@ type taterMediaMarkerScanProgress struct {
 }
 
 type taterMediaMarkerScanSummary = taterMediaMarkerScanProgress
+
+type taterMediaMarkerStatus struct {
+	Enabled          bool      `json:"enabled"`
+	Running          bool      `json:"running"`
+	State            string    `json:"state"`
+	Message          string    `json:"message,omitempty"`
+	StartedAt        time.Time `json:"started_at,omitempty"`
+	FinishedAt       time.Time `json:"finished_at,omitempty"`
+	CurrentFile      string    `json:"current_file,omitempty"`
+	LibraryVideos    int       `json:"library_videos"`
+	Completed        int       `json:"completed"`
+	Queued           int       `json:"queued"`
+	Checked          int       `json:"checked"`
+	Created          int       `json:"created"`
+	Reused           int       `json:"reused"`
+	Failed           int       `json:"failed"`
+	CommercialBreaks int       `json:"commercial_breaks"`
+	Credits          int       `json:"credits"`
+	Errors           []string  `json:"errors,omitempty"`
+}
+
+type taterMediaMarkerInventory struct {
+	Total            int
+	Completed        int
+	CommercialBreaks int
+	Credits          int
+}
+
+type taterMediaMarkerService struct {
+	server *Server
+	wake   chan struct{}
+
+	mu            sync.RWMutex
+	status        taterMediaMarkerStatus
+	pendingAll    bool
+	pendingForce  bool
+	pendingKeys   map[string]struct{}
+	currentCancel context.CancelFunc
+}
+
+func newTaterMediaMarkerService(server *Server) *taterMediaMarkerService {
+	return &taterMediaMarkerService{
+		server:      server,
+		wake:        make(chan struct{}, 1),
+		status:      taterMediaMarkerStatus{State: "idle", Message: "Waiting for the local library"},
+		pendingKeys: map[string]struct{}{},
+	}
+}
+
+func taterMediaMarkersEnabled(cfg *config.Config) bool {
+	return cfg != nil && taterLocalMediaEnabled(cfg) &&
+		(cfg.MediaMarkers.Enabled == nil || *cfg.MediaMarkers.Enabled)
+}
+
+func (service *taterMediaMarkerService) snapshot() taterMediaMarkerStatus {
+	if service == nil {
+		return taterMediaMarkerStatus{State: "unavailable", Message: "Media marker service is unavailable"}
+	}
+	service.mu.RLock()
+	status := service.status
+	status.Errors = append([]string(nil), service.status.Errors...)
+	service.mu.RUnlock()
+	if service.server != nil && service.server.configManager != nil {
+		status.Enabled = taterMediaMarkersEnabled(service.server.configManager.GetConfig())
+	}
+	return status
+}
+
+func (service *taterMediaMarkerService) signal() {
+	select {
+	case service.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (service *taterMediaMarkerService) requestAll(force bool) {
+	if service == nil {
+		return
+	}
+	service.mu.Lock()
+	service.pendingAll = true
+	service.pendingForce = service.pendingForce || force
+	service.pendingKeys = map[string]struct{}{}
+	service.mu.Unlock()
+	service.signal()
+}
+
+func (service *taterMediaMarkerService) requestFiles(keys []string) {
+	if service == nil || len(keys) == 0 {
+		return
+	}
+	service.mu.Lock()
+	if !service.pendingAll {
+		for _, key := range keys {
+			if key = strings.TrimSpace(key); key != "" {
+				service.pendingKeys[key] = struct{}{}
+			}
+		}
+	}
+	service.mu.Unlock()
+	service.signal()
+}
+
+func (service *taterMediaMarkerService) configChanged(cfg *config.Config) {
+	if service == nil {
+		return
+	}
+	if !taterMediaMarkersEnabled(cfg) {
+		service.mu.Lock()
+		if service.currentCancel != nil {
+			service.currentCancel()
+		}
+		service.mu.Unlock()
+		service.signal()
+		return
+	}
+	service.requestAll(false)
+}
+
+func (service *taterMediaMarkerService) takeRequest(defaultAll bool) (bool, bool, map[string]struct{}) {
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	all := defaultAll || service.pendingAll
+	force := service.pendingForce
+	keys := make(map[string]struct{}, len(service.pendingKeys))
+	for key := range service.pendingKeys {
+		keys[key] = struct{}{}
+	}
+	service.pendingAll = false
+	service.pendingForce = false
+	service.pendingKeys = map[string]struct{}{}
+	return all, force, keys
+}
+
+func taterMediaMarkerChangedKeys(before, after taterLocalLibraryIndex) []string {
+	previous := make(map[string]taterLocalLibraryFileIndex, len(before.Files))
+	for _, file := range before.Files {
+		previous[file.Key] = file
+	}
+	keys := make([]string, 0)
+	for _, file := range after.Files {
+		if strings.EqualFold(file.LibraryType, "music") {
+			continue
+		}
+		old, ok := previous[file.Key]
+		if !ok || old.SizeBytes != file.SizeBytes || old.ModifiedUnixNano != file.ModifiedUnixNano {
+			keys = append(keys, file.Key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func taterMediaMarkerBatch(index taterLocalLibraryIndex, all bool, keys map[string]struct{}) taterLocalLibraryIndex {
+	batch := index
+	batch.Files = make([]taterLocalLibraryFileIndex, 0, len(index.Files))
+	for _, file := range index.Files {
+		if strings.EqualFold(file.LibraryType, "music") {
+			continue
+		}
+		if all {
+			batch.Files = append(batch.Files, file)
+			continue
+		}
+		if _, ok := keys[file.Key]; ok {
+			batch.Files = append(batch.Files, file)
+		}
+	}
+	return batch
+}
+
+func taterMediaMarkerLibraryInventory(
+	cfg *config.Config,
+	index taterLocalLibraryIndex,
+	excluded map[string]struct{},
+) taterMediaMarkerInventory {
+	inventory := taterMediaMarkerInventory{}
+	for _, file := range index.Files {
+		if strings.EqualFold(file.LibraryType, "music") {
+			continue
+		}
+		inventory.Total++
+		if _, skip := excluded[file.Key]; skip {
+			continue
+		}
+		mediaPath, err := taterMediaMarkerAbsolutePath(cfg, file)
+		if err != nil {
+			continue
+		}
+		sidecar, err := readTaterMediaMarkerSidecar(taterMediaMarkerSidecarPath(mediaPath))
+		if err != nil || sidecar.SourceSizeBytes != file.SizeBytes {
+			continue
+		}
+		inventory.Completed++
+		inventory.CommercialBreaks += len(sidecar.CommercialBreaks)
+		if sidecar.Credits != nil {
+			inventory.Credits++
+		}
+	}
+	return inventory
+}
 
 var (
 	taterBlackDetectPattern  = regexp.MustCompile(`black_start:([0-9.]+)\s+black_end:([0-9.]+)\s+black_duration:([0-9.]+)`)
@@ -519,6 +722,153 @@ func scanTaterMediaMarkers(
 	}
 	sort.Strings(progress.Errors)
 	return progress, nil
+}
+
+func (service *taterMediaMarkerService) run(ctx context.Context) {
+	startup := time.NewTimer(30 * time.Second)
+	defer startup.Stop()
+	initial := true
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-startup.C:
+		case <-service.wake:
+		}
+
+		all, force, keys := service.takeRequest(initial)
+		initial = false
+		cfg := service.server.configManager.GetConfig()
+		if !force && !taterMediaMarkersEnabled(cfg) {
+			service.mu.Lock()
+			service.status.Enabled = false
+			service.status.Running = false
+			service.status.State = "disabled"
+			service.status.Message = "Automatic media marker scanning is off"
+			service.status.Queued = 0
+			service.status.CurrentFile = ""
+			service.mu.Unlock()
+			continue
+		}
+		if !all && len(keys) == 0 {
+			continue
+		}
+		service.scan(ctx, cfg.DeepCopy(), all, keys)
+	}
+}
+
+func (service *taterMediaMarkerService) scan(
+	parent context.Context,
+	cfg *config.Config,
+	all bool,
+	keys map[string]struct{},
+) {
+	index, err := readTaterLocalLibraryIndex(cfg)
+	if err != nil {
+		service.mu.Lock()
+		service.status.Enabled = taterMediaMarkersEnabled(cfg)
+		service.status.Running = false
+		service.status.State = "waiting"
+		service.status.Message = "Scan the local library before finding breaks and credits"
+		service.status.Errors = []string{err.Error()}
+		service.mu.Unlock()
+		return
+	}
+	batch := taterMediaMarkerBatch(index, all, keys)
+	excluded := make(map[string]struct{}, len(batch.Files))
+	for _, file := range batch.Files {
+		excluded[file.Key] = struct{}{}
+	}
+	inventory := taterMediaMarkerLibraryInventory(cfg, index, excluded)
+	if len(batch.Files) == 0 {
+		service.mu.Lock()
+		service.status = taterMediaMarkerStatus{
+			Enabled: taterMediaMarkersEnabled(cfg), State: "idle",
+			Message:    "Every local video has current media markers",
+			FinishedAt: time.Now().UTC(), LibraryVideos: inventory.Total,
+			Completed: inventory.Completed, CommercialBreaks: inventory.CommercialBreaks,
+			Credits: inventory.Credits, Errors: []string{},
+		}
+		service.mu.Unlock()
+		return
+	}
+
+	scanCtx, cancel := context.WithCancel(parent)
+	service.mu.Lock()
+	service.currentCancel = cancel
+	service.status = taterMediaMarkerStatus{
+		Enabled: taterMediaMarkersEnabled(cfg), Running: true, State: "scanning",
+		Message: "Checking queued videos", StartedAt: time.Now().UTC(),
+		LibraryVideos: inventory.Total, Completed: inventory.Completed,
+		Queued: len(batch.Files), CommercialBreaks: inventory.CommercialBreaks,
+		Credits: inventory.Credits, Errors: []string{},
+	}
+	service.mu.Unlock()
+
+	summary, scanErr := scanTaterMediaMarkers(scanCtx, cfg, &batch, func(progress taterMediaMarkerScanProgress) {
+		service.mu.Lock()
+		service.status.Checked = progress.Processed
+		service.status.Queued = max(0, progress.Total-progress.Processed)
+		service.status.Created = progress.Sidecars
+		service.status.Reused = progress.Reused
+		service.status.Failed = progress.Failed
+		service.status.Completed = inventory.Completed + progress.Sidecars + progress.Reused
+		service.status.CommercialBreaks = inventory.CommercialBreaks + progress.CommercialBreaks
+		service.status.Credits = inventory.Credits + progress.Credits
+		service.status.Message = progress.Message
+		service.status.CurrentFile = progress.Message
+		service.status.Errors = append([]string(nil), progress.Errors...)
+		service.mu.Unlock()
+	})
+	cancel()
+
+	service.mu.Lock()
+	service.currentCancel = nil
+	service.status.Running = false
+	service.status.FinishedAt = time.Now().UTC()
+	service.status.Checked = summary.Processed
+	service.status.Queued = 0
+	service.status.Created = summary.Sidecars
+	service.status.Reused = summary.Reused
+	service.status.Failed = summary.Failed
+	service.status.Completed = inventory.Completed + summary.Sidecars + summary.Reused
+	service.status.CommercialBreaks = inventory.CommercialBreaks + summary.CommercialBreaks
+	service.status.Credits = inventory.Credits + summary.Credits
+	service.status.CurrentFile = ""
+	service.status.Errors = append([]string(nil), summary.Errors...)
+	if scanErr != nil {
+		if errors.Is(scanErr, context.Canceled) && !taterMediaMarkersEnabled(service.server.configManager.GetConfig()) {
+			service.status.State = "disabled"
+			service.status.Message = "Automatic media marker scanning is off"
+		} else {
+			service.status.State = "error"
+			service.status.Message = "Media marker scan stopped: " + scanErr.Error()
+		}
+	} else if summary.Failed > 0 {
+		service.status.State = "warning"
+		service.status.Message = fmt.Sprintf(
+			"Marker scan finished with %d files skipped", summary.Failed,
+		)
+	} else {
+		service.status.State = "idle"
+		service.status.Message = "Media markers are up to date"
+	}
+	service.mu.Unlock()
+}
+
+func (s *Server) handleMediaMarkerStatus(c *fiber.Ctx) error {
+	if s.mediaMarkers == nil {
+		return RespondServiceUnavailable(c, "Media marker service not available", "MEDIA_MARKERS_UNAVAILABLE")
+	}
+	return RespondSuccess(c, s.mediaMarkers.snapshot())
+}
+
+func (s *Server) handleMediaMarkerScan(c *fiber.Ctx) error {
+	if s.mediaMarkers == nil {
+		return RespondServiceUnavailable(c, "Media marker service not available", "MEDIA_MARKERS_UNAVAILABLE")
+	}
+	s.mediaMarkers.requestAll(true)
+	return RespondSuccess(c, s.mediaMarkers.snapshot())
 }
 
 func runTaterMediaMarkerScan(cfg *config.Config) (taterLocalLibraryIndex, error) {

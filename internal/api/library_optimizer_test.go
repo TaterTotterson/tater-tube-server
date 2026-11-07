@@ -13,39 +13,31 @@ import (
 
 func boolPointer(value bool) *bool { return &value }
 
-func TestOptimizerActionSkipsEfficientCodecsByDefault(t *testing.T) {
-	cfg := config.LibraryOptimizerConfig{TargetCodec: "hevc", ConvertHEVCToAV1: boolPointer(false)}
-	assert.Equal(t, "skip-efficient", optimizerAction("hevc", cfg))
-	assert.Equal(t, "skip-efficient", optimizerAction("av1", cfg))
+func TestOptimizerActionAutomaticallyCleansEfficientCodecs(t *testing.T) {
+	cfg := config.LibraryOptimizerConfig{TargetCodec: "hevc"}
+	assert.Equal(t, "cleanup", optimizerAction("hevc", cfg))
+	assert.Equal(t, "cleanup", optimizerAction("av1", cfg))
 	assert.Equal(t, "transcode", optimizerAction("h264", cfg))
 
 	cfg.TargetCodec = "av1"
-	assert.Equal(t, "skip-efficient", optimizerAction("hevc", cfg))
-	cfg.ConvertHEVCToAV1 = boolPointer(true)
 	assert.Equal(t, "transcode", optimizerAction("hevc", cfg))
-	assert.Equal(t, "skip-efficient", optimizerAction("av1", cfg))
+	assert.Equal(t, "cleanup", optimizerAction("av1", cfg))
 }
 
 func TestOptimizerActionOnlyTranscodesDolbyVisionWhenCodecNeedsIt(t *testing.T) {
 	cfg := config.LibraryOptimizerConfig{
-		TargetCodec: "av1", ConvertHEVCToAV1: boolPointer(false), SkipDolbyVision: boolPointer(true),
+		TargetCodec: "av1", SkipDolbyVision: boolPointer(true),
 	}
 	assert.Equal(t, "skip-dolby-vision", optimizerActionForMedia("hevc", "dolby_vision", cfg))
 
 	cfg.SkipDolbyVision = boolPointer(false)
-	assert.Equal(t, "skip-efficient", optimizerActionForMedia("hevc", "dolby_vision", cfg))
-	assert.Equal(t, "skip-efficient", optimizerActionForMedia("av1", "dolby_vision", cfg))
-	assert.Equal(t, "skip-efficient", optimizerActionForMedia("av1", "hdr10", cfg))
-
-	cfg.ConvertHEVCToAV1 = boolPointer(true)
 	assert.Equal(t, "transcode", optimizerActionForMedia("hevc", "dolby_vision", cfg))
+	assert.Equal(t, "cleanup", optimizerActionForMedia("av1", "dolby_vision", cfg))
+	assert.Equal(t, "cleanup", optimizerActionForMedia("av1", "hdr10", cfg))
 
 	cfg.TargetCodec = "hevc"
-	assert.Equal(t, "skip-efficient", optimizerActionForMedia("hevc", "dolby_vision", cfg))
-	assert.Equal(t, "transcode", optimizerActionForMedia("h264", "dolby_vision", cfg))
-
-	cfg.CleanEfficientFiles = boolPointer(true)
 	assert.Equal(t, "cleanup", optimizerActionForMedia("hevc", "dolby_vision", cfg))
+	assert.Equal(t, "transcode", optimizerActionForMedia("h264", "dolby_vision", cfg))
 }
 
 func TestBuildOptimizerCandidatesNeverTranscodesUnknownCodec(t *testing.T) {
@@ -66,9 +58,10 @@ func TestBuildOptimizerCandidatesNeverTranscodesUnknownCodec(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Empty(t, candidates)
 	assert.Equal(t, 2, analysis.TotalFiles)
-	assert.Equal(t, 1, analysis.AlreadyEfficient)
 	assert.Equal(t, 1, analysis.MediaDetailsMissing)
+	assert.Equal(t, 1, analysis.UnavailableFiles)
 	assert.Zero(t, analysis.EligibleFiles)
+	assert.Zero(t, analysis.VideoConversions)
 }
 
 func TestOptimizerDolbyVisionVideoArgsProduceHDR10(t *testing.T) {
