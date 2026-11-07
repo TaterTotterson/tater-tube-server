@@ -3,6 +3,7 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,72 @@ func TestOptimizerActionSkipsEfficientCodecsByDefault(t *testing.T) {
 	cfg.ConvertHEVCToAV1 = boolPointer(true)
 	assert.Equal(t, "transcode", optimizerAction("hevc", cfg))
 	assert.Equal(t, "skip-efficient", optimizerAction("av1", cfg))
+}
+
+func TestOptimizerActionOnlyTranscodesDolbyVisionWhenCodecNeedsIt(t *testing.T) {
+	cfg := config.LibraryOptimizerConfig{
+		TargetCodec: "av1", ConvertHEVCToAV1: boolPointer(false), SkipDolbyVision: boolPointer(true),
+	}
+	assert.Equal(t, "skip-dolby-vision", optimizerActionForMedia("hevc", "dolby_vision", cfg))
+
+	cfg.SkipDolbyVision = boolPointer(false)
+	assert.Equal(t, "skip-efficient", optimizerActionForMedia("hevc", "dolby_vision", cfg))
+	assert.Equal(t, "skip-efficient", optimizerActionForMedia("av1", "dolby_vision", cfg))
+	assert.Equal(t, "skip-efficient", optimizerActionForMedia("av1", "hdr10", cfg))
+
+	cfg.ConvertHEVCToAV1 = boolPointer(true)
+	assert.Equal(t, "transcode", optimizerActionForMedia("hevc", "dolby_vision", cfg))
+
+	cfg.TargetCodec = "hevc"
+	assert.Equal(t, "skip-efficient", optimizerActionForMedia("hevc", "dolby_vision", cfg))
+	assert.Equal(t, "transcode", optimizerActionForMedia("h264", "dolby_vision", cfg))
+
+	cfg.CleanEfficientFiles = boolPointer(true)
+	assert.Equal(t, "cleanup", optimizerActionForMedia("hevc", "dolby_vision", cfg))
+}
+
+func TestOptimizerDolbyVisionVideoArgsProduceHDR10(t *testing.T) {
+	args := optimizerVideoArgs(
+		"libx265",
+		config.LibraryOptimizerConfig{TargetCodec: "hevc", Quality: "balanced"},
+		optimizerProbeStream{ColorTransfer: "smpte2084", ColorPrimaries: "bt2020", ColorSpace: "bt2020nc"},
+		true,
+		"/tmp/tater shader cache/",
+	)
+	joined := strings.Join(args, " ")
+	assert.Contains(t, joined, "libplacebo=apply_dolbyvision=true")
+	assert.Contains(t, joined, "format=yuv420p10le")
+	assert.Contains(t, joined, "shader_cache=")
+	assert.Contains(t, joined, "-profile:v main10")
+	assert.Contains(t, joined, "-pix_fmt yuv420p10le")
+	assert.Contains(t, joined, "-color_primaries bt2020")
+	assert.Contains(t, joined, "-color_trc smpte2084")
+	assert.Contains(t, joined, "-colorspace bt2020nc")
+	assert.Contains(t, joined, "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc")
+}
+
+func TestValidateOptimizerOutputRequiresVerifiedHDR10ForDolbyVision(t *testing.T) {
+	source := optimizerProbe{Format: optimizerProbeFormat{Duration: "120"}}
+	hdr10 := optimizerProbe{
+		Format: optimizerProbeFormat{Duration: "120"},
+		Streams: []optimizerProbeStream{{
+			CodecType: "video", PixelFormat: "yuv420p10le", ColorTransfer: "smpte2084",
+			ColorPrimaries: "bt2020", ColorSpace: "bt2020nc",
+		}},
+	}
+	assert.NoError(t, validateOptimizerOutput(source, hdr10, 1000, 600, true))
+
+	sdr := hdr10
+	sdr.Streams = append([]optimizerProbeStream(nil), hdr10.Streams...)
+	sdr.Streams[0].PixelFormat = "yuv420p"
+	sdr.Streams[0].ColorTransfer = "bt709"
+	sdr.Streams[0].ColorPrimaries = "bt709"
+	assert.ErrorContains(t, validateOptimizerOutput(source, sdr, 1000, 600, true), "verified 10-bit")
+
+	dolbyVision := hdr10
+	dolbyVision.Streams = append([]optimizerProbeStream(nil), hdr10.Streams...)
+	dolbyVision.Streams[0].SideData = []map[string]any{{"side_data_type": "DOVI configuration record"}}
+	assert.ErrorContains(t, validateOptimizerOutput(source, dolbyVision, 1000, 600, true), "still contains Dolby Vision")
 }
 
 func TestSelectOptimizerAudioPrefersBestEnglishMainTrack(t *testing.T) {
