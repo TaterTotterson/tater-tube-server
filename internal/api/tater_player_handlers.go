@@ -20,11 +20,12 @@ const (
 )
 
 type taterPlayerResponse struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	CreatedAt  string `json:"created_at"`
-	LastSeenAt string `json:"last_seen_at,omitempty"`
-	RevokedAt  string `json:"revoked_at,omitempty"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	CreatedAt       string `json:"created_at"`
+	LastSeenAt      string `json:"last_seen_at,omitempty"`
+	RevokedAt       string `json:"revoked_at,omitempty"`
+	LinkedDisplayID string `json:"linked_display_id,omitempty"`
 }
 
 type taterPairingCodeResponse struct {
@@ -38,6 +39,7 @@ type taterPairingCodeResponse struct {
 type taterPlayersResponse struct {
 	Players      []taterPlayerResponse      `json:"players"`
 	PairingCodes []taterPairingCodeResponse `json:"pairing_codes"`
+	Displays     []taterDisplaySatellite    `json:"displays,omitempty"`
 }
 
 type taterCreatePairingCodeRequest struct {
@@ -50,7 +52,8 @@ type taterPairPlayerRequest struct {
 }
 
 type taterUpdatePlayerRequest struct {
-	Name string `json:"name"`
+	Name            *string `json:"name"`
+	LinkedDisplayID *string `json:"linked_display_id"`
 }
 
 type taterPairPlayerResponse struct {
@@ -67,7 +70,9 @@ func (s *Server) handleTaterPlayers(c *fiber.Ctx) error {
 	if cfg == nil {
 		return RespondServiceUnavailable(c, "Configuration not available", "")
 	}
-	return RespondSuccess(c, taterPlayersConfigResponse(cfg.Players, time.Now().UTC()))
+	response := taterPlayersConfigResponse(cfg.Players, time.Now().UTC())
+	response.Displays = s.availableTaterDisplaySatellites(time.Now().UTC())
+	return RespondSuccess(c, response)
 }
 
 func (s *Server) handleTaterCreatePairingCode(c *fiber.Ctx) error {
@@ -212,9 +217,26 @@ func (s *Server) handleTaterUpdatePlayer(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return RespondValidationError(c, "Invalid player update", err.Error())
 	}
-	name := cleanTaterText(req.Name)
-	if name == "" {
-		return RespondValidationError(c, "Player name is required", "")
+	if req.Name == nil && req.LinkedDisplayID == nil {
+		return RespondValidationError(c, "No player changes were supplied", "")
+	}
+	name := ""
+	if req.Name != nil {
+		name = cleanTaterText(*req.Name)
+		if name == "" {
+			return RespondValidationError(c, "Player name is required", "")
+		}
+	}
+	displayID := ""
+	linkChanged := req.LinkedDisplayID != nil
+	if linkChanged {
+		displayID = strings.TrimSpace(*req.LinkedDisplayID)
+		if displayID != "" {
+			display, found := s.taterDisplaySatellite(displayID, time.Now().UTC())
+			if !found || !display.Compatible || !display.Online {
+				return RespondValidationError(c, "The selected display is offline or does not support Companion Display v1", "")
+			}
+		}
 	}
 
 	current := s.configManager.GetConfig()
@@ -224,10 +246,18 @@ func (s *Server) handleTaterUpdatePlayer(c *fiber.Ctx) error {
 	newCfg := current.DeepCopy()
 
 	var updated config.PlayerConfig
+	previousDisplayID := ""
+	displacedPlayerIDs := []string{}
 	found := false
 	for i := range newCfg.Players.Paired {
 		if newCfg.Players.Paired[i].ID == playerID {
-			newCfg.Players.Paired[i].Name = name
+			previousDisplayID = newCfg.Players.Paired[i].LinkedDisplayID
+			if req.Name != nil {
+				newCfg.Players.Paired[i].Name = name
+			}
+			if linkChanged {
+				newCfg.Players.Paired[i].LinkedDisplayID = displayID
+			}
 			updated = newCfg.Players.Paired[i]
 			found = true
 			break
@@ -236,16 +266,32 @@ func (s *Server) handleTaterUpdatePlayer(c *fiber.Ctx) error {
 	if !found {
 		return RespondNotFound(c, "Player", playerID)
 	}
+	if linkChanged && displayID != "" {
+		for i := range newCfg.Players.Paired {
+			if newCfg.Players.Paired[i].ID != playerID &&
+				newCfg.Players.Paired[i].LinkedDisplayID == displayID {
+				displacedPlayerIDs = append(displacedPlayerIDs, newCfg.Players.Paired[i].ID)
+				newCfg.Players.Paired[i].LinkedDisplayID = ""
+			}
+		}
+	}
 
 	if err := s.saveUpdatedConfig(newCfg); err != nil {
-		return RespondInternalError(c, "Failed to rename player", err.Error())
+		return RespondInternalError(c, "Failed to update player", err.Error())
+	}
+	if linkChanged {
+		if previousDisplayID != "" && previousDisplayID != displayID {
+			s.queueTaterDisplayClear(previousDisplayID, playerID)
+		}
+		for _, displacedPlayerID := range displacedPlayerIDs {
+			s.queueTaterDisplayClear(displayID, displacedPlayerID)
+		}
+		s.wakeTaterDisplay(playerID)
 	}
 	return RespondSuccess(c, taterPlayerResponse{
-		ID:         updated.ID,
-		Name:       updated.Name,
-		CreatedAt:  updated.CreatedAt,
-		LastSeenAt: updated.LastSeenAt,
-		RevokedAt:  updated.RevokedAt,
+		ID: updated.ID, Name: updated.Name, CreatedAt: updated.CreatedAt,
+		LastSeenAt: updated.LastSeenAt, RevokedAt: updated.RevokedAt,
+		LinkedDisplayID: updated.LinkedDisplayID,
 	})
 }
 
@@ -267,9 +313,12 @@ func (s *Server) handleTaterRevokePlayer(c *fiber.Ctx) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	found := false
+	linkedDisplayID := ""
 	for i := range newCfg.Players.Paired {
 		if newCfg.Players.Paired[i].ID == playerID {
+			linkedDisplayID = newCfg.Players.Paired[i].LinkedDisplayID
 			newCfg.Players.Paired[i].RevokedAt = now
+			newCfg.Players.Paired[i].LinkedDisplayID = ""
 			found = true
 			break
 		}
@@ -281,6 +330,7 @@ func (s *Server) handleTaterRevokePlayer(c *fiber.Ctx) error {
 	if err := s.saveUpdatedConfig(newCfg); err != nil {
 		return RespondInternalError(c, "Failed to revoke player", err.Error())
 	}
+	s.queueTaterDisplayClear(linkedDisplayID, playerID)
 	return RespondSuccess(c, fiber.Map{"message": "Player revoked"})
 }
 
@@ -424,11 +474,9 @@ func taterPlayersConfigResponse(players config.PlayersConfig, now time.Time) tat
 	}
 	for _, player := range players.Paired {
 		resp.Players = append(resp.Players, taterPlayerResponse{
-			ID:         player.ID,
-			Name:       player.Name,
-			CreatedAt:  player.CreatedAt,
-			LastSeenAt: player.LastSeenAt,
-			RevokedAt:  player.RevokedAt,
+			ID: player.ID, Name: player.Name, CreatedAt: player.CreatedAt,
+			LastSeenAt: player.LastSeenAt, RevokedAt: player.RevokedAt,
+			LinkedDisplayID: player.LinkedDisplayID,
 		})
 	}
 	for _, code := range pruneExpiredPairingCodes(players.PairingCodes, now) {

@@ -436,16 +436,29 @@ func TestStreamTracker_PlayerPresenceDoesNotDuplicateActiveTransfer(t *testing.T
 	)
 	tracker.SetPlayerID(transfer.ID, "player-living-room")
 	tracker.SetPlayerPlaybackPresence(nzbfilesystem.ActiveStream{
-		FilePath: "Moonrise Manor.mkv",
-		Source:   "Local",
-		PlayerID: "player-living-room",
-		UserName: "Living Room",
+		FilePath:      "Moonrise Manor.mkv",
+		Source:        "Local",
+		PlayerID:      "player-living-room",
+		UserName:      "Living Room",
+		MediaID:       "movie-1",
+		MediaTitle:    "Moonrise Manor",
+		MediaType:     "movie",
+		CategoryID:    "local:movies",
+		SourceIndex:   2,
+		MediaPath:     "Moonrise Manor.mkv",
+		MediaDuration: 600,
 	}, true)
 
 	active := tracker.GetActive()
 	assert.Len(t, active, 1)
 	assert.Equal(t, "/movies/Moonrise Manor.mkv", active[0].FilePath)
 	assert.NotEqual(t, "player-playback:player-living-room", active[0].ID)
+	assert.Equal(t, "movie-1", active[0].MediaID)
+	assert.Equal(t, "Moonrise Manor", active[0].MediaTitle)
+	assert.Equal(t, "local:movies", active[0].CategoryID)
+	assert.Equal(t, 2, active[0].SourceIndex)
+	assert.Equal(t, "Moonrise Manor.mkv", active[0].MediaPath)
+	assert.Equal(t, 600.0, active[0].MediaDuration)
 }
 
 func TestStreamTracker_PlayerPresenceExpiresWithoutHeartbeat(t *testing.T) {

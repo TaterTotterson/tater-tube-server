@@ -239,6 +239,9 @@ func setupAPIServer(
 	)
 
 	apiServer.SetupRoutes(app)
+	if err := apiServer.StartTaterDisplayDiscovery(); err != nil {
+		slog.Warn("Companion Display discovery is unavailable", "error", err)
+	}
 
 	// Add simple liveness endpoint for Docker health checks
 	app.Get("/live", handleFiberHealth)

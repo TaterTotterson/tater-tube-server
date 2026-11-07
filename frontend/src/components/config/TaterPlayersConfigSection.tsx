@@ -1,4 +1,18 @@
-import { Check, KeyRound, Pencil, Plus, RefreshCw, ShieldOff, Tv, X } from "lucide-react";
+import {
+	Check,
+	KeyRound,
+	Link2,
+	MonitorSmartphone,
+	Pencil,
+	Plus,
+	RefreshCw,
+	ShieldOff,
+	Tv,
+	Unlink,
+	Wifi,
+	WifiOff,
+	X,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { apiClient } from "../../api/client";
 import { useConfirm } from "../../contexts/ModalContext";
@@ -34,10 +48,34 @@ export function TaterPlayersConfigSection({ config, onRefresh }: TaterPlayersCon
 	const [isLoading, setIsLoading] = useState(false);
 	const [isCreating, setIsCreating] = useState(false);
 	const [isRenaming, setIsRenaming] = useState(false);
+	const [linkingPlayerID, setLinkingPlayerID] = useState("");
 
 	useEffect(() => {
-		setPlayers(config.players ?? { players: [], pairing_codes: [] });
+		setPlayers((current) => {
+			const next = config.players ?? { players: [], pairing_codes: [] };
+			return { ...next, displays: next.displays ?? current.displays };
+		});
 	}, [config.players]);
+
+	useEffect(() => {
+		let cancelled = false;
+		const pollDisplays = () => {
+			void apiClient
+				.getTaterPlayers()
+				.then((next) => {
+					if (!cancelled) setPlayers(next);
+				})
+				.catch(() => {
+					// Keep the current cards stable through a brief server interruption.
+				});
+		};
+		pollDisplays();
+		const timer = window.setInterval(pollDisplays, 5000);
+		return () => {
+			cancelled = true;
+			window.clearInterval(timer);
+		};
+	}, []);
 
 	useEffect(() => {
 		if (!pairingCode) return;
@@ -176,7 +214,32 @@ export function TaterPlayersConfigSection({ config, onRefresh }: TaterPlayersCon
 		}
 	};
 
+	const updateDisplayLink = async (playerID: string, displayID: string) => {
+		setLinkingPlayerID(playerID);
+		try {
+			await apiClient.linkTaterPlayerDisplay(playerID, displayID);
+			await refresh();
+			showToast({
+				type: "success",
+				title: displayID ? "Display Linked" : "Display Unlinked",
+				message: displayID
+					? "Now-playing details will be sent directly to the selected screen."
+					: "This player no longer controls a companion display.",
+			});
+		} catch (error) {
+			showToast({
+				type: "error",
+				title: "Display Link Failed",
+				message: error instanceof Error ? error.message : "Unable to update the companion display.",
+			});
+		} finally {
+			setLinkingPlayerID("");
+		}
+	};
+
 	const activePlayers = players.players.filter((player) => !player.revoked_at);
+	const displays = players.displays ?? [];
+	const compatibleDisplays = displays.filter((display) => display.online && display.compatible);
 
 	return (
 		<div className="min-w-0 space-y-8">
@@ -256,11 +319,23 @@ export function TaterPlayersConfigSection({ config, onRefresh }: TaterPlayersCon
 			</div>
 
 			<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
-				<div className="mb-5 flex items-center gap-2">
-					<Tv className="h-4 w-4 text-base-content/60" />
-					<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-						Paired Players
-					</h4>
+				<div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+					<div>
+						<div className="flex items-center gap-2">
+							<MonitorSmartphone className="h-4 w-4 text-primary" />
+							<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
+								Players & Companion Displays
+							</h4>
+						</div>
+						<p className="mt-2 max-w-2xl text-base-content/60 text-sm">
+							Choose the LAN display that should show artwork, title, and progress for each player.
+							Screens are discovered directly, without Tater or Home Assistant.
+						</p>
+					</div>
+					<div className="badge badge-lg gap-2 border-primary/25 bg-primary/10 text-primary">
+						<Wifi className="h-3.5 w-3.5" />
+						{compatibleDisplays.length} screen{compatibleDisplays.length === 1 ? "" : "s"} ready
+					</div>
 				</div>
 
 				<div className="space-y-3">
@@ -269,79 +344,145 @@ export function TaterPlayersConfigSection({ config, onRefresh }: TaterPlayersCon
 							No active players paired.
 						</div>
 					)}
-					{activePlayers.map((player) => (
-						<div
-							key={player.id}
-							className="flex flex-col gap-3 rounded-xl border border-base-300 bg-base-100/70 p-4 sm:flex-row sm:items-center sm:justify-between"
-						>
-							<div className="min-w-0">
-								{editingPlayerID === player.id ? (
-									<input
-										type="text"
-										className="input input-bordered input-sm w-full max-w-xs font-bold"
-										value={editingName}
-										onChange={(event) => setEditingName(event.target.value)}
-										onKeyDown={(event) => {
-											if (event.key === "Enter") void rename(player.id);
-											if (event.key === "Escape") cancelRename();
-										}}
-										maxLength={48}
-									/>
-								) : (
-									<div className="truncate font-bold">{player.name || "Tater Tube Player"}</div>
-								)}
-								<div className="mt-1 text-base-content/50 text-xs">
-									Last seen {formatDate(player.last_seen_at)} · Paired{" "}
-									{formatDate(player.created_at)}
+					{activePlayers.map((player) => {
+						const linkedValue = player.linked_display_id ?? "";
+						const linkedDisplay = displays.find((display) => display.id === linkedValue);
+						const choices = compatibleDisplays.filter(
+							(display) => !display.linked_player_id || display.linked_player_id === player.id,
+						);
+						const linkedChoiceAvailable = choices.some((display) => display.id === linkedValue);
+						const linkedReady = Boolean(linkedDisplay?.online && linkedDisplay.compatible);
+						return (
+							<div
+								key={player.id}
+								className="overflow-hidden rounded-2xl border border-base-300 bg-base-100/80 shadow-sm"
+							>
+								<div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+									<div className="min-w-0">
+										{editingPlayerID === player.id ? (
+											<input
+												type="text"
+												className="input input-bordered input-sm w-full max-w-xs font-bold"
+												value={editingName}
+												onChange={(event) => setEditingName(event.target.value)}
+												onKeyDown={(event) => {
+													if (event.key === "Enter") void rename(player.id);
+													if (event.key === "Escape") cancelRename();
+												}}
+												maxLength={48}
+											/>
+										) : (
+											<div className="truncate font-bold">{player.name || "Tater Tube Player"}</div>
+										)}
+										<div className="mt-1 text-base-content/50 text-xs">
+											Last seen {formatDate(player.last_seen_at)} · Paired{" "}
+											{formatDate(player.created_at)}
+										</div>
+									</div>
+									<div className="flex flex-wrap gap-2">
+										{editingPlayerID === player.id ? (
+											<>
+												<button
+													type="button"
+													className="btn btn-primary btn-sm"
+													onClick={() => rename(player.id)}
+													disabled={isRenaming}
+												>
+													{isRenaming ? (
+														<span className="loading loading-spinner loading-xs" />
+													) : (
+														<Check className="h-4 w-4" />
+													)}
+													Save
+												</button>
+												<button
+													type="button"
+													className="btn btn-outline btn-sm"
+													onClick={cancelRename}
+													disabled={isRenaming}
+												>
+													<X className="h-4 w-4" />
+													Cancel
+												</button>
+											</>
+										) : (
+											<button
+												type="button"
+												className="btn btn-outline btn-sm"
+												onClick={() => startRename(player.id, player.name)}
+											>
+												<Pencil className="h-4 w-4" />
+												Rename
+											</button>
+										)}
+										<button
+											type="button"
+											className="btn btn-error btn-outline btn-sm"
+											onClick={() => revoke(player.id, player.name)}
+										>
+											<ShieldOff className="h-4 w-4" />
+											Revoke
+										</button>
+									</div>
+								</div>
+
+								<div className="border-base-300 border-t bg-gradient-to-r from-primary/8 via-base-200/60 to-base-200/20 p-4">
+									<div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(260px,380px)] md:items-center">
+										<div className="flex min-w-0 items-start gap-3">
+											<div className="rounded-xl border border-primary/20 bg-primary/10 p-2.5 text-primary">
+												{linkedValue ? (
+													<Link2 className="h-5 w-5" />
+												) : (
+													<Unlink className="h-5 w-5" />
+												)}
+											</div>
+											<div className="min-w-0">
+												<div className="font-bold text-sm">Companion now-playing screen</div>
+												<div className="mt-1 flex items-center gap-1.5 text-base-content/55 text-xs">
+													{linkedReady ? (
+														<Wifi className="h-3.5 w-3.5 text-success" />
+													) : (
+														<WifiOff className="h-3.5 w-3.5" />
+													)}
+													{linkedDisplay
+														? `${linkedDisplay.name}${linkedDisplay.room ? ` · ${linkedDisplay.room}` : ""}${!linkedDisplay.compatible ? " · firmware update required" : !linkedDisplay.online ? " · offline" : ""}`
+														: linkedValue
+															? "Saved screen is currently offline"
+															: "Not linked — playback stays on the TV only"}
+												</div>
+											</div>
+										</div>
+										<div className="relative">
+											<select
+												className="select select-bordered w-full bg-base-100 pr-10 font-medium"
+												value={linkedValue}
+												onChange={(event) => void updateDisplayLink(player.id, event.target.value)}
+												disabled={linkingPlayerID === player.id}
+											>
+												<option value="">No companion display</option>
+												{linkedValue && !linkedChoiceAvailable && (
+													<option value={linkedValue}>
+														{linkedDisplay
+															? `${linkedDisplay.name} (${linkedDisplay.compatible ? "offline" : "update required"})`
+															: "Saved screen (offline)"}
+													</option>
+												)}
+												{choices.map((display) => (
+													<option key={display.id} value={display.id}>
+														{display.name}
+														{display.room ? ` · ${display.room}` : ""} — {display.board}
+													</option>
+												))}
+											</select>
+											{linkingPlayerID === player.id && (
+												<span className="loading loading-spinner loading-sm -translate-y-1/2 absolute top-1/2 right-3" />
+											)}
+										</div>
+									</div>
 								</div>
 							</div>
-							<div className="flex flex-wrap gap-2">
-								{editingPlayerID === player.id ? (
-									<>
-										<button
-											type="button"
-											className="btn btn-primary btn-sm"
-											onClick={() => rename(player.id)}
-											disabled={isRenaming}
-										>
-											{isRenaming ? (
-												<span className="loading loading-spinner loading-xs" />
-											) : (
-												<Check className="h-4 w-4" />
-											)}
-											Save
-										</button>
-										<button
-											type="button"
-											className="btn btn-outline btn-sm"
-											onClick={cancelRename}
-											disabled={isRenaming}
-										>
-											<X className="h-4 w-4" />
-											Cancel
-										</button>
-									</>
-								) : (
-									<button
-										type="button"
-										className="btn btn-outline btn-sm"
-										onClick={() => startRename(player.id, player.name)}
-									>
-										<Pencil className="h-4 w-4" />
-										Rename
-									</button>
-								)}
-								<button
-									type="button"
-									className="btn btn-error btn-outline btn-sm"
-									onClick={() => revoke(player.id, player.name)}
-								>
-									<ShieldOff className="h-4 w-4" />
-									Revoke
-								</button>
-							</div>
-						</div>
-					))}
+						);
+					})}
 				</div>
 			</div>
 		</div>

@@ -15,9 +15,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
 import { apiClient } from "../api/client";
-import { PlaybackBufferBadge } from "../components/playback/PlaybackBufferBadge";
-import { PlaybackHDREnhancementBadge } from "../components/playback/PlaybackHDREnhancementBadge";
-import { PlaybackUpscalingBadge } from "../components/playback/PlaybackUpscalingBadge";
+import { PlaybackProcessingBadges } from "../components/playback/PlaybackProcessingBadges";
 import { LocalMediaScanProgress } from "../components/system/LocalMediaScanProgress";
 import {
 	useActiveStreams,
@@ -132,33 +130,6 @@ function hardwareSettingName(value?: string) {
 	if (!value || value === "none") return "Software x264";
 	if (value === "auto") return "Auto";
 	return hardwareName(value);
-}
-
-function resolutionName(width?: number, height?: number) {
-	const w = Number(width || 0);
-	const h = Number(height || 0);
-	if (w >= 3500 || h >= 2000) return "4K";
-	if (w >= 2500 || h >= 1400) return "1440p";
-	if (w >= 1800 || h >= 1000) return "1080p";
-	if (w >= 1100 || h >= 650) return "720p";
-	return w > 0 && h > 0 ? `${w}×${h}` : "";
-}
-
-function streamResolution(stream: ActiveStream) {
-	if ((stream.video_mode || (stream.transcoded ? "transcode" : "direct")) !== "transcode") {
-		return "";
-	}
-	const source = resolutionName(stream.source_width, stream.source_height);
-	const output = resolutionName(stream.output_width, stream.output_height);
-	if (!source) return output;
-	if (!output) return source;
-	if (
-		stream.source_width === stream.output_width &&
-		stream.source_height === stream.output_height
-	) {
-		return source;
-	}
-	return `${source} → ${output}`;
 }
 
 function playbackMode(stream?: ActiveStream) {
@@ -403,7 +374,6 @@ export function Dashboard() {
 						{activeStreams.length > 0 ? (
 							activeStreams.map((stream) => {
 								const mode = playbackMode(stream);
-								const resolution = streamResolution(stream);
 								const playbackPosition = streamPlaybackPosition(stream);
 								const playbackDuration = streamPlaybackDuration(stream);
 								const playbackProgress = streamProgress(stream);
@@ -423,15 +393,7 @@ export function Dashboard() {
 												</div>
 											</div>
 											<div className="flex min-w-0 flex-wrap gap-2 sm:justify-end">
-												{resolution && (
-													<span className="badge badge-primary badge-outline font-semibold">
-														{resolution}
-													</span>
-												)}
-												{mode && <span className={`badge ${mode.className}`}>{mode.label}</span>}
-												<PlaybackUpscalingBadge stream={stream} />
-												<PlaybackHDREnhancementBadge stream={stream} />
-												<PlaybackBufferBadge stream={stream} />
+												<PlaybackProcessingBadges stream={stream} includeBuffer />
 												<span className="badge badge-primary">{stream.status || "Streaming"}</span>
 											</div>
 										</div>
@@ -715,11 +677,7 @@ export function Dashboard() {
 													<span className="dashboard-line-clamp min-w-0 flex-1">
 														Playing {fileLabel(stream.file_path)}
 													</span>
-													{mode && (
-														<span className={`badge badge-sm ${mode.className}`}>{mode.label}</span>
-													)}
-													<PlaybackUpscalingBadge stream={stream} compact />
-													<PlaybackHDREnhancementBadge stream={stream} compact />
+													<PlaybackProcessingBadges stream={stream} compact />
 												</div>
 											) : lastStream ? (
 												<div className="min-w-0">

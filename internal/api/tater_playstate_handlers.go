@@ -203,6 +203,15 @@ func (s *Server) handleTaterPlayStateSave(c *fiber.Ctx) error {
 					Source:           source,
 					PlayerID:         player.ID,
 					UserName:         taterPlayerDisplayName(player),
+					MediaID:          req.ID,
+					MediaTitle:       req.Title,
+					MediaType:        req.MediaType,
+					SeriesTitle:      req.SeriesTitle,
+					CategoryID:       req.CategoryID,
+					SourceIndex:      req.SourceIndex,
+					MediaPath:        req.Path,
+					Poster:           req.Poster,
+					Backdrop:         req.Backdrop,
 					ClientIP:         c.IP(),
 					UserAgent:        c.Get("User-Agent"),
 					PlaybackPosition: float64(req.PositionMS) / 1000,
@@ -212,6 +221,7 @@ func (s *Server) handleTaterPlayStateSave(c *fiber.Ctx) error {
 			if !*playbackActive || explicitlyCompleted {
 				stopTaterPlaybackForPlayer(player.ID, taterPlayerDisplayName(player), s.streamTracker)
 			}
+			s.wakeTaterDisplay(player.ID)
 		}
 	}
 

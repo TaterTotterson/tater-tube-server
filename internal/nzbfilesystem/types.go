@@ -16,6 +16,15 @@ type ActiveStream struct {
 	Source               string    `json:"source"`
 	PlayerID             string    `json:"player_id,omitempty"`
 	UserName             string    `json:"user_name,omitempty"`
+	MediaID              string    `json:"media_id,omitempty"`
+	MediaTitle           string    `json:"media_title,omitempty"`
+	MediaType            string    `json:"media_type,omitempty"`
+	SeriesTitle          string    `json:"series_title,omitempty"`
+	CategoryID           string    `json:"category_id,omitempty"`
+	SourceIndex          int       `json:"source_index,omitempty"`
+	MediaPath            string    `json:"media_path,omitempty"`
+	Poster               string    `json:"poster,omitempty"`
+	Backdrop             string    `json:"backdrop,omitempty"`
 	ClientIP             string    `json:"client_ip,omitempty"`
 	UserAgent            string    `json:"user_agent,omitempty"`
 	TotalSize            int64     `json:"total_size"`
