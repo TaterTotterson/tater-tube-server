@@ -982,12 +982,17 @@ class APIClient {
 		return this.request<LocalMediaScanStatus>("/local-media/scan");
 	}
 
-	async startLocalMediaScan(scrapeMissingArtwork = false, artworkLibraryType?: string) {
+	async startLocalMediaScan(
+		scrapeMissingArtwork = false,
+		artworkLibraryType?: string,
+		scanMediaMarkers = false,
+	) {
 		return this.request<LocalMediaScanStatus>("/local-media/scan", {
 			method: "POST",
 			body: JSON.stringify({
 				scrape_missing_artwork: scrapeMissingArtwork,
 				artwork_library_type: artworkLibraryType,
+				scan_media_markers: scanMediaMarkers,
 			}),
 		});
 	}

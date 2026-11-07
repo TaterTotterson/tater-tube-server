@@ -591,10 +591,12 @@ export const useStartLocalMediaScan = () => {
 		mutationFn: ({
 			scrapeMissingArtwork,
 			artworkLibraryType,
+			scanMediaMarkers,
 		}: {
 			scrapeMissingArtwork: boolean;
 			artworkLibraryType?: LocalMediaLibraryType;
-		}) => apiClient.startLocalMediaScan(scrapeMissingArtwork, artworkLibraryType),
+			scanMediaMarkers?: boolean;
+		}) => apiClient.startLocalMediaScan(scrapeMissingArtwork, artworkLibraryType, scanMediaMarkers),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["local-media"] });
 		},

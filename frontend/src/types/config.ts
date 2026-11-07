@@ -203,6 +203,7 @@ export interface LibraryOptimizerAnalysis {
 	previously_handled: number;
 	dolby_vision_skipped: number;
 	dolby_vision_hdr10: number;
+	media_details_missing: number;
 	unavailable_files: number;
 	source_bytes: number;
 	eligible_bytes: number;
@@ -828,6 +829,14 @@ export interface LocalMediaScanStatus {
 	metadata_found: number;
 	genre_matches: number;
 	genre_unmatched: number;
+	markers_processed: number;
+	markers_total: number;
+	marker_sidecars: number;
+	marker_sidecars_reused: number;
+	marker_files_failed: number;
+	commercial_breaks_found: number;
+	credits_found: number;
+	marker_errors?: string[];
 	error?: string;
 	monitor?: LocalMediaMonitorStatus;
 }
