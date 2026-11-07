@@ -258,9 +258,14 @@ you enable the feature. Library Optimization is off by default.
   quality or converted to E-AC-3/AAC.
 - Subtitle choices include forced English only, all English, all subtitles, or
   removal.
-- HDR10 can be preserved. Dolby Vision sources are protected and skipped by
-  default because ordinary transcoding cannot safely retain all dynamic Dolby
-  Vision metadata.
+- HDR is always retained as 10-bit output with its source color signaling.
+  Dolby Vision sources are protected and skipped by default. Turning that
+  protection off permits optimization without degrading efficient media:
+  existing Dolby Vision video is preserved when its codec already meets the
+  selected policy, including track-cleanup-only jobs. Only a file that already
+  requires a video codec conversion uses FFmpeg libplacebo to apply its Dolby
+  Vision RPU and create verified BT.2020/PQ HDR10 in the selected HEVC or AV1
+  target. That conversion requires a working libplacebo/Vulkan path.
 - Jobs can wait while playback is active and remember completed files across
   server and container updates.
 

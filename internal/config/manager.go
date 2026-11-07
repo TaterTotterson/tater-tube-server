@@ -347,7 +347,6 @@ type LibraryOptimizerConfig struct {
 	ConvertHEVCToAV1      *bool  `yaml:"convert_hevc_to_av1" mapstructure:"convert_hevc_to_av1" json:"convert_hevc_to_av1"`
 	CleanEfficientFiles   *bool  `yaml:"clean_efficient_files" mapstructure:"clean_efficient_files" json:"clean_efficient_files"`
 	PauseDuringPlayback   *bool  `yaml:"pause_during_playback" mapstructure:"pause_during_playback" json:"pause_during_playback"`
-	PreserveHDR           *bool  `yaml:"preserve_hdr" mapstructure:"preserve_hdr" json:"preserve_hdr"`
 	SkipDolbyVision       *bool  `yaml:"skip_dolby_vision" mapstructure:"skip_dolby_vision" json:"skip_dolby_vision"`
 	MinimumSavingsPercent *int   `yaml:"minimum_savings_percent" mapstructure:"minimum_savings_percent" json:"minimum_savings_percent"`
 	QuarantineDays        *int   `yaml:"quarantine_days" mapstructure:"quarantine_days" json:"quarantine_days"`
@@ -950,10 +949,6 @@ func (c *Config) Validate() error {
 	if c.LibraryOptimizer.PauseDuringPlayback == nil {
 		value := true
 		c.LibraryOptimizer.PauseDuringPlayback = &value
-	}
-	if c.LibraryOptimizer.PreserveHDR == nil {
-		value := true
-		c.LibraryOptimizer.PreserveHDR = &value
 	}
 	if c.LibraryOptimizer.SkipDolbyVision == nil {
 		value := true
@@ -2073,7 +2068,6 @@ func DefaultConfig(configDir ...string) *Config {
 	libraryOptimizerConvertHEVC := false // Efficient HEVC sources are preserved by default
 	libraryOptimizerCleanEfficient := false
 	libraryOptimizerPausePlayback := true
-	libraryOptimizerPreserveHDR := true
 	libraryOptimizerSkipDolbyVision := true
 	newznabEnabled := false              // Player-facing Stream catalog disabled by default
 	localMediaEnabled := false           // Server-local media catalog disabled by default
@@ -2234,7 +2228,6 @@ func DefaultConfig(configDir ...string) *Config {
 			ConvertHEVCToAV1:      &libraryOptimizerConvertHEVC,
 			CleanEfficientFiles:   &libraryOptimizerCleanEfficient,
 			PauseDuringPlayback:   &libraryOptimizerPausePlayback,
-			PreserveHDR:           &libraryOptimizerPreserveHDR,
 			SkipDolbyVision:       &libraryOptimizerSkipDolbyVision,
 			MinimumSavingsPercent: func() *int { value := 15; return &value }(),
 			QuarantineDays:        func() *int { value := 7; return &value }(),

@@ -157,7 +157,6 @@ export interface LibraryOptimizerConfig {
 	convert_hevc_to_av1: boolean;
 	clean_efficient_files: boolean;
 	pause_during_playback: boolean;
-	preserve_hdr: boolean;
 	skip_dolby_vision: boolean;
 	minimum_savings_percent: number;
 	quarantine_days: number;
@@ -189,6 +188,7 @@ export interface LibraryOptimizerCapabilities {
 	writable_libraries: number;
 	total_libraries: number;
 	hdr_preservation: boolean;
+	dolby_vision_hdr10: boolean;
 	dolby_vision_policy: string;
 	notes?: string[];
 }
@@ -202,6 +202,7 @@ export interface LibraryOptimizerAnalysis {
 	already_efficient: number;
 	previously_handled: number;
 	dolby_vision_skipped: number;
+	dolby_vision_hdr10: number;
 	unavailable_files: number;
 	source_bytes: number;
 	eligible_bytes: number;

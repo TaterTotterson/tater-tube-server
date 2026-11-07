@@ -174,6 +174,7 @@ RUN ffmpeg -hide_banner -filters 2>&1 | grep -Eq '[[:space:]]zscale[[:space:]]' 
     if [ "${TARGETARCH}" = "amd64" ]; then \
         ffmpeg -hide_banner -filters 2>&1 | grep -Eq '[[:space:]]libplacebo[[:space:]]' && \
         ffmpeg -hide_banner -h filter=libplacebo 2>&1 | grep -Eq '[[:space:]]shader_cache[[:space:]]' && \
+        ffmpeg -hide_banner -h filter=libplacebo 2>&1 | grep -Eq '[[:space:]]apply_dolbyvision[[:space:]]' && \
         ffmpeg -hide_banner -encoders 2>&1 | grep -Eq '[[:space:]]h264_nvenc[[:space:]]' && \
         ffmpeg -hide_banner -encoders 2>&1 | grep -Eq '[[:space:]]h264_vaapi[[:space:]]'; \
     fi

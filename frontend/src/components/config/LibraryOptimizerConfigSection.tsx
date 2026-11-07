@@ -52,7 +52,6 @@ const DEFAULTS: LibraryOptimizerConfig = {
 	convert_hevc_to_av1: false,
 	clean_efficient_files: false,
 	pause_during_playback: true,
-	preserve_hdr: true,
 	skip_dolby_vision: true,
 	minimum_savings_percent: 15,
 	quarantine_days: 7,
@@ -517,9 +516,11 @@ export function LibraryOptimizerConfigSection({
 									<span
 										className={`badge badge-lg ${capabilities.hdr_preservation ? "badge-success badge-outline" : "badge-ghost"}`}
 									>
-										<Sparkles className="mr-1 h-4 w-4" /> HDR preservation
+										<Sparkles className="mr-1 h-4 w-4" /> HDR preserved automatically
 									</span>
-									<span className="badge badge-ghost badge-lg">
+									<span
+										className={`badge badge-lg ${capabilities.dolby_vision_hdr10 ? "badge-success badge-outline" : "badge-ghost"}`}
+									>
 										{capabilities.dolby_vision_policy}
 									</span>
 								</div>
@@ -656,15 +657,12 @@ export function LibraryOptimizerConfigSection({
 								onChange={(pause_during_playback) => updateData({ ...data, pause_during_playback })}
 							/>
 							<ToggleRow
-								label="Preserve HDR"
-								description="Keep HDR10 signaling and 10-bit video when the chosen encoder supports it."
-								checked={data.preserve_hdr}
-								disabled={isReadOnly}
-								onChange={(preserve_hdr) => updateData({ ...data, preserve_hdr })}
-							/>
-							<ToggleRow
 								label="Protect Dolby Vision"
-								description="Skip Dolby Vision sources instead of risking loss of dynamic metadata."
+								description={
+									data.skip_dolby_vision
+										? "Always skip Dolby Vision video and leave its dynamic metadata untouched."
+										: "Preserve efficient Dolby Vision video. Convert it to verified 10-bit HDR10 only when the selected codec requires a video transcode."
+								}
 								checked={data.skip_dolby_vision}
 								disabled={isReadOnly}
 								onChange={(skip_dolby_vision) => updateData({ ...data, skip_dolby_vision })}
@@ -849,7 +847,7 @@ export function LibraryOptimizerConfigSection({
 								label="Eligible size"
 								value={bytes(analysis.eligible_bytes)}
 								ready={analysis.eligible_files > 0}
-								detail={`${analysis.dolby_vision_skipped} Dolby Vision protected`}
+								detail={`${analysis.dolby_vision_skipped} Dolby Vision preserved · ${analysis.dolby_vision_hdr10} need HDR10 conversion`}
 							/>
 						</div>
 					)}

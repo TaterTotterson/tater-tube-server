@@ -54,6 +54,7 @@ type libraryOptimizerCapabilities struct {
 	WritableLibraries   int                                 `json:"writable_libraries"`
 	TotalLibraries      int                                 `json:"total_libraries"`
 	HDRPreservation     bool                                `json:"hdr_preservation"`
+	DolbyVisionHDR10    bool                                `json:"dolby_vision_hdr10"`
 	DolbyVisionPolicy   string                              `json:"dolby_vision_policy"`
 	Notes               []string                            `json:"notes,omitempty"`
 }
@@ -67,6 +68,7 @@ type libraryOptimizerAnalysis struct {
 	AlreadyEfficient   int            `json:"already_efficient"`
 	PreviouslyHandled  int            `json:"previously_handled"`
 	DolbyVisionSkipped int            `json:"dolby_vision_skipped"`
+	DolbyVisionHDR10   int            `json:"dolby_vision_hdr10"`
 	UnavailableFiles   int            `json:"unavailable_files"`
 	SourceBytes        int64          `json:"source_bytes"`
 	EligibleBytes      int64          `json:"eligible_bytes"`
@@ -159,6 +161,17 @@ type libraryOptimizerService struct {
 	lastCleanup          time.Time
 	automaticFingerprint string
 }
+
+type libraryOptimizerDolbyVisionProbe struct {
+	available bool
+	details   string
+	checkedAt time.Time
+}
+
+var libraryOptimizerDolbyVisionProbes = struct {
+	sync.Mutex
+	byFFmpeg map[string]libraryOptimizerDolbyVisionProbe
+}{byFFmpeg: map[string]libraryOptimizerDolbyVisionProbe{}}
 
 type optimizerProbe struct {
 	Streams []optimizerProbeStream `json:"streams"`
@@ -428,8 +441,87 @@ func recommendedOptimizerEncoder(options []libraryOptimizerEncoderCapability, pr
 	return ""
 }
 
+func optimizerDolbyVisionHDR10Filter(shaderCachePath string) string {
+	parts := []string{
+		"libplacebo=apply_dolbyvision=true",
+		"format=yuv420p10le",
+		"colorspace=bt2020nc",
+		"color_primaries=bt2020",
+		"color_trc=smpte2084",
+		"range=tv",
+	}
+	if shaderCachePath = strings.TrimSpace(shaderCachePath); shaderCachePath != "" {
+		parts = append(parts, "shader_cache="+escapeTaterFilterValue(shaderCachePath))
+	}
+	return strings.Join(parts, ":")
+}
+
+func probeOptimizerDolbyVisionHDR10(parent context.Context, cfg *config.Config, encoder string) (bool, string) {
+	if cfg == nil || strings.TrimSpace(encoder) == "" {
+		return false, "No compatible target encoder is selected"
+	}
+	ffmpegPath := effectiveFFmpegPath(cfg.Transcoding.FFmpegPath)
+	cacheKey := strings.Join([]string{
+		ffmpegPath,
+		encoder,
+		strings.TrimSpace(cfg.Transcoding.HardwareDevice),
+	}, "\x00")
+	libraryOptimizerDolbyVisionProbes.Lock()
+	defer libraryOptimizerDolbyVisionProbes.Unlock()
+	if cached, ok := libraryOptimizerDolbyVisionProbes.byFFmpeg[cacheKey]; ok &&
+		(cached.available || time.Since(cached.checkedAt) < 5*time.Minute) {
+		return cached.available, cached.details
+	}
+
+	result := libraryOptimizerDolbyVisionProbe{checkedAt: time.Now()}
+	switch {
+	case !taterTVFFmpegHasFilter(parent, ffmpegPath, "libplacebo"):
+		result.details = "FFmpeg libplacebo is unavailable"
+	case !strings.Contains(strings.ToLower(ffmpegOutput(ffmpegPath, "-hide_banner", "-h", "filter=libplacebo")), "apply_dolbyvision"):
+		result.details = "FFmpeg libplacebo cannot apply Dolby Vision metadata"
+	default:
+		cachePath := prepareTaterAIShaderCache(parent, ffmpegPath)
+		probeCtx, cancel := context.WithTimeout(parent, 20*time.Second)
+		defer cancel()
+		args := []string{"-hide_banner", "-loglevel", "error", "-nostdin"}
+		args = append(args, optimizerInputArgs(encoder, cfg)...)
+		args = append(args,
+			"-f", "lavfi", "-i", "color=size=320x180:rate=1:duration=1",
+			"-frames:v", "1",
+		)
+		args = append(args, optimizerVideoArgs(
+			encoder,
+			cfg.LibraryOptimizer,
+			optimizerProbeStream{
+				PixelFormat: "yuv420p10le", ColorSpace: "bt2020nc",
+				ColorTransfer: "smpte2084", ColorPrimaries: "bt2020",
+			},
+			true,
+			cachePath,
+		)...)
+		args = append(args, "-an", "-f", "null", "-")
+		var stderr limitedBuffer
+		command := exec.CommandContext(probeCtx, ffmpegPath, args...)
+		command.Stderr = &stderr
+		if err := command.Run(); err != nil {
+			reason := strings.TrimSpace(stderr.String())
+			if probeCtx.Err() != nil {
+				reason = "probe timed out"
+			} else if reason == "" {
+				reason = err.Error()
+			}
+			result.details = "FFmpeg libplacebo/Vulkan HDR10 encode probe failed: " + conciseUpscalingProbeError(errors.New(reason))
+		} else {
+			result.available = true
+			result.details = "Dolby Vision can be rendered and encoded as 10-bit BT.2020/PQ HDR10"
+		}
+	}
+	libraryOptimizerDolbyVisionProbes.byFFmpeg[cacheKey] = result
+	return result.available, result.details
+}
+
 func detectLibraryOptimizerCapabilities(cfg *config.Config) libraryOptimizerCapabilities {
-	result := libraryOptimizerCapabilities{DolbyVisionPolicy: "Skipped by default to protect Dolby Vision metadata"}
+	result := libraryOptimizerCapabilities{DolbyVisionPolicy: "Protected by default"}
 	if cfg == nil {
 		result.Notes = []string{"Configuration is unavailable."}
 		return result
@@ -458,6 +550,16 @@ func detectLibraryOptimizerCapabilities(cfg *config.Config) libraryOptimizerCapa
 	result.EAC3 = hasFFmpegEncoder(encoders, "eac3")
 	result.AAC = hasFFmpegEncoder(encoders, "aac")
 	result.HDRPreservation = result.RecommendedHEVC != "" || result.RecommendedAV1 != ""
+	targetEncoder := result.RecommendedHEVC
+	if strings.EqualFold(cfg.LibraryOptimizer.TargetCodec, "av1") {
+		targetEncoder = result.RecommendedAV1
+	}
+	result.DolbyVisionHDR10, _ = probeOptimizerDolbyVisionHDR10(context.Background(), cfg, targetEncoder)
+	if result.DolbyVisionHDR10 {
+		result.DolbyVisionPolicy = "Protected by default · HDR10 conversion ready"
+	} else {
+		result.DolbyVisionPolicy = "Protected · HDR10 conversion unavailable"
+	}
 	seenRoots := map[string]struct{}{}
 	for _, category := range cfg.LocalMedia.Categories {
 		if !taterLocalLibraryEnabled(category) || strings.EqualFold(category.LibraryType, "music") {
@@ -526,7 +628,7 @@ func optimizerFingerprint(path string, info os.FileInfo, cfg config.LibraryOptim
 		cfg.TargetCodec, cfg.Quality, cfg.AudioPolicy, cfg.AudioFormat, cfg.SubtitlePolicy,
 		strconv.FormatBool(boolValue(cfg.ConvertHEVCToAV1, false)),
 		strconv.FormatBool(boolValue(cfg.CleanEfficientFiles, false)),
-		strconv.FormatBool(boolValue(cfg.PreserveHDR, true)),
+		strconv.FormatBool(boolValue(cfg.SkipDolbyVision, true)),
 		strconv.Itoa(intValue(cfg.MinimumSavingsPercent, 15)),
 	}, "\x00")
 	hash := sha256.Sum256([]byte(payload))
@@ -564,6 +666,15 @@ func optimizerAction(codec string, cfg config.LibraryOptimizerConfig) string {
 	return "transcode"
 }
 
+func optimizerActionForMedia(codec, videoRange string, cfg config.LibraryOptimizerConfig) string {
+	if strings.Contains(strings.ToLower(strings.TrimSpace(videoRange)), "dolby") {
+		if boolValue(cfg.SkipDolbyVision, true) {
+			return "skip-dolby-vision"
+		}
+	}
+	return optimizerAction(codec, cfg)
+}
+
 func optimizerSupportedPath(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".mkv", ".mp4", ".m4v", ".mov", ".avi", ".wmv", ".ts", ".m2ts", ".mpg", ".mpeg", ".webm":
@@ -591,8 +702,16 @@ func buildOptimizerCandidates(cfg *config.Config, store libraryOptimizerStore) (
 			codec = "unknown"
 		}
 		analysis.Codecs[codec]++
-		action := optimizerAction(codec, cfg.LibraryOptimizer)
+		dolbyVision := strings.Contains(strings.ToLower(file.VideoRange), "dolby")
+		action := optimizerActionForMedia(codec, file.VideoRange, cfg.LibraryOptimizer)
+		if action == "skip-dolby-vision" {
+			analysis.DolbyVisionSkipped++
+			continue
+		}
 		if action == "skip-efficient" {
+			if dolbyVision {
+				analysis.DolbyVisionSkipped++
+			}
 			analysis.AlreadyEfficient++
 			continue
 		}
@@ -611,9 +730,11 @@ func buildOptimizerCandidates(cfg *config.Config, store libraryOptimizerStore) (
 			analysis.PreviouslyHandled++
 			continue
 		}
-		if boolValue(cfg.LibraryOptimizer.SkipDolbyVision, true) && strings.Contains(strings.ToLower(file.VideoRange), "dolby") {
-			analysis.DolbyVisionSkipped++
-			continue
+		if dolbyVision && action == "transcode" {
+			// Dolby Vision is converted to HDR10 only when the normal codec policy
+			// already requires a video transcode. Efficient DV video and cleanup-only
+			// jobs preserve the original Dolby Vision stream.
+			analysis.DolbyVisionHDR10++
 		}
 		analysis.EligibleFiles++
 		analysis.EligibleBytes += info.Size()
@@ -1059,7 +1180,13 @@ func optimizerQuality(cfg config.LibraryOptimizerConfig) int {
 	}
 }
 
-func optimizerVideoArgs(encoder string, cfg config.LibraryOptimizerConfig, stream optimizerProbeStream) []string {
+func optimizerVideoArgs(
+	encoder string,
+	cfg config.LibraryOptimizerConfig,
+	stream optimizerProbeStream,
+	dolbyVision bool,
+	shaderCachePath string,
+) []string {
 	quality := optimizerQuality(cfg)
 	args := []string{"-c:v", encoder}
 	switch {
@@ -1077,23 +1204,62 @@ func optimizerVideoArgs(encoder string, cfg config.LibraryOptimizerConfig, strea
 		videoToolboxQuality := max(35, 100-quality*2)
 		args = append(args, "-q:v", strconv.Itoa(videoToolboxQuality), "-realtime", "0")
 	}
-	if boolValue(cfg.PreserveHDR, true) && optimizerStreamHDR(stream) {
-		if strings.Contains(encoder, "vaapi") {
-			args = append([]string{"-vf", "format=p010,hwupload"}, args...)
-		} else {
-			args = append(args, "-pix_fmt", "yuv420p10le")
+
+	hdr := dolbyVision || optimizerStreamHDR(stream)
+	filters := []string{}
+	if dolbyVision {
+		filters = append(filters, optimizerDolbyVisionHDR10Filter(shaderCachePath))
+	}
+	if strings.Contains(encoder, "vaapi") {
+		format := "nv12"
+		if hdr {
+			format = "p010le"
 		}
-		if stream.ColorPrimaries != "" {
-			args = append(args, "-color_primaries", stream.ColorPrimaries)
+		filters = append(filters, "format="+format, "hwupload")
+	}
+	if len(filters) > 0 {
+		args = append([]string{"-vf", strings.Join(filters, ",")}, args...)
+	}
+	if !hdr {
+		return args
+	}
+
+	primaries := strings.TrimSpace(stream.ColorPrimaries)
+	transfer := strings.TrimSpace(stream.ColorTransfer)
+	colorSpace := strings.TrimSpace(stream.ColorSpace)
+	if dolbyVision || primaries == "" {
+		primaries = "bt2020"
+	}
+	if dolbyVision || transfer == "" {
+		transfer = "smpte2084"
+	}
+	if dolbyVision || colorSpace == "" {
+		colorSpace = "bt2020nc"
+	}
+	if !strings.Contains(encoder, "vaapi") {
+		pixelFormat := "yuv420p10le"
+		if strings.HasSuffix(encoder, "_nvenc") || strings.HasSuffix(encoder, "_qsv") ||
+			strings.HasSuffix(encoder, "_videotoolbox") {
+			pixelFormat = "p010le"
 		}
-		if stream.ColorTransfer != "" {
-			args = append(args, "-color_trc", stream.ColorTransfer)
-		}
-		if stream.ColorSpace != "" {
-			args = append(args, "-colorspace", stream.ColorSpace)
-		}
-	} else if strings.Contains(encoder, "vaapi") {
-		args = append([]string{"-vf", "format=nv12,hwupload"}, args...)
+		args = append(args, "-pix_fmt", pixelFormat)
+	}
+	if encoder == "libx265" || strings.HasPrefix(encoder, "hevc_") {
+		args = append(args, "-profile:v", "main10")
+	}
+	args = append(args,
+		"-color_primaries", primaries,
+		"-color_trc", transfer,
+		"-colorspace", colorSpace,
+		"-color_range", "tv",
+	)
+	if encoder == "libx265" {
+		args = append(args, "-x265-params", strings.Join([]string{
+			"colorprim=" + primaries,
+			"transfer=" + transfer,
+			"colormatrix=" + colorSpace,
+			"range=limited",
+		}, ":"))
 	}
 	return args
 }
@@ -1102,6 +1268,14 @@ func optimizerStreamHDR(stream optimizerProbeStream) bool {
 	transfer := strings.ToLower(stream.ColorTransfer)
 	primaries := strings.ToLower(stream.ColorPrimaries)
 	return strings.Contains(transfer, "2084") || strings.Contains(transfer, "arib") || strings.Contains(primaries, "2020")
+}
+
+func optimizerStreamHDR10(stream optimizerProbeStream) bool {
+	transfer := strings.ToLower(strings.TrimSpace(stream.ColorTransfer))
+	primaries := strings.ToLower(strings.TrimSpace(stream.ColorPrimaries))
+	pixelFormat := strings.ToLower(strings.TrimSpace(stream.PixelFormat))
+	return strings.Contains(transfer, "2084") && strings.Contains(primaries, "2020") &&
+		(strings.Contains(pixelFormat, "10") || strings.Contains(pixelFormat, "p010"))
 }
 
 func optimizerInputArgs(encoder string, cfg *config.Config) []string {
@@ -1131,7 +1305,7 @@ func optimizerInputArgs(encoder string, cfg *config.Config) []string {
 	return nil
 }
 
-func optimizerFFmpegArgs(cfg *config.Config, encoder string, candidate libraryOptimizerCandidate, probe optimizerProbe, tempPath string) ([]string, error) {
+func optimizerFFmpegArgs(ctx context.Context, cfg *config.Config, encoder string, candidate libraryOptimizerCandidate, probe optimizerProbe, tempPath string) ([]string, error) {
 	video, ok := optimizerVideoStream(probe)
 	if !ok {
 		return nil, fmt.Errorf("source has no video stream")
@@ -1163,7 +1337,14 @@ func optimizerFFmpegArgs(cfg *config.Config, encoder string, candidate libraryOp
 	if candidate.Action == "cleanup" {
 		args = append(args, "-c:v", "copy")
 	} else {
-		args = append(args, optimizerVideoArgs(encoder, cfg.LibraryOptimizer, video)...)
+		dolbyVision := optimizerHasDolbyVision(probe)
+		shaderCachePath := ""
+		if dolbyVision {
+			shaderCachePath = prepareTaterAIShaderCache(ctx, effectiveFFmpegPath(cfg.Transcoding.FFmpegPath))
+		}
+		args = append(args, optimizerVideoArgs(
+			encoder, cfg.LibraryOptimizer, video, dolbyVision, shaderCachePath,
+		)...)
 	}
 	switch cfg.LibraryOptimizer.AudioFormat {
 	case "eac3":
@@ -1196,9 +1377,18 @@ func optimizerDuration(probe optimizerProbe) float64 {
 	return duration
 }
 
-func validateOptimizerOutput(source, output optimizerProbe, originalSize, outputSize int64) error {
-	if _, ok := optimizerVideoStream(output); !ok {
+func validateOptimizerOutput(source, output optimizerProbe, originalSize, outputSize int64, requireHDR10 bool) error {
+	outputVideo, ok := optimizerVideoStream(output)
+	if !ok {
 		return fmt.Errorf("optimized file has no video stream")
+	}
+	if requireHDR10 {
+		if optimizerHasDolbyVision(output) {
+			return fmt.Errorf("optimized file still contains Dolby Vision metadata")
+		}
+		if !optimizerStreamHDR10(outputVideo) {
+			return fmt.Errorf("Dolby Vision conversion did not produce verified 10-bit BT.2020/PQ HDR10")
+		}
 	}
 	sourceDuration := optimizerDuration(source)
 	outputDuration := optimizerDuration(output)
@@ -1293,10 +1483,22 @@ func (service *libraryOptimizerService) processCandidate(ctx context.Context, cf
 		return record
 	}
 	record.SourceCodec = normalizeOptimizerCodec(video.CodecName)
-	if boolValue(cfg.LibraryOptimizer.SkipDolbyVision, true) && optimizerHasDolbyVision(probe) {
-		record.Status, record.Message = "skipped", "Dolby Vision was protected from lossy conversion"
-		return record
+	dolbyVision := optimizerHasDolbyVision(probe)
+	if dolbyVision {
+		if boolValue(cfg.LibraryOptimizer.SkipDolbyVision, true) {
+			record.Status, record.Message = "skipped", "Dolby Vision was protected from lossy conversion"
+			return record
+		}
+		if candidate.Action == "transcode" {
+			available, details := probeOptimizerDolbyVisionHDR10(ctx, cfg, encoder)
+			if !available {
+				record.Status = "failed"
+				record.Message = "Dolby Vision to HDR10 conversion is unavailable: " + details
+				return record
+			}
+		}
 	}
+	convertDolbyVision := dolbyVision && candidate.Action == "transcode"
 	if freeBytes, _ := getDiskSpace(filepath.Dir(candidate.AbsolutePath)); freeBytes > 0 && freeBytes < uint64(info.Size()) {
 		record.Status = "failed"
 		record.Message = fmt.Sprintf("Not enough free space beside the source (need about %s)", optimizerByteLabel(info.Size()))
@@ -1308,7 +1510,7 @@ func (service *libraryOptimizerService) processCandidate(ctx context.Context, cf
 		return record
 	}
 	defer os.Remove(tempPath)
-	args, err := optimizerFFmpegArgs(cfg, encoder, candidate, probe, tempPath)
+	args, err := optimizerFFmpegArgs(ctx, cfg, encoder, candidate, probe, tempPath)
 	if err != nil {
 		record.Status, record.Message = "failed", err.Error()
 		return record
@@ -1333,7 +1535,7 @@ func (service *libraryOptimizerService) processCandidate(ctx context.Context, cf
 		record.Status, record.Message = "failed", fmt.Sprintf("validate output: %v", err)
 		return record
 	}
-	if err := validateOptimizerOutput(probe, outputProbe, info.Size(), outputInfo.Size()); err != nil {
+	if err := validateOptimizerOutput(probe, outputProbe, info.Size(), outputInfo.Size(), convertDolbyVision); err != nil {
 		record.Status, record.Message = "failed", err.Error()
 		return record
 	}
@@ -1359,11 +1561,16 @@ func (service *libraryOptimizerService) processCandidate(ctx context.Context, cf
 	}
 	record.Status = "completed"
 	record.Message = "Optimized and validated"
+	if convertDolbyVision {
+		record.Message = "Dolby Vision converted to 10-bit HDR10 and validated"
+	} else if dolbyVision && candidate.Action == "cleanup" {
+		record.Message = "Tracks cleaned and Dolby Vision video preserved"
+	}
 	if installedInfo, statErr := os.Stat(candidate.AbsolutePath); statErr == nil {
 		record.Fingerprint = optimizerFingerprint(candidate.AbsolutePath, installedInfo, cfg.LibraryOptimizer)
 	}
 	if quarantine != "" {
-		record.Message = "Optimized and validated; original quarantined"
+		record.Message += "; original quarantined"
 	}
 	return record
 }

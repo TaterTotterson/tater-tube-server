@@ -288,6 +288,10 @@ if [[ -x "${FFMPEG_BIN_DIR}/ffmpeg" ]]; then
     echo "Bundled FFmpeg is missing libplacebo persistent shader-cache support." >&2
     exit 1
   fi
+  if ! "${FFMPEG_BIN_DIR}/ffmpeg" -hide_banner -h filter=libplacebo 2>&1 | grep -Eq '[[:space:]]apply_dolbyvision[[:space:]]'; then
+    echo "Bundled FFmpeg is missing libplacebo Dolby Vision rendering support." >&2
+    exit 1
+  fi
   if ! grep -Eq '[[:space:]]h264_videotoolbox[[:space:]]' <<< "${bundled_encoders}"; then
     echo "Bundled FFmpeg is missing the required h264_videotoolbox encoder." >&2
     exit 1
