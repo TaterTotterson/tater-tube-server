@@ -460,6 +460,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/config/reload", s.handleReloadConfig)
 	api.Post("/config/validate", s.handleValidateConfig)
 	api.Get("/library-optimizer/status", s.handleLibraryOptimizerStatus)
+	api.Get("/library-optimizer/history", s.handleLibraryOptimizerHistory)
 	api.Post("/library-optimizer/analyze", s.handleLibraryOptimizerAnalyze)
 	api.Post("/library-optimizer/start", s.handleLibraryOptimizerStart)
 	api.Patch("/library-optimizer/pause", s.handleLibraryOptimizerPause)

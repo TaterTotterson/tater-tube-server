@@ -108,6 +108,37 @@ type libraryOptimizerRecord struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+type libraryOptimizerHistoryRecord struct {
+	Path          string    `json:"path"`
+	Status        string    `json:"status"`
+	Action        string    `json:"action"`
+	SourceCodec   string    `json:"source_codec,omitempty"`
+	TargetCodec   string    `json:"target_codec,omitempty"`
+	OriginalBytes int64     `json:"original_bytes,omitempty"`
+	OutputBytes   int64     `json:"output_bytes,omitempty"`
+	SavedBytes    int64     `json:"saved_bytes,omitempty"`
+	Message       string    `json:"message,omitempty"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type libraryOptimizerHistorySummary struct {
+	Total         int   `json:"total"`
+	Completed     int   `json:"completed"`
+	Skipped       int   `json:"skipped"`
+	Failed        int   `json:"failed"`
+	OriginalBytes int64 `json:"original_bytes"`
+	OutputBytes   int64 `json:"output_bytes"`
+	SavedBytes    int64 `json:"saved_bytes"`
+}
+
+type libraryOptimizerHistory struct {
+	Summary       libraryOptimizerHistorySummary  `json:"summary"`
+	FilteredTotal int                             `json:"filtered_total"`
+	Offset        int                             `json:"offset"`
+	Limit         int                             `json:"limit"`
+	Records       []libraryOptimizerHistoryRecord `json:"records"`
+}
+
 type libraryOptimizerStore struct {
 	Schema  int                               `json:"schema"`
 	Records map[string]libraryOptimizerRecord `json:"records"`
@@ -197,6 +228,74 @@ func writeLibraryOptimizerStore(cfg *config.Config, store libraryOptimizerStore)
 		store.Records = map[string]libraryOptimizerRecord{}
 	}
 	return writeTaterJSON(libraryOptimizerStatePath(cfg), store)
+}
+
+func buildLibraryOptimizerHistory(store libraryOptimizerStore, statusFilter, search string, offset, limit int) libraryOptimizerHistory {
+	statusFilter = strings.ToLower(strings.TrimSpace(statusFilter))
+	search = strings.ToLower(strings.TrimSpace(search))
+	if limit <= 0 {
+		limit = 50
+	}
+	limit = min(limit, 200)
+	offset = max(offset, 0)
+
+	history := libraryOptimizerHistory{
+		Offset:  offset,
+		Limit:   limit,
+		Records: []libraryOptimizerHistoryRecord{},
+	}
+	filtered := make([]libraryOptimizerHistoryRecord, 0, len(store.Records))
+	for _, record := range store.Records {
+		history.Summary.Total++
+		switch record.Status {
+		case "completed":
+			history.Summary.Completed++
+			history.Summary.OriginalBytes += record.OriginalBytes
+			history.Summary.OutputBytes += record.OutputBytes
+			history.Summary.SavedBytes += max(int64(0), record.SavedBytes)
+		case "skipped":
+			history.Summary.Skipped++
+		default:
+			history.Summary.Failed++
+		}
+		if statusFilter != "" && statusFilter != "all" && record.Status != statusFilter {
+			continue
+		}
+		if search != "" {
+			haystack := strings.ToLower(strings.Join([]string{
+				record.Path,
+				record.Message,
+				record.Action,
+				record.SourceCodec,
+				record.TargetCodec,
+			}, " "))
+			if !strings.Contains(haystack, search) {
+				continue
+			}
+		}
+		filtered = append(filtered, libraryOptimizerHistoryRecord{
+			Path:          record.Path,
+			Status:        record.Status,
+			Action:        record.Action,
+			SourceCodec:   record.SourceCodec,
+			TargetCodec:   record.TargetCodec,
+			OriginalBytes: record.OriginalBytes,
+			OutputBytes:   record.OutputBytes,
+			SavedBytes:    record.SavedBytes,
+			Message:       record.Message,
+			UpdatedAt:     record.UpdatedAt,
+		})
+	}
+	sort.SliceStable(filtered, func(i, j int) bool {
+		return filtered[i].UpdatedAt.After(filtered[j].UpdatedAt)
+	})
+	history.FilteredTotal = len(filtered)
+	if offset >= len(filtered) {
+		return history
+	}
+	end := min(offset+limit, len(filtered))
+	history.Records = filtered[offset:end]
+	return history
 }
 
 func boolValue(value *bool, fallback bool) bool {
@@ -697,10 +796,10 @@ func (service *libraryOptimizerService) run(ctx context.Context, cfg *config.Con
 		service.setStatus(func(status *libraryOptimizerStatus) {
 			status.OriginalBytes += record.OriginalBytes
 			status.OutputBytes += record.OutputBytes
-			status.SavedBytes += max(int64(0), record.SavedBytes)
 			switch record.Status {
 			case "completed":
 				status.Completed++
+				status.SavedBytes += max(int64(0), record.SavedBytes)
 			case "skipped":
 				status.Skipped++
 			default:
@@ -1347,6 +1446,26 @@ func (s *Server) handleLibraryOptimizerStatus(c *fiber.Ctx) error {
 		return RespondServiceUnavailable(c, "Library optimizer is unavailable", "OPTIMIZER_UNAVAILABLE")
 	}
 	return RespondSuccess(c, s.libraryOptimizer.snapshot())
+}
+
+func (s *Server) handleLibraryOptimizerHistory(c *fiber.Ctx) error {
+	if s.configManager == nil {
+		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
+	}
+	cfg := s.configManager.GetConfig()
+	if cfg == nil {
+		return RespondServiceUnavailable(c, "Configuration is unavailable", "CONFIG_UNAVAILABLE")
+	}
+	limit, _ := strconv.Atoi(c.Query("limit", "50"))
+	offset, _ := strconv.Atoi(c.Query("offset", "0"))
+	history := buildLibraryOptimizerHistory(
+		readLibraryOptimizerStore(cfg),
+		c.Query("status"),
+		c.Query("search"),
+		offset,
+		limit,
+	)
+	return RespondSuccess(c, history)
 }
 
 func (s *Server) handleLibraryOptimizerStart(c *fiber.Ctx) error {

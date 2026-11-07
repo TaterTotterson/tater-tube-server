@@ -77,3 +77,59 @@ func TestCleanupOptimizerQuarantineUsesSafetyWindowDate(t *testing.T) {
 	_, recentErr := os.Stat(recentFile)
 	assert.NoError(t, recentErr)
 }
+
+func TestBuildLibraryOptimizerHistorySummarizesOnlyCompletedSavings(t *testing.T) {
+	now := time.Now().UTC()
+	store := libraryOptimizerStore{Records: map[string]libraryOptimizerRecord{
+		"/media/completed.mkv": {
+			Path: "/media/completed.mkv", Status: "completed", OriginalBytes: 1000,
+			OutputBytes: 600, SavedBytes: 400, UpdatedAt: now,
+		},
+		"/media/skipped.mkv": {
+			Path: "/media/skipped.mkv", Status: "skipped", OriginalBytes: 1000,
+			OutputBytes: 900, SavedBytes: 100, UpdatedAt: now.Add(-time.Minute),
+		},
+		"/media/failed.mkv": {
+			Path: "/media/failed.mkv", Status: "failed", OriginalBytes: 1000,
+			Message: "encoder failed", UpdatedAt: now.Add(-2 * time.Minute),
+		},
+	}}
+
+	history := buildLibraryOptimizerHistory(store, "", "", 0, 50)
+
+	assert.Equal(t, 3, history.Summary.Total)
+	assert.Equal(t, 1, history.Summary.Completed)
+	assert.Equal(t, 1, history.Summary.Skipped)
+	assert.Equal(t, 1, history.Summary.Failed)
+	assert.Equal(t, int64(400), history.Summary.SavedBytes)
+	assert.Equal(t, int64(1000), history.Summary.OriginalBytes)
+	assert.Equal(t, int64(600), history.Summary.OutputBytes)
+	if assert.Len(t, history.Records, 3) {
+		assert.Equal(t, "/media/completed.mkv", history.Records[0].Path)
+	}
+}
+
+func TestBuildLibraryOptimizerHistoryFiltersSearchesAndPaginates(t *testing.T) {
+	now := time.Now().UTC()
+	store := libraryOptimizerStore{Records: map[string]libraryOptimizerRecord{
+		"/movies/alpha.mkv": {
+			Path: "/movies/alpha.mkv", Status: "failed", Message: "No video stream",
+			UpdatedAt: now,
+		},
+		"/movies/beta.mkv": {
+			Path: "/movies/beta.mkv", Status: "failed", Message: "Encoder failed",
+			UpdatedAt: now.Add(-time.Minute),
+		},
+		"/movies/gamma.mkv": {
+			Path: "/movies/gamma.mkv", Status: "completed", UpdatedAt: now.Add(-2 * time.Minute),
+		},
+	}}
+
+	history := buildLibraryOptimizerHistory(store, "failed", "video", 0, 1)
+
+	assert.Equal(t, 3, history.Summary.Total)
+	assert.Equal(t, 1, history.FilteredTotal)
+	if assert.Len(t, history.Records, 1) {
+		assert.Equal(t, "/movies/alpha.mkv", history.Records[0].Path)
+	}
+}

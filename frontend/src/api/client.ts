@@ -33,6 +33,7 @@ import type {
 	HDREnhancementCompatibilityDetection,
 	LibraryOptimizerAnalysis,
 	LibraryOptimizerCapabilities,
+	LibraryOptimizerHistory,
 	LibraryOptimizerStatus,
 	LocalMediaLibraryResponse,
 	LocalMediaMusicAlbum,
@@ -1053,6 +1054,20 @@ class APIClient {
 
 	async getLibraryOptimizerStatus() {
 		return this.request<LibraryOptimizerStatus>("/library-optimizer/status");
+	}
+
+	async getLibraryOptimizerHistory(
+		params: { status?: string; search?: string; offset?: number; limit?: number } = {},
+	) {
+		const searchParams = new URLSearchParams();
+		if (params.status && params.status !== "all") searchParams.set("status", params.status);
+		if (params.search) searchParams.set("search", params.search);
+		if (params.offset) searchParams.set("offset", String(params.offset));
+		if (params.limit) searchParams.set("limit", String(params.limit));
+		const query = searchParams.toString();
+		return this.request<LibraryOptimizerHistory>(
+			`/library-optimizer/history${query ? `?${query}` : ""}`,
+		);
 	}
 
 	async analyzeLibraryOptimizer() {
