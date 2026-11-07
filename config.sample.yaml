@@ -48,6 +48,28 @@ hdr_enhancement:
   # conservative, balanced, or vivid
   strength: 'balanced'
 
+# Optional safe local-media optimization. Requires writable movie/TV mounts.
+library_optimizer:
+  enabled: false
+  automatic: false
+  # hevc or av1
+  target_codec: 'hevc'
+  # high, balanced, or small
+  quality: 'balanced'
+  # best_english, all_english, or all
+  audio_policy: 'best_english'
+  # copy, eac3, or aac
+  audio_format: 'copy'
+  # forced_english, english, remove, or all
+  subtitle_policy: 'forced_english'
+  convert_hevc_to_av1: false
+  clean_efficient_files: false
+  pause_during_playback: true
+  preserve_hdr: true
+  skip_dolby_vision: true
+  minimum_savings_percent: 15
+  quarantine_days: 7
+
 newznab:
   enabled: false
   url: ''

@@ -75,6 +75,8 @@ type Server struct {
 
 	tvGuidePlannerCancel           context.CancelFunc
 	localLibraryScanCancel         context.CancelFunc
+	libraryOptimizerCancel         context.CancelFunc
+	libraryOptimizer               *libraryOptimizerService
 	localLibraryScanWake           chan struct{}
 	localLibraryMonitorWake        chan struct{}
 	localLibraryRealtimeScanWake   chan struct{}
@@ -150,6 +152,7 @@ func NewServer(
 	}
 
 	if configManager != nil {
+		server.libraryOptimizer = newLibraryOptimizerService(server)
 		configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 			if taterTVGuideConfigChanged(oldConfig, newConfig) {
 				taterTVResetGuideForConfig(oldConfig)
@@ -174,6 +177,9 @@ func NewServer(
 		server.localLibraryScanCancel = localScanCancel
 		go server.runLocalLibraryScanner(localScanCtx)
 		go server.runLocalLibraryMonitor(localScanCtx)
+		optimizerCtx, optimizerCancel := context.WithCancel(context.Background())
+		server.libraryOptimizerCancel = optimizerCancel
+		go server.libraryOptimizer.runAutomatic(optimizerCtx)
 	}
 
 	return server
@@ -438,6 +444,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/system/transcoding-detect", s.handleDetectTranscodingHardware)
 	api.Get("/system/upscaling-detect", s.handleDetectUpscalingCompatibility)
 	api.Get("/system/hdr-enhancement-detect", s.handleDetectHDREnhancementCompatibility)
+	api.Get("/system/library-optimizer-detect", s.handleDetectLibraryOptimizerCapabilities)
 	api.Delete("/system/indexer-stats/cleanup", s.handleCleanupIndexerStats)
 	api.Post("/system/stats/reset", s.handleResetSystemStats)
 	api.Post("/system/cleanup", s.handleSystemCleanup)
@@ -452,6 +459,11 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Patch("/config/:section", s.handlePatchConfigSection)
 	api.Post("/config/reload", s.handleReloadConfig)
 	api.Post("/config/validate", s.handleValidateConfig)
+	api.Get("/library-optimizer/status", s.handleLibraryOptimizerStatus)
+	api.Post("/library-optimizer/analyze", s.handleLibraryOptimizerAnalyze)
+	api.Post("/library-optimizer/start", s.handleLibraryOptimizerStart)
+	api.Patch("/library-optimizer/pause", s.handleLibraryOptimizerPause)
+	api.Delete("/library-optimizer", s.handleLibraryOptimizerCancel)
 
 	// Provider management endpoints
 	api.Post("/providers/test", s.handleTestProvider)
@@ -508,6 +520,12 @@ func (s *Server) Shutdown(ctx context.Context) {
 	}
 	if s.localLibraryScanCancel != nil {
 		s.localLibraryScanCancel()
+	}
+	if s.libraryOptimizerCancel != nil {
+		s.libraryOptimizerCancel()
+	}
+	if s.libraryOptimizer != nil {
+		_ = s.libraryOptimizer.stop()
 	}
 	taterTVResetHLS()
 	if s.speedtest != nil {

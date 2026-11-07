@@ -11,6 +11,7 @@ export interface ConfigResponse {
 	transcoding: TranscodingConfig;
 	upscaling: UpscalingConfig;
 	hdr_enhancement: HDREnhancementConfig;
+	library_optimizer: LibraryOptimizerConfig;
 	health: HealthConfig;
 	segment_cache: SegmentCacheConfig;
 	import: ImportConfig;
@@ -143,6 +144,89 @@ export interface HDREnhancementCompatibilityDetection {
 	status: string;
 	details?: string;
 	notes?: string[];
+}
+
+export interface LibraryOptimizerConfig {
+	enabled: boolean;
+	automatic: boolean;
+	target_codec: "hevc" | "av1" | string;
+	quality: "high" | "balanced" | "small" | string;
+	audio_policy: "best_english" | "all_english" | "all" | string;
+	audio_format: "copy" | "eac3" | "aac" | string;
+	subtitle_policy: "forced_english" | "english" | "remove" | "all" | string;
+	convert_hevc_to_av1: boolean;
+	clean_efficient_files: boolean;
+	pause_during_playback: boolean;
+	preserve_hdr: boolean;
+	skip_dolby_vision: boolean;
+	minimum_savings_percent: number;
+	quarantine_days: number;
+}
+
+export interface LibraryOptimizerEncoderCapability {
+	codec: string;
+	label: string;
+	encoder: string;
+	hardware: string;
+	available: boolean;
+	status: string;
+	details?: string;
+}
+
+export interface LibraryOptimizerCapabilities {
+	ffmpeg_path: string;
+	ffmpeg_available: boolean;
+	ffprobe_available: boolean;
+	recommended_hardware: string;
+	recommended_hevc?: string;
+	recommended_av1?: string;
+	hevc: LibraryOptimizerEncoderCapability[];
+	av1: LibraryOptimizerEncoderCapability[];
+	audio_copy: boolean;
+	eac3: boolean;
+	aac: boolean;
+	library_writable: boolean;
+	writable_libraries: number;
+	total_libraries: number;
+	hdr_preservation: boolean;
+	dolby_vision_policy: string;
+	notes?: string[];
+}
+
+export interface LibraryOptimizerAnalysis {
+	generated_at: string;
+	total_files: number;
+	eligible_files: number;
+	video_conversions: number;
+	track_cleanup_only: number;
+	already_efficient: number;
+	previously_handled: number;
+	dolby_vision_skipped: number;
+	unavailable_files: number;
+	source_bytes: number;
+	eligible_bytes: number;
+	codecs: Record<string, number>;
+}
+
+export interface LibraryOptimizerStatus {
+	state: string;
+	message?: string;
+	running: boolean;
+	paused: boolean;
+	waiting_for_playback: boolean;
+	started_at?: string;
+	finished_at?: string;
+	current_file?: string;
+	current: number;
+	total: number;
+	completed: number;
+	skipped: number;
+	failed: number;
+	original_bytes: number;
+	output_bytes: number;
+	saved_bytes: number;
+	last_error?: string;
+	analysis?: LibraryOptimizerAnalysis;
 }
 
 export interface TranscodingHardwareOption {
@@ -322,6 +406,7 @@ export interface ConfigUpdateRequest {
 	transcoding?: Partial<TranscodingConfig>;
 	upscaling?: Partial<UpscalingConfig>;
 	hdr_enhancement?: Partial<HDREnhancementConfig>;
+	library_optimizer?: Partial<LibraryOptimizerConfig>;
 	segment_cache?: Partial<SegmentCacheConfig>;
 	health?: HealthUpdateRequest;
 	import?: ImportUpdateRequest;
@@ -462,6 +547,7 @@ export type ConfigSection =
 	| "transcoding"
 	| "upscaling"
 	| "hdr_enhancement"
+	| "library_optimizer"
 	| "segment_cache"
 	| "health"
 	| "import"
@@ -1135,6 +1221,13 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		description:
 			"Optionally enhance SDR on-demand video into HDR10 for compatible Tater Tube TV displays.",
 		icon: "Sun",
+		canEdit: true,
+	},
+	library_optimizer: {
+		title: "Library Optimization",
+		description:
+			"Safely reduce local-library storage with HEVC or AV1, curated audio, and subtitle cleanup.",
+		icon: "HardDrive",
 		canEdit: true,
 	},
 	segment_cache: {

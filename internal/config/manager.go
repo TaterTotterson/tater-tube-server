@@ -36,33 +36,34 @@ const (
 
 // Config represents the complete application configuration
 type Config struct {
-	Server          ServerConfig         `yaml:"server" mapstructure:"server" json:"server"`
-	API             APIConfig            `yaml:"api" mapstructure:"api" json:"api"`
-	Auth            AuthConfig           `yaml:"auth" mapstructure:"auth" json:"auth"`
-	Database        DatabaseConfig       `yaml:"database" mapstructure:"database" json:"database"`
-	Metadata        MetadataConfig       `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
-	Streaming       StreamingConfig      `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
-	Transcoding     TranscodingConfig    `yaml:"transcoding" mapstructure:"transcoding" json:"transcoding"`
-	Upscaling       UpscalingConfig      `yaml:"upscaling" mapstructure:"upscaling" json:"upscaling"`
-	HDREnhancement  HDREnhancementConfig `yaml:"hdr_enhancement" mapstructure:"hdr_enhancement" json:"hdr_enhancement"`
-	Health          HealthConfig         `yaml:"health" mapstructure:"health" json:"health"`
-	RClone          RCloneConfig         `yaml:"rclone" mapstructure:"rclone" json:"-"`
-	Import          ImportConfig         `yaml:"import" mapstructure:"import" json:"import"`
-	Log             LogConfig            `yaml:"log" mapstructure:"log" json:"log"`
-	SABnzbd         SABnzbdConfig        `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
-	Arrs            ArrsConfig           `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
-	Stremio         StremioConfig        `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
-	Newznab         NewznabConfig        `yaml:"newznab" mapstructure:"newznab" json:"newznab"`
-	LocalMedia      LocalMediaConfig     `yaml:"local_media" mapstructure:"local_media" json:"local_media"`
-	TubeTV          TubeTVConfig         `yaml:"tube_tv" mapstructure:"tube_tv" json:"tube_tv"`
-	TaterBumpers    TaterBumpersConfig   `yaml:"tater_bumpers" mapstructure:"tater_bumpers" json:"tater_bumpers"`
-	Players         PlayersConfig        `yaml:"players" mapstructure:"players" json:"players"`
-	Fuse            FuseConfig           `yaml:"fuse" mapstructure:"fuse" json:"-"`
-	SegmentCache    SegmentCacheConfig   `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
-	Providers       []ProviderConfig     `yaml:"providers" mapstructure:"providers" json:"providers"`
-	MountPath       string               `yaml:"mount_path" mapstructure:"mount_path" json:"-"`
-	MountType       MountType            `yaml:"mount_type" mapstructure:"mount_type" json:"-"`
-	ProfilerEnabled bool                 `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
+	Server           ServerConfig           `yaml:"server" mapstructure:"server" json:"server"`
+	API              APIConfig              `yaml:"api" mapstructure:"api" json:"api"`
+	Auth             AuthConfig             `yaml:"auth" mapstructure:"auth" json:"auth"`
+	Database         DatabaseConfig         `yaml:"database" mapstructure:"database" json:"database"`
+	Metadata         MetadataConfig         `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
+	Streaming        StreamingConfig        `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
+	Transcoding      TranscodingConfig      `yaml:"transcoding" mapstructure:"transcoding" json:"transcoding"`
+	Upscaling        UpscalingConfig        `yaml:"upscaling" mapstructure:"upscaling" json:"upscaling"`
+	HDREnhancement   HDREnhancementConfig   `yaml:"hdr_enhancement" mapstructure:"hdr_enhancement" json:"hdr_enhancement"`
+	LibraryOptimizer LibraryOptimizerConfig `yaml:"library_optimizer" mapstructure:"library_optimizer" json:"library_optimizer"`
+	Health           HealthConfig           `yaml:"health" mapstructure:"health" json:"health"`
+	RClone           RCloneConfig           `yaml:"rclone" mapstructure:"rclone" json:"-"`
+	Import           ImportConfig           `yaml:"import" mapstructure:"import" json:"import"`
+	Log              LogConfig              `yaml:"log" mapstructure:"log" json:"log"`
+	SABnzbd          SABnzbdConfig          `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
+	Arrs             ArrsConfig             `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
+	Stremio          StremioConfig          `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
+	Newznab          NewznabConfig          `yaml:"newznab" mapstructure:"newznab" json:"newznab"`
+	LocalMedia       LocalMediaConfig       `yaml:"local_media" mapstructure:"local_media" json:"local_media"`
+	TubeTV           TubeTVConfig           `yaml:"tube_tv" mapstructure:"tube_tv" json:"tube_tv"`
+	TaterBumpers     TaterBumpersConfig     `yaml:"tater_bumpers" mapstructure:"tater_bumpers" json:"tater_bumpers"`
+	Players          PlayersConfig          `yaml:"players" mapstructure:"players" json:"players"`
+	Fuse             FuseConfig             `yaml:"fuse" mapstructure:"fuse" json:"-"`
+	SegmentCache     SegmentCacheConfig     `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
+	Providers        []ProviderConfig       `yaml:"providers" mapstructure:"providers" json:"providers"`
+	MountPath        string                 `yaml:"mount_path" mapstructure:"mount_path" json:"-"`
+	MountType        MountType              `yaml:"mount_type" mapstructure:"mount_type" json:"-"`
+	ProfilerEnabled  bool                   `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
 }
 
 // SegmentCacheConfig configures the segment-aligned disk cache shared by FUSE and Server.
@@ -330,6 +331,26 @@ type UpscalingConfig struct {
 type HDREnhancementConfig struct {
 	Enabled  *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	Strength string `yaml:"strength" mapstructure:"strength" json:"strength"`
+}
+
+// LibraryOptimizerConfig controls optional, non-destructive local-library
+// optimization. Large working files always live beside their source media;
+// only compact job history and fingerprints are stored under /config.
+type LibraryOptimizerConfig struct {
+	Enabled               *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	Automatic             *bool  `yaml:"automatic" mapstructure:"automatic" json:"automatic"`
+	TargetCodec           string `yaml:"target_codec" mapstructure:"target_codec" json:"target_codec"`
+	Quality               string `yaml:"quality" mapstructure:"quality" json:"quality"`
+	AudioPolicy           string `yaml:"audio_policy" mapstructure:"audio_policy" json:"audio_policy"`
+	AudioFormat           string `yaml:"audio_format" mapstructure:"audio_format" json:"audio_format"`
+	SubtitlePolicy        string `yaml:"subtitle_policy" mapstructure:"subtitle_policy" json:"subtitle_policy"`
+	ConvertHEVCToAV1      *bool  `yaml:"convert_hevc_to_av1" mapstructure:"convert_hevc_to_av1" json:"convert_hevc_to_av1"`
+	CleanEfficientFiles   *bool  `yaml:"clean_efficient_files" mapstructure:"clean_efficient_files" json:"clean_efficient_files"`
+	PauseDuringPlayback   *bool  `yaml:"pause_during_playback" mapstructure:"pause_during_playback" json:"pause_during_playback"`
+	PreserveHDR           *bool  `yaml:"preserve_hdr" mapstructure:"preserve_hdr" json:"preserve_hdr"`
+	SkipDolbyVision       *bool  `yaml:"skip_dolby_vision" mapstructure:"skip_dolby_vision" json:"skip_dolby_vision"`
+	MinimumSavingsPercent *int   `yaml:"minimum_savings_percent" mapstructure:"minimum_savings_percent" json:"minimum_savings_percent"`
+	QuarantineDays        *int   `yaml:"quarantine_days" mapstructure:"quarantine_days" json:"quarantine_days"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -895,6 +916,57 @@ func (c *Config) Validate() error {
 	if c.HDREnhancement.Strength == "" {
 		c.HDREnhancement.Strength = "balanced"
 	}
+	if c.LibraryOptimizer.Enabled == nil {
+		enabled := false
+		c.LibraryOptimizer.Enabled = &enabled
+	}
+	if c.LibraryOptimizer.Automatic == nil {
+		automatic := false
+		c.LibraryOptimizer.Automatic = &automatic
+	}
+	if c.LibraryOptimizer.TargetCodec == "" {
+		c.LibraryOptimizer.TargetCodec = "hevc"
+	}
+	if c.LibraryOptimizer.Quality == "" {
+		c.LibraryOptimizer.Quality = "balanced"
+	}
+	if c.LibraryOptimizer.AudioPolicy == "" {
+		c.LibraryOptimizer.AudioPolicy = "best_english"
+	}
+	if c.LibraryOptimizer.AudioFormat == "" {
+		c.LibraryOptimizer.AudioFormat = "copy"
+	}
+	if c.LibraryOptimizer.SubtitlePolicy == "" {
+		c.LibraryOptimizer.SubtitlePolicy = "forced_english"
+	}
+	if c.LibraryOptimizer.ConvertHEVCToAV1 == nil {
+		value := false
+		c.LibraryOptimizer.ConvertHEVCToAV1 = &value
+	}
+	if c.LibraryOptimizer.CleanEfficientFiles == nil {
+		value := false
+		c.LibraryOptimizer.CleanEfficientFiles = &value
+	}
+	if c.LibraryOptimizer.PauseDuringPlayback == nil {
+		value := true
+		c.LibraryOptimizer.PauseDuringPlayback = &value
+	}
+	if c.LibraryOptimizer.PreserveHDR == nil {
+		value := true
+		c.LibraryOptimizer.PreserveHDR = &value
+	}
+	if c.LibraryOptimizer.SkipDolbyVision == nil {
+		value := true
+		c.LibraryOptimizer.SkipDolbyVision = &value
+	}
+	if c.LibraryOptimizer.MinimumSavingsPercent == nil {
+		value := 15
+		c.LibraryOptimizer.MinimumSavingsPercent = &value
+	}
+	if c.LibraryOptimizer.QuarantineDays == nil {
+		value := 7
+		c.LibraryOptimizer.QuarantineDays = &value
+	}
 	if c.Newznab.Enabled == nil {
 		enabled := false
 		c.Newznab.Enabled = &enabled
@@ -1168,6 +1240,32 @@ func (c *Config) Validate() error {
 	}
 	if !validHDREnhancementStrengths[c.HDREnhancement.Strength] {
 		return fmt.Errorf("hdr enhancement strength must be one of: conservative, balanced, vivid")
+	}
+	validOptimizerCodecs := map[string]bool{"hevc": true, "av1": true}
+	if !validOptimizerCodecs[c.LibraryOptimizer.TargetCodec] {
+		return fmt.Errorf("library optimizer target_codec must be one of: hevc, av1")
+	}
+	validOptimizerQualities := map[string]bool{"high": true, "balanced": true, "small": true}
+	if !validOptimizerQualities[c.LibraryOptimizer.Quality] {
+		return fmt.Errorf("library optimizer quality must be one of: high, balanced, small")
+	}
+	validAudioPolicies := map[string]bool{"best_english": true, "all_english": true, "all": true}
+	if !validAudioPolicies[c.LibraryOptimizer.AudioPolicy] {
+		return fmt.Errorf("library optimizer audio_policy must be one of: best_english, all_english, all")
+	}
+	validAudioFormats := map[string]bool{"copy": true, "eac3": true, "aac": true}
+	if !validAudioFormats[c.LibraryOptimizer.AudioFormat] {
+		return fmt.Errorf("library optimizer audio_format must be one of: copy, eac3, aac")
+	}
+	validSubtitlePolicies := map[string]bool{"forced_english": true, "english": true, "remove": true, "all": true}
+	if !validSubtitlePolicies[c.LibraryOptimizer.SubtitlePolicy] {
+		return fmt.Errorf("library optimizer subtitle_policy must be one of: forced_english, english, remove, all")
+	}
+	if c.LibraryOptimizer.MinimumSavingsPercent == nil || *c.LibraryOptimizer.MinimumSavingsPercent < 0 || *c.LibraryOptimizer.MinimumSavingsPercent > 90 {
+		return fmt.Errorf("library optimizer minimum_savings_percent must be between 0 and 90")
+	}
+	if c.LibraryOptimizer.QuarantineDays == nil || *c.LibraryOptimizer.QuarantineDays < 0 || *c.LibraryOptimizer.QuarantineDays > 365 {
+		return fmt.Errorf("library optimizer quarantine_days must be between 0 and 365")
 	}
 
 	// Validate health configuration (always active)
@@ -1970,6 +2068,13 @@ func DefaultConfig(configDir ...string) *Config {
 	segmentCacheEnabled := true          // Persist decoded Usenet segments by default
 	transcodingEnabled := false          // Direct play by default; FFmpeg transcode is opt-in
 	hdrEnhancementEnabled := false       // Experimental SDR-to-HDR10 presentation is opt-in
+	libraryOptimizerEnabled := false     // Library files are never modified until explicitly enabled
+	libraryOptimizerAutomatic := false   // Background optimization is opt-in
+	libraryOptimizerConvertHEVC := false // Efficient HEVC sources are preserved by default
+	libraryOptimizerCleanEfficient := false
+	libraryOptimizerPausePlayback := true
+	libraryOptimizerPreserveHDR := true
+	libraryOptimizerSkipDolbyVision := true
 	newznabEnabled := false              // Player-facing Stream catalog disabled by default
 	localMediaEnabled := false           // Server-local media catalog disabled by default
 	localMediaRealtimeMonitoring := true // Watch supported filesystems for local media changes
@@ -2117,6 +2222,22 @@ func DefaultConfig(configDir ...string) *Config {
 		HDREnhancement: HDREnhancementConfig{
 			Enabled:  &hdrEnhancementEnabled,
 			Strength: "balanced",
+		},
+		LibraryOptimizer: LibraryOptimizerConfig{
+			Enabled:               &libraryOptimizerEnabled,
+			Automatic:             &libraryOptimizerAutomatic,
+			TargetCodec:           "hevc",
+			Quality:               "balanced",
+			AudioPolicy:           "best_english",
+			AudioFormat:           "copy",
+			SubtitlePolicy:        "forced_english",
+			ConvertHEVCToAV1:      &libraryOptimizerConvertHEVC,
+			CleanEfficientFiles:   &libraryOptimizerCleanEfficient,
+			PauseDuringPlayback:   &libraryOptimizerPausePlayback,
+			PreserveHDR:           &libraryOptimizerPreserveHDR,
+			SkipDolbyVision:       &libraryOptimizerSkipDolbyVision,
+			MinimumSavingsPercent: func() *int { value := 15; return &value }(),
+			QuarantineDays:        func() *int { value := 7; return &value }(),
 		},
 		SegmentCache: SegmentCacheConfig{
 			Enabled:     &segmentCacheEnabled,

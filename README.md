@@ -25,6 +25,7 @@ playback compatibility.
 - Shared Tube TV channels with schedules, commercials, bumpers, and logos.
 - Player pairing, playback activity, and watch-progress tracking.
 - Direct play plus software, NVIDIA, AMD, Intel, and Apple transcoding options.
+- Optional HEVC/AV1 library optimization with safe replacement and track cleanup.
 - Browser-based setup, stream monitoring, queues, logs, and updates.
 
 ## Quick Start
@@ -65,6 +66,7 @@ services:
       # Add any local libraries you want Tater Tube to serve:
       - /path/to/movies:/media/movies:ro
       - /path/to/tv:/media/tv:ro
+      # Use :rw instead of :ro if you want Library Optimization.
     restart: unless-stopped
 ```
 
@@ -240,6 +242,47 @@ and safely returns to ordinary SDR transcoding if the enhancement path is not
 available. The Activity and Dashboard views identify enhanced streams and the
 selected strength while they are playing.
 
+## Library Optimization
+
+Open `Configuration -> Library Optimization` to safely reduce the space used
+by local movies and series. The capability panel checks the server's actual
+FFmpeg, HEVC and AV1 encoders, audio support, and library write access before
+you enable the feature. Library Optimization is off by default.
+
+- **HEVC** is the recommended target for broad compatibility and responsive
+  encoding. **AV1** can save more space when the server and players support it.
+- Existing HEVC and AV1 video is skipped by default, so it is not needlessly
+  converted again. HEVC-to-AV1 conversion and track-only cleanup are optional.
+- **Best English main track** favors the highest-quality English audio while
+  excluding commentary and descriptive tracks. Audio may be copied at original
+  quality or converted to E-AC-3/AAC.
+- Subtitle choices include forced English only, all English, all subtitles, or
+  removal.
+- HDR10 can be preserved. Dolby Vision sources are protected and skipped by
+  default because ordinary transcoding cannot safely retain all dynamic Dolby
+  Vision metadata.
+- Jobs can wait while playback is active and remember completed files across
+  server and container updates.
+
+Use **Analyze** to preview the eligible file count and size before starting.
+Each output must pass video, audio, duration, size, and minimum-savings checks
+before it replaces the source. Temporary output and hidden quarantine copies
+are stored beside the original media, while `/config` stores only compact job
+history. The library volume therefore needs enough free space for one output
+plus any originals retained during the configured safety window.
+Space reported as saved is fully reclaimed when that safety window expires;
+set it to `0` only when you do not want a recovery copy after validation.
+
+Docker and Unraid library mappings must be writable for optimization:
+
+```yaml
+volumes:
+  - /mnt/user/media/movies:/media/movies:rw
+  - /mnt/user/media/tv:/media/tv:rw
+```
+
+No additional data-directory mapping is required.
+
 ## Unraid
 
 | Setting | Value |
@@ -290,8 +333,8 @@ Finish the library setup in the dashboard:
 The scanned library will appear on every paired Tater Tube Player.
 
 Read-only (`:ro`) mounts support scanning and playback. Use a writable mount if
-you want the server to save artwork or NFO metadata beside the media. Optional
-TMDB matching uses the API key you provide.
+you want the server to save artwork or NFO metadata beside the media, or to use
+Library Optimization. Optional TMDB matching uses the API key you provide.
 
 ## Tube TV
 
