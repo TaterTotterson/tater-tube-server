@@ -914,14 +914,18 @@ func (t *StreamTracker) GetHistory() []nzbfilesystem.ActiveStream {
 	// heartbeat only after determining which real readers are active, and hide
 	// it while a reader for that same paired player is already represented.
 	activePlayers := make(map[string]bool)
+	activePlayerIndexes := make(map[string]int)
 	latestByPlayer := make(map[string]nzbfilesystem.ActiveStream)
-	for _, stream := range streams {
+	for index, stream := range streams {
 		playerKey := strings.ToLower(strings.TrimSpace(stream.PlayerID))
 		if playerKey == "" {
 			continue
 		}
 		if stream.IsActive {
 			activePlayers[playerKey] = true
+			if _, found := activePlayerIndexes[playerKey]; !found {
+				activePlayerIndexes[playerKey] = index
+			}
 		}
 		if previous, ok := latestByPlayer[playerKey]; !ok ||
 			streamSortTime(stream).After(streamSortTime(previous)) {
@@ -936,11 +940,12 @@ func (t *StreamTracker) GetHistory() []nzbfilesystem.ActiveStream {
 			return true
 		}
 		age := now.Sub(presence.LastActivity)
-		if age < 0 || age >= playerPlaybackPresenceWindow {
+		if age < 0 || (age >= playerPlaybackPresenceWindow && !activePlayers[playerKey]) {
 			t.playbackPresences.Delete(key)
 			return true
 		}
-		if activePlayers[playerKey] {
+		if index, found := activePlayerIndexes[playerKey]; found {
+			copyPlayerPlaybackMetadata(&streams[index], presence)
 			return true
 		}
 		if transfer, ok := latestByPlayer[playerKey]; ok {
@@ -961,6 +966,27 @@ func (t *StreamTracker) GetHistory() []nzbfilesystem.ActiveStream {
 		streams = streams[:playbackHistoryLimit]
 	}
 	return streams
+}
+
+// copyPlayerPlaybackMetadata enriches the existing Activity stream with the
+// title and artwork identity already reported through /api/tater/playstate.
+// The byte-transfer record remains authoritative for activity and progress.
+func copyPlayerPlaybackMetadata(dst *nzbfilesystem.ActiveStream, src nzbfilesystem.ActiveStream) {
+	if dst == nil {
+		return
+	}
+	dst.MediaID = src.MediaID
+	dst.MediaTitle = src.MediaTitle
+	dst.MediaType = src.MediaType
+	dst.SeriesTitle = src.SeriesTitle
+	dst.CategoryID = src.CategoryID
+	dst.SourceIndex = src.SourceIndex
+	dst.MediaPath = src.MediaPath
+	dst.Poster = src.Poster
+	dst.Backdrop = src.Backdrop
+	if dst.MediaDuration <= 0 && src.MediaDuration > 0 {
+		dst.MediaDuration = src.MediaDuration
+	}
 }
 
 // copyStreamPresentation retains the useful server-side processing details on

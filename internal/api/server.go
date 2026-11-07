@@ -85,6 +85,12 @@ type Server struct {
 	taterPlayerHomeCacheMu         sync.RWMutex
 	taterPlayerHomeCache           map[string]taterPlayerHomeCacheEntry
 	taterCorePlaybackGrants        sync.Map
+	taterDisplaySatellites         sync.Map
+	taterDisplayDeliveries         sync.Map
+	taterDisplayWake               chan taterDisplayWork
+	taterDisplayStartOnce          sync.Once
+	taterDisplayStartErr           error
+	taterDisplayRuntime            *taterDisplayRuntime
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -132,6 +138,7 @@ func NewServer(
 		localLibraryMonitorWake:        make(chan struct{}, 1),
 		localLibraryRealtimeScanWake:   make(chan struct{}, 1),
 		localLibraryRealtimeCategories: map[string]struct{}{},
+		taterDisplayWake:               make(chan taterDisplayWork, 64),
 	}
 
 	// Wire stream-activity ↔ pool admission. Streams notify the pool when they
@@ -495,6 +502,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 
 // Shutdown shuts down the API server and its managed resources
 func (s *Server) Shutdown(ctx context.Context) {
+	s.stopTaterDisplayDiscovery()
 	if s.tvGuidePlannerCancel != nil {
 		s.tvGuidePlannerCancel()
 	}
@@ -768,6 +776,25 @@ func (s *Server) handleKillStream(c *fiber.Ctx) error {
 			"success": false,
 			"message": "Stream tracker not available",
 		})
+	}
+
+	// Tube TV is a shared HLS session rather than a request-scoped reader, so
+	// its tracker entry does not have a cancel function for KillStream to call.
+	// Stop the paired player's complete playback ownership instead. This also
+	// leaves the short explicit-stop tombstone that rejects late AppleCoreMedia
+	// playlist reads after the user has left playback.
+	if stream := s.streamTracker.GetStream(id); stream != nil && strings.TrimSpace(stream.PlayerID) != "" {
+		stopped := stopTaterPlaybackForPlayer(
+			stream.PlayerID,
+			stream.UserName,
+			s.streamTracker,
+		)
+		if stopped > 0 || s.streamTracker.GetStream(id) == nil {
+			return c.JSON(fiber.Map{
+				"success": true,
+				"message": "Player playback terminated",
+			})
+		}
 	}
 
 	if s.streamTracker.KillStream(id) {

@@ -761,6 +761,18 @@ class APIClient {
 		});
 	}
 
+	async linkTaterPlayerDisplay(id: string, displayId: string) {
+		return this.request<{
+			id: string;
+			linked_display_id?: string;
+		}>(`/tater/players/${encodeURIComponent(id)}`, {
+			method: "PATCH",
+			body: JSON.stringify({
+				linked_display_id: displayId,
+			}),
+		});
+	}
+
 	async revokeTaterPlayer(id: string) {
 		return this.request<{ message: string }>(`/tater/players/${encodeURIComponent(id)}`, {
 			method: "DELETE",

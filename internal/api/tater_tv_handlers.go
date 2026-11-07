@@ -26,6 +26,7 @@ import (
 type taterTVEpisodeGroup struct {
 	Title    string            `json:"title"`
 	Episodes []taterUsenetItem `json:"episodes"`
+	Genres   []string          `json:"-"`
 	Seen     map[string]bool   `json:"-"`
 }
 
@@ -133,7 +134,7 @@ const (
 	taterTVGuidePlannerInterval = 5 * time.Minute
 	taterTVGuideRetryInterval   = 5 * time.Minute
 	taterTVGuideFutureTolerance = time.Minute
-	taterTVGuideCacheVersion    = 10
+	taterTVGuideCacheVersion    = 11
 	taterTVGuideCacheFile       = "tube-tv-guide-cache.json"
 )
 
@@ -740,14 +741,14 @@ func taterTVAddRefToSource(cfg *config.Config, baseURL, playerToken string, sour
 		if err != nil {
 			return err
 		}
-		return taterTVAddRowsToSource(cfg, baseURL, playerToken, source, rawCategoryID, rows, cleanTaterText(ref.Title))
+		return taterTVAddRowsToSource(cfg, baseURL, playerToken, source, rawCategoryID, rows, taterUsenetItem{Title: cleanTaterText(ref.Title)})
 	}
 	categoryID := strings.TrimPrefix(rawCategoryID, "local:")
 	if categoryID == "" {
 		return nil
 	}
 	if item, ok := taterTVLocalFileFromRef(cfg, baseURL, playerToken, categoryID, ref); ok {
-		taterTVAddFile(source, item, cleanTaterText(ref.Title))
+		taterTVAddFile(source, item, taterUsenetItem{Title: cleanTaterText(ref.Title)})
 		return nil
 	}
 	sourceIndex := ref.SourceIndex
@@ -755,7 +756,7 @@ func taterTVAddRefToSource(cfg *config.Config, baseURL, playerToken string, sour
 	if err != nil {
 		return err
 	}
-	return taterTVAddRowsToSource(cfg, baseURL, playerToken, source, categoryID, rows, cleanTaterText(ref.Title))
+	return taterTVAddRowsToSource(cfg, baseURL, playerToken, source, categoryID, rows, taterUsenetItem{Title: cleanTaterText(ref.Title)})
 }
 
 func taterTVLocalFileFromRef(cfg *config.Config, baseURL, playerToken, categoryID string, ref config.TubeTVCustomSource) (taterUsenetItem, bool) {
@@ -817,27 +818,48 @@ func taterTVLocalFileFromRef(cfg *config.Config, baseURL, playerToken, categoryI
 	return item, true
 }
 
-func taterTVAddRowsToSource(cfg *config.Config, baseURL, playerToken string, source *taterTVSource, categoryID string, rows []taterUsenetItem, showTitle string) error {
+func taterTVAddRowsToSource(cfg *config.Config, baseURL, playerToken string, source *taterTVSource, categoryID string, rows []taterUsenetItem, show taterUsenetItem) error {
 	for _, row := range rows {
 		switch strings.ToLower(row.Type) {
 		case "localfile":
 			taterTVAttachMissingLocalDuration(cfg, &row)
-			taterTVAddFile(source, row, showTitle)
+			taterTVAddFile(source, row, show)
 		case "localfolder":
-			nextShowTitle := showTitle
+			nextShow := show
 			if strings.ToLower(row.MediaType) == "show" {
-				nextShowTitle = row.Title
+				nextShow = row
+				taterTVAttachShowMetadata(cfg, &nextShow)
 			}
 			nextRows, err := taterLocalMediaItems(cfg, baseURL, playerToken, strings.TrimPrefix(row.CategoryID, "local:"), row.SourceIndex, row.Path)
 			if err != nil {
 				continue
 			}
-			if err := taterTVAddRowsToSource(cfg, baseURL, playerToken, source, categoryID, nextRows, nextShowTitle); err != nil {
+			if err := taterTVAddRowsToSource(cfg, baseURL, playerToken, source, categoryID, nextRows, nextShow); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func taterTVAttachShowMetadata(cfg *config.Config, show *taterUsenetItem) {
+	if cfg == nil || show == nil || !strings.EqualFold(strings.TrimSpace(show.MediaType), "show") {
+		return
+	}
+	categoryID := strings.TrimPrefix(strings.TrimSpace(show.CategoryID), "local:")
+	cat, ok := taterLocalMediaCategory(cfg, categoryID)
+	if !ok {
+		return
+	}
+	paths := taterLocalMediaCategoryPaths(cat)
+	if show.SourceIndex < 0 || show.SourceIndex >= len(paths) {
+		return
+	}
+	path, err := safeLocalPath(paths[show.SourceIndex], show.Path)
+	if err != nil {
+		return
+	}
+	taterApplyLocalMetadata(path, show)
 }
 
 func taterTVAttachMissingLocalDuration(cfg *config.Config, item *taterUsenetItem) {
@@ -860,7 +882,7 @@ func taterTVAttachMissingLocalDuration(cfg *config.Config, item *taterUsenetItem
 	attachTaterLocalDuration(cfg, path, item)
 }
 
-func taterTVAddFile(source *taterTVSource, item taterUsenetItem, showTitle string) {
+func taterTVAddFile(source *taterTVSource, item taterUsenetItem, show taterUsenetItem) {
 	if source.Seen == nil {
 		source.Seen = map[string]bool{}
 	}
@@ -872,17 +894,24 @@ func taterTVAddFile(source *taterTVSource, item taterUsenetItem, showTitle strin
 		source.Seen[key] = true
 	}
 	if strings.ToLower(item.MediaType) == "episode" {
-		title := cleanTaterText(showTitle)
+		title := cleanTaterText(show.Title)
 		if title == "" {
 			title = cleanShowTitle(taterSeriesKeyFromPath(item.Path))
+		}
+		genres := taterTVItemGenres(show)
+		if len(genres) == 0 {
+			genres = taterTVItemGenres(item)
 		}
 		for i := range source.Groups {
 			if source.Groups[i].Title == title {
 				source.Groups[i].Episodes = append(source.Groups[i].Episodes, item)
+				source.Groups[i].Genres = taterTVMergeGenres(source.Groups[i].Genres, genres)
 				return
 			}
 		}
-		source.Groups = append(source.Groups, taterTVEpisodeGroup{Title: title, Episodes: []taterUsenetItem{item}})
+		source.Groups = append(source.Groups, taterTVEpisodeGroup{
+			Title: title, Episodes: []taterUsenetItem{item}, Genres: genres,
+		})
 		return
 	}
 	source.Programs = append(source.Programs, item)
@@ -918,12 +947,12 @@ func taterTVThemedSources(source taterTVSource) []taterTVSource {
 	addMovieTheme("HORROR MOVIES", []string{"horror"}, 2)
 	addMovieTheme("SCI-FI MOVIES", []string{"science fiction", "sci-fi", "sci fi", "scifi"}, 2)
 	addMovieTheme("FAMILY MOVIES", []string{"family", "children", "kids", "disney", "pixar"}, 2)
-	addMovieTheme("CARTOON MOVIES", []string{"animation", "animated", "anime", "cartoon"}, 2)
+	addMovieTheme("CARTOON MOVIES", []string{"animation", "animated", "anime", "cartoon", "cartoons"}, 2)
 	addMovieTheme("DOCUMENTARY MOVIES", []string{"documentary", "docu"}, 2)
 	addMovieTheme("DRAMA MOVIES", []string{"drama"}, 2)
 	addMovieTheme("CRIME MOVIES", []string{"crime", "mystery"}, 2)
 
-	addTVTheme("CARTOON CHANNEL", []string{"animation", "animated", "anime", "cartoon", "children", "kids", "looney"}, 1)
+	addTVTheme("CARTOON CHANNEL", []string{"animation", "animated", "anime", "cartoon", "cartoons", "looney", "tom and jerry", "disney animated", "pixar"}, 1)
 	addTVTheme("COMEDY CHANNEL", []string{"comedy"}, 1)
 	addTVTheme("DRAMA CHANNEL", []string{"drama"}, 1)
 	addTVTheme("SCI-FI CHANNEL", []string{"science fiction", "sci-fi", "sci fi", "scifi"}, 1)
@@ -2251,31 +2280,76 @@ func taterTVText(item taterUsenetItem) string {
 		item.Title,
 		item.Path,
 		item.Category,
-		item.Description,
-		item.Date,
-		item.MediaType,
 	}, " "))
 }
 
 func taterTVItemHasAnyTerm(item taterUsenetItem, terms []string) bool {
-	text := taterTVText(item)
-	for _, term := range terms {
-		if strings.Contains(text, taterLocalDiscoverNormalize(term)) {
+	if genres := taterTVItemGenres(item); len(genres) > 0 {
+		return taterTVGenresHaveAnyTerm(genres, terms)
+	}
+	return taterTVTextHasAnyTerm(taterTVText(item), terms)
+}
+
+func taterTVGroupHasAnyTerm(group taterTVEpisodeGroup, terms []string) bool {
+	if len(group.Genres) > 0 {
+		return taterTVGenresHaveAnyTerm(group.Genres, terms)
+	}
+	return taterTVTextHasAnyTerm(taterLocalDiscoverNormalize(group.Title), terms)
+}
+
+func taterTVItemGenres(item taterUsenetItem) []string {
+	values := append([]string{}, item.Genres...)
+	if genre := strings.TrimSpace(item.Genre); genre != "" {
+		values = append(values, genre)
+	}
+	if len(values) == 0 {
+		if category := strings.TrimSpace(item.Category); category != "" {
+			values = append(values, category)
+		}
+	}
+	return taterTVMergeGenres(values)
+}
+
+func taterTVMergeGenres(groups ...[]string) []string {
+	genres := []string{}
+	seen := map[string]bool{}
+	for _, group := range groups {
+		for _, raw := range group {
+			parts := strings.FieldsFunc(raw, func(r rune) bool {
+				return r == ',' || r == '/' || r == '|' || r == ';'
+			})
+			for _, part := range parts {
+				genre := cleanTaterText(part)
+				key := taterLocalDiscoverNormalize(genre)
+				if key == "" || seen[key] {
+					continue
+				}
+				seen[key] = true
+				genres = append(genres, genre)
+			}
+		}
+	}
+	return genres
+}
+
+func taterTVGenresHaveAnyTerm(genres, terms []string) bool {
+	for _, genre := range genres {
+		if taterTVTextHasAnyTerm(taterLocalDiscoverNormalize(genre), terms) {
 			return true
 		}
 	}
 	return false
 }
 
-func taterTVGroupHasAnyTerm(group taterTVEpisodeGroup, terms []string) bool {
-	title := taterLocalDiscoverNormalize(group.Title)
-	for _, term := range terms {
-		if strings.Contains(title, taterLocalDiscoverNormalize(term)) {
-			return true
-		}
+func taterTVTextHasAnyTerm(text string, terms []string) bool {
+	text = taterLocalDiscoverNormalize(text)
+	if text == "" {
+		return false
 	}
-	for _, item := range group.Episodes {
-		if taterTVItemHasAnyTerm(item, terms) {
+	paddedText := " " + text + " "
+	for _, term := range terms {
+		normalized := taterLocalDiscoverNormalize(term)
+		if normalized != "" && strings.Contains(paddedText, " "+normalized+" ") {
 			return true
 		}
 	}

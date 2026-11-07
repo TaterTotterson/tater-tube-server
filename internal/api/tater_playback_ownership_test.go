@@ -2,10 +2,13 @@ package api
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
+
+	"github.com/gofiber/fiber/v2"
 )
 
 func TestTaterLocalHLSManagerStopsOnlyRequestedPlayer(t *testing.T) {
@@ -99,6 +102,64 @@ func TestTaterTVHLSManagerRetainsSharedSessionUntilLastPlayerLeaves(t *testing.T
 	case <-newCtx.Done():
 	default:
 		t.Fatal("new channel was not stopped after its player left")
+	}
+}
+
+func TestKillActiveStreamStopsPairedTubeTVSession(t *testing.T) {
+	oldTVManager := globalTaterTVHLS
+	oldLocalManager := globalTaterLocalHLS
+	t.Cleanup(func() {
+		globalTaterTVHLS = oldTVManager
+		globalTaterLocalHLS = oldLocalManager
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	globalTaterTVHLS = &taterTVHLSManager{
+		sessions: map[string]*taterTVHLSSession{
+			"channel-07": {key: "channel-07", cancel: cancel, accessed: time.Now()},
+		},
+		playerSessions: map[string]string{"living-room": "channel-07"},
+		stoppedPlayers: map[string]time.Time{},
+	}
+	globalTaterLocalHLS = &taterLocalHLSManager{
+		sessions:   map[string]*taterLocalHLSSession{},
+		superseded: map[string]time.Time{},
+	}
+
+	tracker := NewStreamTracker(nil)
+	t.Cleanup(tracker.Stop)
+	stream := tracker.AddStream(
+		"Channel 07 CARTOON CHANNEL",
+		"Tube TV",
+		"Living Room",
+		"10.4.20.114:52488",
+		"AppleCoreMedia",
+		0,
+	)
+	stream.PlayerID = "living-room"
+
+	server := &Server{streamTracker: tracker}
+	app := fiber.New()
+	app.Delete("/streams/:id", server.handleKillStream)
+	response, err := app.Test(httptest.NewRequest(http.MethodDelete, "/streams/"+stream.ID, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusOK)
+	}
+	if tracker.GetStream(stream.ID) != nil {
+		t.Fatal("paired Tube TV stream remains active after dashboard termination")
+	}
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("Tube TV transcode was not canceled")
+	}
+	if !globalTaterTVHLS.playerRecentlyStopped("living-room") {
+		t.Fatal("late AppleCoreMedia requests are not guarded after termination")
 	}
 }
 

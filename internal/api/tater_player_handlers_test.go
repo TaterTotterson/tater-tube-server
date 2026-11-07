@@ -89,6 +89,34 @@ func TestTaterUpdatePlayerRenamesPairedPlayer(t *testing.T) {
 	require.Equal(t, "Bedroom CRT", manager.cfg.Players.Paired[0].Name)
 }
 
+func TestTaterUpdatePlayerLinksCompatibleDisplayAndMovesExistingLink(t *testing.T) {
+	app := fiber.New()
+	manager := &mockConfigManager{cfg: &config.Config{
+		Players: config.PlayersConfig{Paired: []config.PlayerConfig{
+			{ID: "player-1", Name: "Living Room", LinkedDisplayID: "rook-1"},
+			{ID: "player-2", Name: "Bedroom"},
+		}},
+	}}
+	server := &Server{configManager: manager, taterDisplayWake: make(chan taterDisplayWork, 8)}
+	server.taterDisplaySatellites.Store("rook-1", taterDisplaySatellite{
+		ID: "rook-1", Name: "Kitchen Rook",
+		Online: true, Compatible: true, LastSeenAt: time.Now().UTC(),
+	})
+	app.Patch("/players/:id", server.handleTaterUpdatePlayer)
+
+	body, err := json.Marshal(map[string]string{
+		"linked_display_id": "rook-1",
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPatch, "/players/player-2", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Empty(t, manager.cfg.Players.Paired[0].LinkedDisplayID)
+	require.Equal(t, "rook-1", manager.cfg.Players.Paired[1].LinkedDisplayID)
+}
+
 func TestTaterActiveStreamsUsesPlayerIDWhenNamesMatch(t *testing.T) {
 	app := fiber.New()
 	manager := &mockConfigManager{cfg: &config.Config{

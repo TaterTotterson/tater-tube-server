@@ -942,6 +942,21 @@ export interface TaterPlayer {
 	created_at: string;
 	last_seen_at?: string;
 	revoked_at?: string;
+	linked_display_id?: string;
+}
+
+export interface TaterCompanionDisplay {
+	id: string;
+	name: string;
+	room?: string;
+	board?: string;
+	firmware_version?: string;
+	protocol_version: number;
+	endpoint?: string;
+	online: boolean;
+	compatible: boolean;
+	linked_player_id?: string;
+	last_seen_at: string;
 }
 
 export interface TaterPairingCode {
@@ -955,6 +970,7 @@ export interface TaterPairingCode {
 export interface TaterPlayersConfig {
 	players: TaterPlayer[];
 	pairing_codes: TaterPairingCode[];
+	displays?: TaterCompanionDisplay[];
 }
 
 export interface TaterPairingCodeCreateResponse extends TaterPairingCode {

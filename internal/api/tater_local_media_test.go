@@ -349,6 +349,11 @@ func TestTaterPlayStateHeartbeatTracksPlayerUntilStopped(t *testing.T) {
 	assert.Len(t, streams, 1)
 	assert.Equal(t, "living-room-player", streams[0].PlayerID)
 	assert.Equal(t, "Living Room", streams[0].UserName)
+	assert.NotEmpty(t, streams[0].MediaID)
+	assert.Equal(t, "Moonrise Manor", streams[0].MediaTitle)
+	assert.Equal(t, "movie", streams[0].MediaType)
+	assert.Equal(t, "local:movies", streams[0].CategoryID)
+	assert.Equal(t, "Moonrise Manor/Moonrise Manor.mkv", streams[0].MediaPath)
 	assert.Equal(t, 30.0, streams[0].PlaybackPosition)
 	assert.Equal(t, 600.0, streams[0].MediaDuration)
 

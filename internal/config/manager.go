@@ -239,12 +239,13 @@ type PlayersConfig struct {
 // PlayerConfig is a paired Tater Tube player. TokenHash stores the SHA256 hash
 // of the player's bearer token; the raw token is only returned once during pair.
 type PlayerConfig struct {
-	ID         string `yaml:"id" mapstructure:"id" json:"id"`
-	Name       string `yaml:"name" mapstructure:"name" json:"name"`
-	TokenHash  string `yaml:"token_hash" mapstructure:"token_hash" json:"-"`
-	CreatedAt  string `yaml:"created_at" mapstructure:"created_at" json:"created_at"`
-	LastSeenAt string `yaml:"last_seen_at,omitempty" mapstructure:"last_seen_at" json:"last_seen_at,omitempty"`
-	RevokedAt  string `yaml:"revoked_at,omitempty" mapstructure:"revoked_at" json:"revoked_at,omitempty"`
+	ID              string `yaml:"id" mapstructure:"id" json:"id"`
+	Name            string `yaml:"name" mapstructure:"name" json:"name"`
+	TokenHash       string `yaml:"token_hash" mapstructure:"token_hash" json:"-"`
+	CreatedAt       string `yaml:"created_at" mapstructure:"created_at" json:"created_at"`
+	LastSeenAt      string `yaml:"last_seen_at,omitempty" mapstructure:"last_seen_at" json:"last_seen_at,omitempty"`
+	RevokedAt       string `yaml:"revoked_at,omitempty" mapstructure:"revoked_at" json:"revoked_at,omitempty"`
+	LinkedDisplayID string `yaml:"linked_display_id,omitempty" mapstructure:"linked_display_id" json:"linked_display_id,omitempty"`
 }
 
 // PlayerPairingCode is a short-lived code created in the web UI and entered on

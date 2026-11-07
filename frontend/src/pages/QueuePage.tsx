@@ -10,12 +10,9 @@ import {
 	Search,
 	Server,
 	Tv,
-	Zap,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { PlaybackBufferBadge } from "../components/playback/PlaybackBufferBadge";
-import { PlaybackHDREnhancementBadge } from "../components/playback/PlaybackHDREnhancementBadge";
-import { PlaybackUpscalingBadge } from "../components/playback/PlaybackUpscalingBadge";
+import { PlaybackProcessingBadges } from "../components/playback/PlaybackProcessingBadges";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
 import { Pagination } from "../components/ui/Pagination";
@@ -173,31 +170,6 @@ function playbackProgress(stream: ActiveStream) {
 	const position = Number(stream.playback_position_seconds || 0);
 	if (!Number.isFinite(duration) || duration <= 0 || !Number.isFinite(position)) return undefined;
 	return Math.max(0, Math.min(100, (position / duration) * 100));
-}
-
-function hardwareLabel(stream: ActiveStream) {
-	if (stream.video_mode === "direct" && stream.audio_mode === "transcode") {
-		return "Audio Transcode";
-	}
-	if (stream.video_mode === "direct") {
-		return stream.transcoded ? "Remux" : "Direct Play";
-	}
-	if (!stream.transcoded) return "Direct Play";
-	if (!stream.hardware_active) return "Software Transcode";
-	switch (String(stream.hardware_acceleration || "").toLowerCase()) {
-		case "qsv":
-			return "HW Quick Sync";
-		case "vaapi":
-			return "HW VAAPI";
-		case "nvenc":
-			return "HW NVENC";
-		case "videotoolbox":
-			return "HW VideoToolbox";
-		case "v4l2m2m":
-			return "HW V4L2";
-		default:
-			return "Hardware Transcode";
-	}
 }
 
 function resolutionName(width?: number, height?: number) {
@@ -499,8 +471,6 @@ export function QueuePage() {
 									const moment = activityDate(stream);
 									const live = isLive(stream);
 									const progress = playbackProgress(stream);
-									const hardware = hardwareLabel(stream);
-									const resolution = streamResolution(stream);
 									const detail = hardwareDetail(stream);
 									return (
 										<article
@@ -578,29 +548,9 @@ export function QueuePage() {
 												</div>
 
 												<div className="min-w-0 md:text-right">
-													<div className="flex items-center gap-2 md:justify-end">
-														{stream.hardware_active ? (
-															<Zap className="h-4 w-4 shrink-0 text-success" />
-														) : (
-															<Cpu className="h-4 w-4 shrink-0 text-base-content/50" />
-														)}
-														<span className="truncate font-semibold text-sm">{hardware}</span>
+													<div className="flex flex-wrap gap-1.5 md:justify-end">
+														<PlaybackProcessingBadges stream={stream} compact includeBuffer />
 													</div>
-													{(resolution ||
-														stream.upscaling_active ||
-														stream.hdr_enhancement_active ||
-														stream.buffer_target_seconds) && (
-														<div className="mt-2 flex flex-wrap gap-1.5 md:justify-end">
-															{resolution && (
-																<span className="badge badge-primary badge-outline font-semibold">
-																	{resolution}
-																</span>
-															)}
-															<PlaybackUpscalingBadge stream={stream} compact />
-															<PlaybackHDREnhancementBadge stream={stream} compact />
-															<PlaybackBufferBadge stream={stream} compact />
-														</div>
-													)}
 													{detail && (
 														<div className="mt-1 truncate font-mono text-[11px] text-base-content/45">
 															{detail}
