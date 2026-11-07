@@ -229,6 +229,37 @@ export interface LibraryOptimizerStatus {
 	analysis?: LibraryOptimizerAnalysis;
 }
 
+export interface LibraryOptimizerHistoryRecord {
+	path: string;
+	status: "completed" | "skipped" | "failed" | string;
+	action: string;
+	source_codec?: string;
+	target_codec?: string;
+	original_bytes?: number;
+	output_bytes?: number;
+	saved_bytes?: number;
+	message?: string;
+	updated_at: string;
+}
+
+export interface LibraryOptimizerHistorySummary {
+	total: number;
+	completed: number;
+	skipped: number;
+	failed: number;
+	original_bytes: number;
+	output_bytes: number;
+	saved_bytes: number;
+}
+
+export interface LibraryOptimizerHistory {
+	summary: LibraryOptimizerHistorySummary;
+	filtered_total: number;
+	offset: number;
+	limit: number;
+	records: LibraryOptimizerHistoryRecord[];
+}
+
 export interface TranscodingHardwareOption {
 	id: string;
 	label: string;
