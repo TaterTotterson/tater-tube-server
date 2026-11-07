@@ -570,3 +570,16 @@ func TestMigrateArrsCleanup_AutoFailureFlag_FalseClearsOnly(t *testing.T) {
 	assert.Equal(t, rules, cfg.Arrs.QueueCleanupRules)
 	assert.Nil(t, cfg.Arrs.CleanupAutomaticImportFailure)
 }
+
+func TestLibraryOptimizerDefaultsAndValidation(t *testing.T) {
+	cfg := DefaultConfig()
+	assert.NotNil(t, cfg.LibraryOptimizer.Enabled)
+	assert.False(t, *cfg.LibraryOptimizer.Enabled)
+	assert.Equal(t, "hevc", cfg.LibraryOptimizer.TargetCodec)
+	assert.Equal(t, "best_english", cfg.LibraryOptimizer.AudioPolicy)
+	assert.Equal(t, "forced_english", cfg.LibraryOptimizer.SubtitlePolicy)
+	assert.NoError(t, cfg.Validate())
+
+	cfg.LibraryOptimizer.TargetCodec = "unsupported"
+	assert.ErrorContains(t, cfg.Validate(), "library optimizer target_codec")
+}

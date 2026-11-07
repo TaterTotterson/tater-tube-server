@@ -31,6 +31,9 @@ import type {
 	ConfigSection,
 	ConfigUpdateRequest,
 	HDREnhancementCompatibilityDetection,
+	LibraryOptimizerAnalysis,
+	LibraryOptimizerCapabilities,
+	LibraryOptimizerStatus,
 	LocalMediaLibraryResponse,
 	LocalMediaMusicAlbum,
 	LocalMediaScanStatus,
@@ -1042,6 +1045,39 @@ class APIClient {
 
 	async detectHDREnhancementCompatibility() {
 		return this.request<HDREnhancementCompatibilityDetection>("/system/hdr-enhancement-detect");
+	}
+
+	async detectLibraryOptimizerCapabilities() {
+		return this.request<LibraryOptimizerCapabilities>("/system/library-optimizer-detect");
+	}
+
+	async getLibraryOptimizerStatus() {
+		return this.request<LibraryOptimizerStatus>("/library-optimizer/status");
+	}
+
+	async analyzeLibraryOptimizer() {
+		return this.request<LibraryOptimizerAnalysis>("/library-optimizer/analyze", {
+			method: "POST",
+		});
+	}
+
+	async startLibraryOptimizer() {
+		return this.request<LibraryOptimizerStatus>("/library-optimizer/start", {
+			method: "POST",
+		});
+	}
+
+	async setLibraryOptimizerPaused(paused: boolean) {
+		return this.request<LibraryOptimizerStatus>("/library-optimizer/pause", {
+			method: "PATCH",
+			body: JSON.stringify({ paused }),
+		});
+	}
+
+	async cancelLibraryOptimizer() {
+		return this.request<LibraryOptimizerStatus>("/library-optimizer", {
+			method: "DELETE",
+		});
 	}
 
 	async getSystemStats() {
