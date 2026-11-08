@@ -3,7 +3,9 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"github.com/stretchr/testify/assert"
@@ -118,6 +120,186 @@ func TestMediaMarkersEnabledByDefault(t *testing.T) {
 	cfg := config.DefaultConfig(t.TempDir())
 	require.NotNil(t, cfg.MediaMarkers.Enabled)
 	assert.True(t, *cfg.MediaMarkers.Enabled)
+	require.NotNil(t, cfg.MediaMarkers.PauseDuringPlayback)
+	assert.True(t, *cfg.MediaMarkers.PauseDuringPlayback)
+	assert.True(t, taterMediaMarkersPauseDuringPlayback(cfg))
+
+	disabled := false
+	cfg.MediaMarkers.PauseDuringPlayback = &disabled
+	assert.False(t, taterMediaMarkersPauseDuringPlayback(cfg))
+}
+
+func TestTaterMediaMarkerHardwareDecodeArgsUsesConfiguredDecoder(t *testing.T) {
+	cfg := config.DefaultConfig(t.TempDir())
+	cfg.Transcoding.HardwareAcceleration = "nvenc"
+	cfg.Transcoding.HardwareDevice = "0"
+	assert.Equal(t, []string{"-hwaccel", "cuda", "-hwaccel_device", "0"}, taterMediaMarkerHardwareDecodeArgs(cfg))
+
+	cfg.Transcoding.HardwareAcceleration = "videotoolbox"
+	cfg.Transcoding.HardwareDevice = ""
+	assert.Equal(t, []string{"-hwaccel", "videotoolbox"}, taterMediaMarkerHardwareDecodeArgs(cfg))
+
+	cfg.Transcoding.HardwareAcceleration = "none"
+	assert.Empty(t, taterMediaMarkerHardwareDecodeArgs(cfg))
+}
+
+func TestTaterMediaMarkerScanFallsBackToSoftwareDecode(t *testing.T) {
+	root := t.TempDir()
+	mediaPath := filepath.Join(root, "Movie.mkv")
+	require.NoError(t, os.WriteFile(mediaPath, []byte("video"), 0644))
+	info, err := os.Stat(mediaPath)
+	require.NoError(t, err)
+
+	ffmpegPath := filepath.Join(root, "ffmpeg")
+	ffprobePath := filepath.Join(root, "ffprobe")
+	ffmpegScript := `#!/bin/sh
+count_file="${0}.count"
+count=0
+if [ -f "$count_file" ]; then count=$(cat "$count_file"); fi
+count=$((count + 1))
+printf '%s' "$count" > "$count_file"
+for arg in "$@"; do
+  if [ "$arg" = "-hwaccel" ]; then
+    echo "hardware decoder unavailable" >&2
+    exit 1
+  fi
+done
+echo "[blackdetect] black_start:60 black_end:60.5 black_duration:0.5" >&2
+exit 0
+`
+	ffprobeScript := `#!/bin/sh
+printf '%s\n' '{"streams":[{"codec_type":"video"}],"chapters":[],"format":{"duration":"120"}}'
+`
+	require.NoError(t, os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0755))
+	require.NoError(t, os.WriteFile(ffprobePath, []byte(ffprobeScript), 0755))
+
+	cfg := config.DefaultConfig(root)
+	cfg.Transcoding.FFmpegPath = ffmpegPath
+	cfg.Transcoding.HardwareAcceleration = "auto"
+	_, err = scanTaterMediaMarkerFile(t.Context(), cfg, mediaPath, info, 120)
+	require.NoError(t, err)
+	invocations, err := os.ReadFile(ffmpegPath + ".count")
+	require.NoError(t, err)
+	assert.Equal(t, "2", string(invocations), "hardware failure should retry the file once in software")
+}
+
+func TestTaterMediaMarkerScanUsesTwoWorkersWhenPlaybackIsIdle(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"One.mkv", "Two.mkv"} {
+		require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte("video"), 0644))
+	}
+
+	ffmpegPath := filepath.Join(root, "ffmpeg")
+	ffprobePath := filepath.Join(root, "ffprobe")
+	ffmpegScript := `#!/bin/sh
+workers="${0}.workers"
+mkdir -p "$workers"
+touch "$workers/$$"
+count=$(find "$workers" -type f | wc -l | tr -d ' ')
+if [ "$count" -gt 1 ]; then touch "${0}.parallel"; fi
+sleep 0.2
+rm -f "$workers/$$"
+exit 0
+`
+	ffprobeScript := `#!/bin/sh
+printf '%s\n' '{"streams":[{"codec_type":"video"}],"chapters":[],"format":{"duration":"120"}}'
+`
+	require.NoError(t, os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0755))
+	require.NoError(t, os.WriteFile(ffprobePath, []byte(ffprobeScript), 0755))
+
+	cfg := config.DefaultConfig(root)
+	cfg.Transcoding.FFmpegPath = ffmpegPath
+	cfg.Transcoding.HardwareAcceleration = "auto"
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID: "movies", Name: "Movies", LibraryType: "movies", Paths: []string{root}, Enabled: boolPtr(true),
+	}}
+	index := taterLocalLibraryIndex{Files: []taterLocalLibraryFileIndex{
+		{CategoryID: "movies", LibraryType: "movies", SourceIndex: 0, Path: "One.mkv", DurationSeconds: 120},
+		{CategoryID: "movies", LibraryType: "movies", SourceIndex: 0, Path: "Two.mkv", DurationSeconds: 120},
+	}}
+
+	summary, err := scanTaterMediaMarkersWithOptions(
+		t.Context(),
+		cfg,
+		&index,
+		taterMediaMarkerScanOptions{Workers: 2},
+		nil,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, 2, summary.Sidecars)
+	_, err = os.Stat(ffmpegPath + ".parallel")
+	assert.NoError(t, err, "idle marker scan should analyze two files concurrently")
+}
+
+func TestTaterMediaMarkerScanWaitsForPlaybackBetweenFiles(t *testing.T) {
+	root := t.TempDir()
+	mediaPath := filepath.Join(root, "Movie.mkv")
+	require.NoError(t, os.WriteFile(mediaPath, []byte("video"), 0644))
+
+	ffmpegPath := filepath.Join(root, "ffmpeg")
+	ffprobePath := filepath.Join(root, "ffprobe")
+	ffmpegScript := `#!/bin/sh
+touch "${0}.started"
+exit 0
+`
+	ffprobeScript := `#!/bin/sh
+printf '%s\n' '{"streams":[{"codec_type":"video"}],"chapters":[],"format":{"duration":"120"}}'
+`
+	require.NoError(t, os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0755))
+	require.NoError(t, os.WriteFile(ffprobePath, []byte(ffprobeScript), 0755))
+
+	cfg := config.DefaultConfig(root)
+	cfg.Transcoding.FFmpegPath = ffmpegPath
+	cfg.Transcoding.HardwareAcceleration = "auto"
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID: "movies", Name: "Movies", LibraryType: "movies", Paths: []string{root}, Enabled: boolPtr(true),
+	}}
+	index := taterLocalLibraryIndex{Files: []taterLocalLibraryFileIndex{{
+		CategoryID: "movies", LibraryType: "movies", SourceIndex: 0, Path: "Movie.mkv", DurationSeconds: 120,
+	}}}
+
+	var playbackActive atomic.Bool
+	playbackActive.Store(true)
+	waiting := make(chan bool, 2)
+	type scanResult struct {
+		summary taterMediaMarkerScanSummary
+		err     error
+	}
+	finished := make(chan scanResult, 1)
+	go func() {
+		summary, err := scanTaterMediaMarkersWithOptions(
+			t.Context(),
+			cfg,
+			&index,
+			taterMediaMarkerScanOptions{
+				Workers:        2,
+				PlaybackActive: playbackActive.Load,
+				PlaybackWaiting: func(value bool) {
+					waiting <- value
+				},
+			},
+			nil,
+		)
+		finished <- scanResult{summary: summary, err: err}
+	}()
+
+	select {
+	case value := <-waiting:
+		assert.True(t, value)
+	case <-time.After(time.Second):
+		t.Fatal("marker scan did not enter playback wait state")
+	}
+	_, err := os.Stat(ffmpegPath + ".started")
+	assert.True(t, os.IsNotExist(err), "marker FFmpeg must not start during playback")
+
+	playbackActive.Store(false)
+	select {
+	case result := <-finished:
+		require.NoError(t, result.err)
+		assert.Equal(t, 1, result.summary.Sidecars)
+	case <-time.After(4 * time.Second):
+		t.Fatal("marker scan did not resume after playback stopped")
+	}
 }
 
 func TestTaterTVMidrollOffsetsUsesDetectedBreaks(t *testing.T) {

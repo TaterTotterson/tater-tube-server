@@ -355,7 +355,8 @@ type LibraryOptimizerConfig struct {
 // detection for local video. Marker sidecars are always portable beside the
 // media; disabling this only stops automatic background discovery.
 type MediaMarkersConfig struct {
-	Enabled *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	Enabled             *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	PauseDuringPlayback *bool `yaml:"pause_during_playback" mapstructure:"pause_during_playback" json:"pause_during_playback"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -963,6 +964,10 @@ func (c *Config) Validate() error {
 	if c.MediaMarkers.Enabled == nil {
 		value := true
 		c.MediaMarkers.Enabled = &value
+	}
+	if c.MediaMarkers.PauseDuringPlayback == nil {
+		value := true
+		c.MediaMarkers.PauseDuringPlayback = &value
 	}
 	if c.Newznab.Enabled == nil {
 		enabled := false
@@ -2070,6 +2075,7 @@ func DefaultConfig(configDir ...string) *Config {
 	libraryOptimizerPausePlayback := true
 	libraryOptimizerSkipDolbyVision := true
 	mediaMarkersEnabled := true
+	mediaMarkersPausePlayback := true
 	newznabEnabled := false              // Player-facing Stream catalog disabled by default
 	localMediaEnabled := false           // Server-local media catalog disabled by default
 	localMediaRealtimeMonitoring := true // Watch supported filesystems for local media changes
@@ -2232,7 +2238,8 @@ func DefaultConfig(configDir ...string) *Config {
 			QuarantineDays:        func() *int { value := 7; return &value }(),
 		},
 		MediaMarkers: MediaMarkersConfig{
-			Enabled: &mediaMarkersEnabled,
+			Enabled:             &mediaMarkersEnabled,
+			PauseDuringPlayback: &mediaMarkersPausePlayback,
 		},
 		SegmentCache: SegmentCacheConfig{
 			Enabled:     &segmentCacheEnabled,
