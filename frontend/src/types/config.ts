@@ -231,11 +231,13 @@ export interface LibraryOptimizerStatus {
 
 export interface MediaMarkersConfig {
 	enabled: boolean;
+	pause_during_playback: boolean;
 }
 
 export interface MediaMarkerStatus {
 	enabled: boolean;
 	running: boolean;
+	waiting_for_playback: boolean;
 	state: "idle" | "scanning" | "waiting" | "warning" | "error" | "disabled" | string;
 	message?: string;
 	started_at?: string;

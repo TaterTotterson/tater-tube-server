@@ -22,7 +22,10 @@ interface MediaMarkersConfigSectionProps {
 }
 
 function normalize(value?: MediaMarkersConfig): MediaMarkersConfig {
-	return { enabled: value?.enabled !== false };
+	return {
+		enabled: value?.enabled !== false,
+		pause_during_playback: value?.pause_during_playback !== false,
+	};
 }
 
 function StatusTile({
@@ -71,9 +74,13 @@ export function MediaMarkersConfigSection({
 		setHasChanges(false);
 	}, [config.media_markers]);
 
-	const updateEnabled = (enabled: boolean) => {
-		setData({ enabled });
-		setHasChanges(enabled !== normalize(config.media_markers).enabled);
+	const updateData = (next: MediaMarkersConfig) => {
+		const current = normalize(config.media_markers);
+		setData(next);
+		setHasChanges(
+			next.enabled !== current.enabled ||
+				next.pause_during_playback !== current.pause_during_playback,
+		);
 	};
 
 	const save = async () => {
@@ -110,11 +117,28 @@ export function MediaMarkersConfigSection({
 							className="toggle toggle-primary"
 							checked={data.enabled}
 							disabled={isReadOnly}
-							onChange={(event) => updateEnabled(event.target.checked)}
+							onChange={(event) => updateData({ ...data, enabled: event.target.checked })}
 						/>
 					</label>
 				</div>
 			</section>
+
+			<label className="flex cursor-pointer items-start justify-between gap-5 rounded-2xl border border-base-300 bg-base-100/60 p-5">
+				<div>
+					<div className="font-bold text-base">Pause for playback</div>
+					<p className="mt-1 max-w-2xl text-base-content/55 text-sm leading-relaxed">
+						Finish marker analyses already in progress, then pause the queue while anyone is
+						watching. Scanning resumes automatically when playback stops.
+					</p>
+				</div>
+				<input
+					type="checkbox"
+					className="toggle toggle-primary mt-1 shrink-0"
+					checked={data.pause_during_playback}
+					disabled={isReadOnly || !data.enabled}
+					onChange={(event) => updateData({ ...data, pause_during_playback: event.target.checked })}
+				/>
+			</label>
 
 			<section className="rounded-2xl border border-base-300 bg-base-100/60 p-5">
 				<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -122,9 +146,15 @@ export function MediaMarkersConfigSection({
 						<div className="flex flex-wrap items-center gap-2">
 							<h3 className="font-bold text-lg">Library marker status</h3>
 							<span
-								className={`badge badge-sm ${status?.running ? "badge-primary" : status?.failed ? "badge-warning" : data.enabled ? "badge-success" : "badge-ghost"}`}
+								className={`badge badge-sm ${status?.waiting_for_playback ? "badge-warning" : status?.running ? "badge-primary" : status?.failed ? "badge-warning" : data.enabled ? "badge-success" : "badge-ghost"}`}
 							>
-								{status?.running ? "Scanning" : data.enabled ? "Ready" : "Automatic scan off"}
+								{status?.waiting_for_playback
+									? "Waiting for playback"
+									: status?.running
+										? "Scanning"
+										: data.enabled
+											? "Ready"
+											: "Automatic scan off"}
 							</span>
 						</div>
 						<p className="mt-1 text-base-content/55 text-sm">
@@ -177,7 +207,9 @@ export function MediaMarkersConfigSection({
 					<div className="mt-5 rounded-xl border border-primary/20 bg-primary/5 p-4">
 						<div className="flex items-center justify-between gap-3 text-sm">
 							<span className="min-w-0 truncate font-semibold">
-								{status.current_file || "Analyzing queued video"}
+								{status.waiting_for_playback
+									? "Paused until active playback stops"
+									: status.current_file || "Analyzing queued video"}
 							</span>
 							<span className="shrink-0 font-bold text-primary">{progress}%</span>
 						</div>

@@ -71,6 +71,7 @@ library_optimizer:
 # changed local videos. Portable sidecars are written beside each media file.
 media_markers:
   enabled: true
+  pause_during_playback: true
 
 newznab:
   enabled: false

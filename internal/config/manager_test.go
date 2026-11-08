@@ -14,6 +14,8 @@ func TestDefaultConfigUsesStandardUpscaling(t *testing.T) {
 	assert.NotNil(t, cfg.HDREnhancement.Enabled)
 	assert.False(t, *cfg.HDREnhancement.Enabled)
 	assert.Equal(t, "balanced", cfg.HDREnhancement.Strength)
+	assert.NotNil(t, cfg.MediaMarkers.PauseDuringPlayback)
+	assert.True(t, *cfg.MediaMarkers.PauseDuringPlayback)
 }
 
 func TestConfigValidateAcceptsHDREnhancementStrengths(t *testing.T) {

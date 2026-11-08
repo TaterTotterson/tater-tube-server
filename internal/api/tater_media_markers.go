@@ -24,9 +24,11 @@ import (
 )
 
 const (
-	taterMediaMarkerSchema     = 1
-	taterMediaMarkerSampleSize = int64(1024 * 1024)
-	taterMediaMarkerMaxErrors  = 50
+	taterMediaMarkerSchema            = 1
+	taterMediaMarkerSampleSize        = int64(1024 * 1024)
+	taterMediaMarkerMaxErrors         = 50
+	taterMediaMarkerMaxWorkers        = 2
+	taterMediaMarkerPlaybackPollDelay = 2 * time.Second
 )
 
 type taterMediaMarker struct {
@@ -85,6 +87,7 @@ type taterMediaMarkerScanSummary = taterMediaMarkerScanProgress
 type taterMediaMarkerStatus struct {
 	Enabled          bool      `json:"enabled"`
 	Running          bool      `json:"running"`
+	WaitingPlayback  bool      `json:"waiting_for_playback"`
 	State            string    `json:"state"`
 	Message          string    `json:"message,omitempty"`
 	StartedAt        time.Time `json:"started_at,omitempty"`
@@ -133,6 +136,11 @@ func newTaterMediaMarkerService(server *Server) *taterMediaMarkerService {
 func taterMediaMarkersEnabled(cfg *config.Config) bool {
 	return cfg != nil && taterLocalMediaEnabled(cfg) &&
 		(cfg.MediaMarkers.Enabled == nil || *cfg.MediaMarkers.Enabled)
+}
+
+func taterMediaMarkersPauseDuringPlayback(cfg *config.Config) bool {
+	return cfg == nil || cfg.MediaMarkers.PauseDuringPlayback == nil ||
+		*cfg.MediaMarkers.PauseDuringPlayback
 }
 
 func (service *taterMediaMarkerService) snapshot() taterMediaMarkerStatus {
@@ -568,24 +576,18 @@ func scanTaterMediaMarkerFile(
 		duration = knownDuration
 	}
 	ffmpegPath := effectiveFFmpegPath(cfg.Transcoding.FFmpegPath)
-	args := []string{
-		"-hide_banner", "-nostdin", "-loglevel", "info", "-threads", "1",
-		"-i", mediaPath,
-		"-map", "0:v:0",
-		"-vf", "scale=320:-2,blackdetect=d=0.15:pic_th=0.97:pix_th=0.10",
+	hardwareArgs := taterMediaMarkerHardwareDecodeArgs(cfg)
+	output, scanErr := runTaterMediaMarkerFFmpeg(ctx, ffmpegPath, mediaPath, taterMediaMarkerHasAudio(probe), hardwareArgs)
+	if scanErr != nil && len(hardwareArgs) > 0 && ctx.Err() == nil {
+		// Hardware decoding is an acceleration only. Unsupported codecs, drivers,
+		// containers, or filters must never prevent a portable marker sidecar from
+		// being created, so retry the same file with software decoding.
+		output, scanErr = runTaterMediaMarkerFFmpeg(ctx, ffmpegPath, mediaPath, taterMediaMarkerHasAudio(probe), nil)
 	}
-	if taterMediaMarkerHasAudio(probe) {
-		args = append(args, "-map", "0:a:0", "-af", "silencedetect=n=-45dB:d=0.15")
+	if scanErr != nil {
+		return taterMediaMarkerSidecar{}, scanErr
 	}
-	args = append(args, "-sn", "-dn", "-f", "null", "-")
-	var output bytes.Buffer
-	command := exec.CommandContext(ctx, ffmpegPath, args...)
-	command.Stdout = &output
-	command.Stderr = &output
-	if err := command.Run(); err != nil {
-		return taterMediaMarkerSidecar{}, fmt.Errorf("FFmpeg marker scan failed: %s", conciseUpscalingProbeError(errors.New(output.String())))
-	}
-	black, silence := parseTaterMarkerIntervals(output.String())
+	black, silence := parseTaterMarkerIntervals(output)
 	credits := detectTaterCredits(probe.Chapters, black, silence, duration)
 	breaks := detectTaterCommercialBreaks(black, silence, duration, credits)
 	fingerprint, err := taterMediaSampleFingerprint(mediaPath, info.Size())
@@ -598,6 +600,63 @@ func scanTaterMediaMarkerFile(
 		SourceSampleSHA256: fingerprint, DurationSeconds: duration,
 		CommercialBreaks: breaks, Credits: credits,
 	}, nil
+}
+
+func taterMediaMarkerHardwareDecodeArgs(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	accel := strings.ToLower(strings.TrimSpace(cfg.Transcoding.HardwareAcceleration))
+	switch accel {
+	case "nvenc":
+		accel = "cuda"
+	case "videotoolbox", "qsv", "vaapi", "auto":
+	case "none", "software", "", "v4l2m2m":
+		return nil
+	default:
+		return nil
+	}
+	args := []string{"-hwaccel", accel}
+	device := strings.TrimSpace(cfg.Transcoding.HardwareDevice)
+	if device != "" && (accel == "cuda" || accel == "qsv" || accel == "vaapi") {
+		args = append(args, "-hwaccel_device", device)
+	}
+	return args
+}
+
+func runTaterMediaMarkerFFmpeg(
+	ctx context.Context,
+	ffmpegPath string,
+	mediaPath string,
+	hasAudio bool,
+	decodeArgs []string,
+) (string, error) {
+	args := []string{"-hide_banner", "-nostdin", "-loglevel", "info", "-threads", "2"}
+	args = append(args, decodeArgs...)
+	args = append(args,
+		"-i", mediaPath,
+		"-map", "0:v:0",
+		"-vf", "scale=320:-2,blackdetect=d=0.15:pic_th=0.97:pix_th=0.10",
+	)
+	if hasAudio {
+		args = append(args, "-map", "0:a:0", "-af", "silencedetect=n=-45dB:d=0.15")
+	}
+	args = append(args, "-sn", "-dn", "-f", "null", "-")
+	var output bytes.Buffer
+	command := exec.CommandContext(ctx, ffmpegPath, args...)
+	command.Stdout = &output
+	command.Stderr = &output
+	if err := command.Run(); err != nil {
+		detail := strings.TrimSpace(output.String())
+		if detail == "" {
+			detail = err.Error()
+		}
+		return output.String(), fmt.Errorf(
+			"FFmpeg marker scan failed: %s",
+			conciseUpscalingProbeError(errors.New(detail)),
+		)
+	}
+	return output.String(), nil
 }
 
 func taterMediaMarkerAbsolutePath(cfg *config.Config, file taterLocalLibraryFileIndex) (string, error) {
@@ -622,15 +681,51 @@ func appendTaterMediaMarkerError(progress *taterMediaMarkerScanProgress, path st
 	}
 }
 
+type taterMediaMarkerScanOptions struct {
+	Workers         int
+	PlaybackActive  func() bool
+	PlaybackWaiting func(bool)
+}
+
+type taterMediaMarkerScanJob struct {
+	File        taterLocalLibraryFileIndex
+	MediaPath   string
+	SidecarPath string
+	Info        os.FileInfo
+}
+
 func scanTaterMediaMarkers(
 	ctx context.Context,
 	cfg *config.Config,
 	index *taterLocalLibraryIndex,
 	progressFn func(taterMediaMarkerScanProgress),
 ) (taterMediaMarkerScanSummary, error) {
+	return scanTaterMediaMarkersWithOptions(ctx, cfg, index, taterMediaMarkerScanOptions{Workers: 1}, progressFn)
+}
+
+func scanTaterMediaMarkersWithOptions(
+	ctx context.Context,
+	cfg *config.Config,
+	index *taterLocalLibraryIndex,
+	options taterMediaMarkerScanOptions,
+	progressFn func(taterMediaMarkerScanProgress),
+) (taterMediaMarkerScanSummary, error) {
 	progress := taterMediaMarkerScanProgress{Errors: []string{}}
 	if cfg == nil || index == nil {
 		return progress, fmt.Errorf("local media index is unavailable")
+	}
+	var progressMu sync.Mutex
+	report := func(update func(*taterMediaMarkerScanProgress)) {
+		progressMu.Lock()
+		if update != nil {
+			update(&progress)
+		}
+		snapshot := progress
+		snapshot.Errors = append([]string(nil), progress.Errors...)
+		progressMu.Unlock()
+		if progressFn != nil {
+			progressFn(snapshot)
+		}
 	}
 	for _, file := range index.Files {
 		if !strings.EqualFold(file.LibraryType, "music") {
@@ -638,6 +733,7 @@ func scanTaterMediaMarkers(
 		}
 	}
 	writableDirectories := map[string]error{}
+	jobs := make([]taterMediaMarkerScanJob, 0, progress.Total)
 	for fileIndex := range index.Files {
 		if err := ctx.Err(); err != nil {
 			return progress, err
@@ -648,8 +744,11 @@ func scanTaterMediaMarkers(
 		}
 		mediaPath, err := taterMediaMarkerAbsolutePath(cfg, *file)
 		if err != nil {
-			appendTaterMediaMarkerError(&progress, file.Path, err)
-			progress.Processed++
+			report(func(progress *taterMediaMarkerScanProgress) {
+				appendTaterMediaMarkerError(progress, file.Path, err)
+				progress.Processed++
+				progress.Message = "Skipped " + filepath.Base(file.Path)
+			})
 			continue
 		}
 		info, err := os.Stat(mediaPath)
@@ -657,8 +756,11 @@ func scanTaterMediaMarkers(
 			if err == nil {
 				err = fmt.Errorf("media path is not a file")
 			}
-			appendTaterMediaMarkerError(&progress, file.Path, err)
-			progress.Processed++
+			report(func(progress *taterMediaMarkerScanProgress) {
+				appendTaterMediaMarkerError(progress, file.Path, err)
+				progress.Processed++
+				progress.Message = "Skipped " + filepath.Base(file.Path)
+			})
 			continue
 		}
 		sidecarPath := taterMediaMarkerSidecarPath(mediaPath)
@@ -666,16 +768,15 @@ func scanTaterMediaMarkers(
 			existing.SourceSizeBytes == info.Size() {
 			fingerprint, fingerprintErr := taterMediaSampleFingerprint(mediaPath, info.Size())
 			if fingerprintErr == nil && existing.SourceSampleSHA256 == fingerprint {
-				progress.Reused++
-				progress.CommercialBreaks += len(existing.CommercialBreaks)
-				if existing.Credits != nil {
-					progress.Credits++
-				}
-				progress.Processed++
-				progress.Message = "Reused markers for " + filepath.Base(mediaPath)
-				if progressFn != nil {
-					progressFn(progress)
-				}
+				report(func(progress *taterMediaMarkerScanProgress) {
+					progress.Reused++
+					progress.CommercialBreaks += len(existing.CommercialBreaks)
+					if existing.Credits != nil {
+						progress.Credits++
+					}
+					progress.Processed++
+					progress.Message = "Reused markers for " + filepath.Base(mediaPath)
+				})
 				continue
 			}
 		}
@@ -689,36 +790,120 @@ func scanTaterMediaMarkers(
 			writableDirectories[directory] = writeErr
 		}
 		if writeErr != nil {
-			appendTaterMediaMarkerError(&progress, file.Path, writeErr)
-			progress.Processed++
-			progress.Message = "Skipped " + filepath.Base(mediaPath) + ": no sidecar write access"
-			if progressFn != nil {
-				progressFn(progress)
-			}
+			report(func(progress *taterMediaMarkerScanProgress) {
+				appendTaterMediaMarkerError(progress, file.Path, writeErr)
+				progress.Processed++
+				progress.Message = "Skipped " + filepath.Base(mediaPath) + ": no sidecar write access"
+			})
 			continue
 		}
+		jobs = append(jobs, taterMediaMarkerScanJob{
+			File: *file, MediaPath: mediaPath, SidecarPath: sidecarPath, Info: info,
+		})
+	}
 
-		progress.Message = "Analyzing " + filepath.Base(mediaPath)
-		if progressFn != nil {
-			progressFn(progress)
+	workers := options.Workers
+	if workers <= 0 {
+		workers = 1
+	}
+	workers = min(workers, len(jobs))
+	var jobsMu sync.Mutex
+	nextJob := 0
+	takeJob := func() (taterMediaMarkerScanJob, bool) {
+		jobsMu.Lock()
+		defer jobsMu.Unlock()
+		if nextJob >= len(jobs) {
+			return taterMediaMarkerScanJob{}, false
 		}
-		sidecar, scanErr := scanTaterMediaMarkerFile(ctx, cfg, mediaPath, info, file.DurationSeconds)
-		if scanErr == nil {
-			scanErr = writeTaterJSON(sidecarPath, sidecar)
+		job := jobs[nextJob]
+		nextJob++
+		return job, true
+	}
+	jobsRemaining := func() bool {
+		jobsMu.Lock()
+		defer jobsMu.Unlock()
+		return nextJob < len(jobs)
+	}
+	var waitingMu sync.Mutex
+	waitingWorkers := 0
+	setWorkerWaiting := func(waiting *bool, next bool) {
+		if *waiting == next {
+			return
 		}
-		if scanErr != nil {
-			appendTaterMediaMarkerError(&progress, file.Path, scanErr)
+		waitingMu.Lock()
+		wasWaiting := waitingWorkers > 0
+		if next {
+			waitingWorkers++
 		} else {
-			progress.Sidecars++
-			progress.CommercialBreaks += len(sidecar.CommercialBreaks)
-			if sidecar.Credits != nil {
-				progress.Credits++
+			waitingWorkers = max(0, waitingWorkers-1)
+		}
+		isWaiting := waitingWorkers > 0
+		*waiting = next
+		waitingMu.Unlock()
+		if wasWaiting != isWaiting && options.PlaybackWaiting != nil {
+			options.PlaybackWaiting(isWaiting)
+		}
+	}
+
+	var workersGroup sync.WaitGroup
+	for range workers {
+		workersGroup.Add(1)
+		go func() {
+			defer workersGroup.Done()
+			waiting := false
+			defer setWorkerWaiting(&waiting, false)
+			for {
+				// Match Library Optimization: finish any file already being analyzed,
+				// then keep every worker between files until playback stops.
+				if options.PlaybackActive != nil {
+					for jobsRemaining() && options.PlaybackActive() {
+						setWorkerWaiting(&waiting, true)
+						select {
+						case <-ctx.Done():
+							return
+						case <-time.After(taterMediaMarkerPlaybackPollDelay):
+						}
+					}
+				}
+				setWorkerWaiting(&waiting, false)
+				job, ok := takeJob()
+				if !ok {
+					return
+				}
+				if ctx.Err() != nil {
+					return
+				}
+				report(func(progress *taterMediaMarkerScanProgress) {
+					progress.Message = "Analyzing " + filepath.Base(job.MediaPath)
+				})
+				sidecar, scanErr := scanTaterMediaMarkerFile(
+					ctx, cfg, job.MediaPath, job.Info, job.File.DurationSeconds,
+				)
+				if scanErr == nil {
+					scanErr = writeTaterJSON(job.SidecarPath, sidecar)
+				}
+				if ctx.Err() != nil {
+					return
+				}
+				report(func(progress *taterMediaMarkerScanProgress) {
+					if scanErr != nil {
+						appendTaterMediaMarkerError(progress, job.File.Path, scanErr)
+					} else {
+						progress.Sidecars++
+						progress.CommercialBreaks += len(sidecar.CommercialBreaks)
+						if sidecar.Credits != nil {
+							progress.Credits++
+						}
+					}
+					progress.Processed++
+					progress.Message = "Checked " + filepath.Base(job.MediaPath)
+				})
 			}
-		}
-		progress.Processed++
-		if progressFn != nil {
-			progressFn(progress)
-		}
+		}()
+	}
+	workersGroup.Wait()
+	if err := ctx.Err(); err != nil {
+		return progress, err
 	}
 	sort.Strings(progress.Errors)
 	return progress, nil
@@ -805,26 +990,61 @@ func (service *taterMediaMarkerService) scan(
 	}
 	service.mu.Unlock()
 
-	summary, scanErr := scanTaterMediaMarkers(scanCtx, cfg, &batch, func(progress taterMediaMarkerScanProgress) {
-		service.mu.Lock()
-		service.status.Checked = progress.Processed
-		service.status.Queued = max(0, progress.Total-progress.Processed)
-		service.status.Created = progress.Sidecars
-		service.status.Reused = progress.Reused
-		service.status.Failed = progress.Failed
-		service.status.Completed = inventory.Completed + progress.Sidecars + progress.Reused
-		service.status.CommercialBreaks = inventory.CommercialBreaks + progress.CommercialBreaks
-		service.status.Credits = inventory.Credits + progress.Credits
-		service.status.Message = progress.Message
-		service.status.CurrentFile = progress.Message
-		service.status.Errors = append([]string(nil), progress.Errors...)
-		service.mu.Unlock()
-	})
+	summary, scanErr := scanTaterMediaMarkersWithOptions(
+		scanCtx,
+		cfg,
+		&batch,
+		taterMediaMarkerScanOptions{
+			Workers: taterMediaMarkerMaxWorkers,
+			PlaybackActive: func() bool {
+				return service.server != nil && service.server.configManager != nil &&
+					taterMediaMarkersPauseDuringPlayback(service.server.configManager.GetConfig()) &&
+					service.server.streamTracker != nil &&
+					service.server.streamTracker.ActiveStreams() > 0
+			},
+			PlaybackWaiting: func(waiting bool) {
+				service.mu.Lock()
+				service.status.WaitingPlayback = waiting
+				if waiting {
+					service.status.State = "waiting"
+					service.status.Message = "Paused while Tater Tube playback is active"
+					service.status.CurrentFile = ""
+				} else if service.status.Running {
+					service.status.State = "scanning"
+					service.status.Message = "Resuming media marker scanning"
+				}
+				service.mu.Unlock()
+			},
+		},
+		func(progress taterMediaMarkerScanProgress) {
+			service.mu.Lock()
+			service.status.Checked = progress.Processed
+			service.status.Queued = max(0, progress.Total-progress.Processed)
+			service.status.Created = progress.Sidecars
+			service.status.Reused = progress.Reused
+			service.status.Failed = progress.Failed
+			service.status.Completed = inventory.Completed + progress.Sidecars + progress.Reused
+			service.status.CommercialBreaks = inventory.CommercialBreaks + progress.CommercialBreaks
+			service.status.Credits = inventory.Credits + progress.Credits
+			if service.status.WaitingPlayback {
+				service.status.State = "waiting"
+				service.status.Message = "Paused while Tater Tube playback is active"
+				service.status.CurrentFile = ""
+			} else {
+				service.status.State = "scanning"
+				service.status.Message = progress.Message
+				service.status.CurrentFile = progress.Message
+			}
+			service.status.Errors = append([]string(nil), progress.Errors...)
+			service.mu.Unlock()
+		},
+	)
 	cancel()
 
 	service.mu.Lock()
 	service.currentCancel = nil
 	service.status.Running = false
+	service.status.WaitingPlayback = false
 	service.status.FinishedAt = time.Now().UTC()
 	service.status.Checked = summary.Processed
 	service.status.Queued = 0

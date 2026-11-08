@@ -351,6 +351,14 @@ videos afterward. The page shows completed and queued videos, created and reused
 sidecars, failures, commercial transitions, and credits markers. **Scan missing
 now** is available for an on-demand check.
 
+Marker analysis uses the configured hardware decoder when available and retries
+unsupported media with software decoding. While no player is active, two videos
+can be analyzed at once. Like Library Optimization, files already in progress
+finish and then all marker workers can pause between videos during playback.
+This behavior is enabled by default and can be toggled independently for both
+Breaks & Credits and Library Optimization. A paused queue resumes automatically
+after playback stops.
+
 Tater Tube saves a portable `.tater-markers.json` sidecar beside each video and
 reuses valid sidecars after server updates or when media moves with its sidecar.
 Before analyzing a video, the server verifies that its folder can accept the

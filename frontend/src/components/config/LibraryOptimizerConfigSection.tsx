@@ -689,7 +689,7 @@ export function LibraryOptimizerConfigSection({
 							/>
 							<ToggleRow
 								label="Automatic optimization"
-								description="Periodically process new eligible local media when playback is idle."
+								description="Periodically process new eligible local media automatically."
 								checked={data.automatic}
 								disabled={isReadOnly || !data.enabled}
 								onChange={(automatic) => updateData({ ...data, automatic })}
