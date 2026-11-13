@@ -9,6 +9,7 @@ import (
 
 	"github.com/TaterTotterson/tater-tube-server/internal/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func boolPointer(value bool) *bool { return &value }
@@ -190,6 +191,47 @@ func TestBuildLibraryOptimizerHistorySummarizesOnlyCompletedSavings(t *testing.T
 	if assert.Len(t, history.Records, 3) {
 		assert.Equal(t, "/media/completed.mkv", history.Records[0].Path)
 	}
+}
+
+func TestLibraryOptimizerLifetimeStatsAccumulateCompletedRuns(t *testing.T) {
+	store := libraryOptimizerStore{}
+	addLibraryOptimizerLifetimeResult(&store, libraryOptimizerRecord{
+		Status: "completed", OriginalBytes: 1000, OutputBytes: 600, SavedBytes: 400,
+	})
+	addLibraryOptimizerLifetimeResult(&store, libraryOptimizerRecord{
+		Status: "failed", OriginalBytes: 1000, OutputBytes: 0, SavedBytes: 1000,
+	})
+	addLibraryOptimizerLifetimeResult(&store, libraryOptimizerRecord{
+		Status: "completed", OriginalBytes: 800, OutputBytes: 700, SavedBytes: 100,
+	})
+
+	assert.Equal(t, 2, store.Lifetime.Completed)
+	assert.Equal(t, int64(1800), store.Lifetime.OriginalBytes)
+	assert.Equal(t, int64(1300), store.Lifetime.OutputBytes)
+	assert.Equal(t, int64(500), store.Lifetime.SavedBytes)
+}
+
+func TestReadLibraryOptimizerStoreMigratesPersistentHistoryToLifetimeStats(t *testing.T) {
+	configDir := t.TempDir()
+	cfg := config.DefaultConfig(configDir)
+	legacy := libraryOptimizerStore{
+		Schema: 1,
+		Records: map[string]libraryOptimizerRecord{
+			"/media/completed.mkv": {
+				Status: "completed", OriginalBytes: 1000, OutputBytes: 600, SavedBytes: 400,
+			},
+			"/media/failed.mkv": {Status: "failed", OriginalBytes: 1000},
+		},
+	}
+	require.NoError(t, writeTaterJSON(libraryOptimizerStatePath(cfg), legacy))
+
+	store := readLibraryOptimizerStore(cfg)
+
+	assert.Equal(t, libraryOptimizerStateSchema, store.Schema)
+	assert.Equal(t, 1, store.Lifetime.Completed)
+	assert.Equal(t, int64(400), store.Lifetime.SavedBytes)
+	history := buildLibraryOptimizerHistory(store, "", "", 0, 50)
+	assert.Equal(t, store.Lifetime, history.Lifetime)
 }
 
 func TestBuildLibraryOptimizerHistoryFiltersSearchesAndPaginates(t *testing.T) {

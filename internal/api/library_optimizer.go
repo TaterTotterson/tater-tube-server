@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	libraryOptimizerStateSchema = 1
+	libraryOptimizerStateSchema = 2
 	libraryOptimizerAutoDelay   = 5 * time.Minute
 	libraryOptimizerPollDelay   = 2 * time.Second
 )
@@ -81,6 +81,7 @@ type libraryOptimizerStatus struct {
 	Running         bool                      `json:"running"`
 	Paused          bool                      `json:"paused"`
 	WaitingPlayback bool                      `json:"waiting_for_playback"`
+	WaitingMarkers  bool                      `json:"waiting_for_media_markers"`
 	StartedAt       time.Time                 `json:"started_at,omitempty"`
 	FinishedAt      time.Time                 `json:"finished_at,omitempty"`
 	CurrentFile     string                    `json:"current_file,omitempty"`
@@ -133,8 +134,16 @@ type libraryOptimizerHistorySummary struct {
 	SavedBytes    int64 `json:"saved_bytes"`
 }
 
+type libraryOptimizerLifetimeStats struct {
+	Completed     int   `json:"completed_files"`
+	OriginalBytes int64 `json:"original_bytes"`
+	OutputBytes   int64 `json:"output_bytes"`
+	SavedBytes    int64 `json:"saved_bytes"`
+}
+
 type libraryOptimizerHistory struct {
 	Summary       libraryOptimizerHistorySummary  `json:"summary"`
+	Lifetime      libraryOptimizerLifetimeStats   `json:"lifetime"`
 	FilteredTotal int                             `json:"filtered_total"`
 	Offset        int                             `json:"offset"`
 	Limit         int                             `json:"limit"`
@@ -142,8 +151,9 @@ type libraryOptimizerHistory struct {
 }
 
 type libraryOptimizerStore struct {
-	Schema  int                               `json:"schema"`
-	Records map[string]libraryOptimizerRecord `json:"records"`
+	Schema   int                               `json:"schema"`
+	Lifetime libraryOptimizerLifetimeStats     `json:"lifetime"`
+	Records  map[string]libraryOptimizerRecord `json:"records"`
 }
 
 type libraryOptimizerCandidate struct {
@@ -231,6 +241,9 @@ func readLibraryOptimizerStore(cfg *config.Config) libraryOptimizerStore {
 	if json.Unmarshal(raw, &store) != nil || store.Records == nil {
 		return libraryOptimizerStore{Schema: libraryOptimizerStateSchema, Records: map[string]libraryOptimizerRecord{}}
 	}
+	if store.Schema < 2 {
+		store.Lifetime = libraryOptimizerLifetimeFromRecords(store.Records)
+	}
 	store.Schema = libraryOptimizerStateSchema
 	return store
 }
@@ -243,6 +256,30 @@ func writeLibraryOptimizerStore(cfg *config.Config, store libraryOptimizerStore)
 	return writeTaterJSON(libraryOptimizerStatePath(cfg), store)
 }
 
+func libraryOptimizerLifetimeFromRecords(records map[string]libraryOptimizerRecord) libraryOptimizerLifetimeStats {
+	stats := libraryOptimizerLifetimeStats{}
+	for _, record := range records {
+		if record.Status != "completed" {
+			continue
+		}
+		stats.Completed++
+		stats.OriginalBytes += record.OriginalBytes
+		stats.OutputBytes += record.OutputBytes
+		stats.SavedBytes += max(int64(0), record.SavedBytes)
+	}
+	return stats
+}
+
+func addLibraryOptimizerLifetimeResult(store *libraryOptimizerStore, record libraryOptimizerRecord) {
+	if store == nil || record.Status != "completed" {
+		return
+	}
+	store.Lifetime.Completed++
+	store.Lifetime.OriginalBytes += record.OriginalBytes
+	store.Lifetime.OutputBytes += record.OutputBytes
+	store.Lifetime.SavedBytes += max(int64(0), record.SavedBytes)
+}
+
 func buildLibraryOptimizerHistory(store libraryOptimizerStore, statusFilter, search string, offset, limit int) libraryOptimizerHistory {
 	statusFilter = strings.ToLower(strings.TrimSpace(statusFilter))
 	search = strings.ToLower(strings.TrimSpace(search))
@@ -253,9 +290,10 @@ func buildLibraryOptimizerHistory(store libraryOptimizerStore, statusFilter, sea
 	offset = max(offset, 0)
 
 	history := libraryOptimizerHistory{
-		Offset:  offset,
-		Limit:   limit,
-		Records: []libraryOptimizerHistoryRecord{},
+		Lifetime: store.Lifetime,
+		Offset:   offset,
+		Limit:    limit,
+		Records:  []libraryOptimizerHistoryRecord{},
 	}
 	filtered := make([]libraryOptimizerHistoryRecord, 0, len(store.Records))
 	for _, record := range store.Records {
@@ -782,40 +820,96 @@ func (service *libraryOptimizerService) start(automatic bool) error {
 	if cfg == nil || !boolValue(cfg.LibraryOptimizer.Enabled, false) {
 		return fmt.Errorf("enable Library Optimization before starting a job")
 	}
-	capabilities := detectLibraryOptimizerCapabilities(cfg)
+	service.mu.Lock()
+	if service.status.Running {
+		service.mu.Unlock()
+		return fmt.Errorf("library optimization is already running")
+	}
+	if service.server.processingCoordinator != nil && !service.server.processingCoordinator.reserveOptimizer() {
+		service.mu.Unlock()
+		return fmt.Errorf("library optimization is already preparing")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	service.cancel = cancel
+	service.status = libraryOptimizerStatus{
+		State: "preparing", Message: "Preparing Library Optimization", Running: true,
+		StartedAt: time.Now().UTC(),
+	}
+	service.mu.Unlock()
+	go service.prepareAndRun(ctx, cfg.DeepCopy(), automatic)
+	return nil
+}
+
+func libraryOptimizerEncoderForCapabilities(
+	cfg *config.Config,
+	capabilities libraryOptimizerCapabilities,
+) (string, error) {
 	if !capabilities.FFmpegAvailable || !capabilities.FFprobeAvailable {
-		return fmt.Errorf("FFmpeg and FFprobe are required")
+		return "", fmt.Errorf("FFmpeg and FFprobe are required")
 	}
 	if !capabilities.LibraryWritable {
-		return fmt.Errorf("every enabled movie and series library must be writable")
+		return "", fmt.Errorf("every enabled movie and series library must be writable")
 	}
 	targetEncoder := capabilities.RecommendedHEVC
 	if strings.EqualFold(cfg.LibraryOptimizer.TargetCodec, "av1") {
 		targetEncoder = capabilities.RecommendedAV1
 	}
 	if targetEncoder == "" {
-		return fmt.Errorf("no usable %s encoder was detected", strings.ToUpper(cfg.LibraryOptimizer.TargetCodec))
+		return "", fmt.Errorf("no usable %s encoder was detected", strings.ToUpper(cfg.LibraryOptimizer.TargetCodec))
 	}
 	if cfg.LibraryOptimizer.AudioFormat == "eac3" && !capabilities.EAC3 {
-		return fmt.Errorf("the configured FFmpeg does not include the E-AC-3 encoder")
+		return "", fmt.Errorf("the configured FFmpeg does not include the E-AC-3 encoder")
 	}
 	if cfg.LibraryOptimizer.AudioFormat == "aac" && !capabilities.AAC {
-		return fmt.Errorf("the configured FFmpeg does not include the AAC encoder")
+		return "", fmt.Errorf("the configured FFmpeg does not include the AAC encoder")
 	}
-	service.mu.Lock()
-	if service.status.Running {
-		service.mu.Unlock()
-		return fmt.Errorf("library optimization is already running")
+	return targetEncoder, nil
+}
+
+func (service *libraryOptimizerService) prepareAndRun(
+	ctx context.Context,
+	cfg *config.Config,
+	automatic bool,
+) {
+	coordinator := service.server.processingCoordinator
+	if coordinator != nil {
+		defer coordinator.releaseOptimizer()
+		if coordinator.activeMarkerCount() > 0 {
+			service.setStatus(func(status *libraryOptimizerStatus) {
+				status.State = "waiting"
+				status.WaitingMarkers = true
+				status.Message = "Waiting for active Breaks & Credits analyses to finish"
+			})
+		}
+		if err := coordinator.waitForMarkers(ctx); err != nil {
+			service.finish("cancelled", "Library optimization stopped", nil)
+			return
+		}
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	service.cancel = cancel
-	service.status = libraryOptimizerStatus{
-		State: "preparing", Message: "Reading the local media index", Running: true,
-		StartedAt: time.Now().UTC(),
+	if ctx.Err() != nil {
+		service.finish("cancelled", "Library optimization stopped", nil)
+		return
 	}
-	service.mu.Unlock()
-	go service.run(ctx, cfg.DeepCopy(), targetEncoder, automatic)
-	return nil
+	service.setStatus(func(status *libraryOptimizerStatus) {
+		status.State = "preparing"
+		status.WaitingMarkers = false
+		status.Message = "Checking optimization hardware"
+	})
+	capabilities := detectLibraryOptimizerCapabilities(cfg)
+	if ctx.Err() != nil {
+		service.finish("cancelled", "Library optimization stopped", nil)
+		return
+	}
+	targetEncoder, err := libraryOptimizerEncoderForCapabilities(cfg, capabilities)
+	if err != nil {
+		slog.WarnContext(ctx, "Library optimization preparation failed", "error", err)
+		service.finish("failed", "Unable to prepare Library Optimization", err)
+		return
+	}
+	service.setStatus(func(status *libraryOptimizerStatus) {
+		status.Message = "Reading the local media index"
+	})
+	service.run(ctx, cfg, targetEncoder, automatic)
 }
 
 func (service *libraryOptimizerService) setPaused(paused bool) error {
@@ -905,6 +999,7 @@ func (service *libraryOptimizerService) run(ctx context.Context, cfg *config.Con
 		})
 		record := service.processCandidate(ctx, cfg, encoder, candidate)
 		store.Records[filepath.Clean(candidate.AbsolutePath)] = record
+		addLibraryOptimizerLifetimeResult(&store, record)
 		if err := writeLibraryOptimizerStore(cfg, store); err != nil {
 			slog.WarnContext(ctx, "Failed to save library optimization history", "error", err)
 		}
@@ -948,6 +1043,7 @@ func (service *libraryOptimizerService) finish(state, message string, err error)
 		status.Running = false
 		status.Paused = false
 		status.WaitingPlayback = false
+		status.WaitingMarkers = false
 		status.CurrentFile = ""
 		status.FinishedAt = time.Now().UTC()
 		if err != nil {

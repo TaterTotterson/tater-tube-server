@@ -269,7 +269,9 @@ you enable the feature. Library Optimization is off by default.
   Vision RPU and create verified BT.2020/PQ HDR10 in the selected HEVC or AV1
   target. That conversion requires a working libplacebo/Vulkan path.
 - Jobs can wait while playback is active and remember completed files across
-  server and container updates.
+  server and container updates. Starting Library Optimization also lets active
+  Breaks & Credits files finish, then holds that background queue until the
+  optimizer is done so both jobs do not compete for FFmpeg, the GPU, or storage.
 
 Use **Analyze** to preview the eligible file count and size before starting.
 Each output must pass video, audio, duration, size, and minimum-savings checks
@@ -279,6 +281,10 @@ history. The library volume therefore needs enough free space for one output
 plus any originals retained during the configured safety window.
 Space reported as saved is fully reclaimed when that safety window expires;
 set it to `0` only when you do not want a recovery copy after validation.
+The Activity page keeps current-run counts separate from an all-time total of
+successfully optimized files and space saved. The all-time total is stored with
+optimizer history under `/config` and persists across runs, restarts, container
+recreation, and server updates.
 
 Docker and Unraid library mappings must be writable for optimization:
 

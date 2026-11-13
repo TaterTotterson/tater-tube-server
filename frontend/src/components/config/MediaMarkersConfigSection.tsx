@@ -146,15 +146,17 @@ export function MediaMarkersConfigSection({
 						<div className="flex flex-wrap items-center gap-2">
 							<h3 className="font-bold text-lg">Library marker status</h3>
 							<span
-								className={`badge badge-sm ${status?.waiting_for_playback ? "badge-warning" : status?.running ? "badge-primary" : status?.failed ? "badge-warning" : data.enabled ? "badge-success" : "badge-ghost"}`}
+								className={`badge badge-sm ${status?.waiting_for_playback || status?.waiting_for_library_optimizer ? "badge-warning" : status?.running ? "badge-primary" : status?.failed ? "badge-warning" : data.enabled ? "badge-success" : "badge-ghost"}`}
 							>
 								{status?.waiting_for_playback
 									? "Waiting for playback"
-									: status?.running
-										? "Scanning"
-										: data.enabled
-											? "Ready"
-											: "Automatic scan off"}
+									: status?.waiting_for_library_optimizer
+										? "Waiting for Library Optimization"
+										: status?.running
+											? "Scanning"
+											: data.enabled
+												? "Ready"
+												: "Automatic scan off"}
 							</span>
 						</div>
 						<p className="mt-1 text-base-content/55 text-sm">
@@ -209,7 +211,9 @@ export function MediaMarkersConfigSection({
 							<span className="min-w-0 truncate font-semibold">
 								{status.waiting_for_playback
 									? "Paused until active playback stops"
-									: status.current_file || "Analyzing queued video"}
+									: status.waiting_for_library_optimizer
+										? "Paused until Library Optimization finishes"
+										: status.current_file || "Analyzing queued video"}
 							</span>
 							<span className="shrink-0 font-bold text-primary">{progress}%</span>
 						</div>
