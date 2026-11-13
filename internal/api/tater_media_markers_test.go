@@ -302,6 +302,63 @@ printf '%s\n' '{"streams":[{"codec_type":"video"}],"chapters":[],"format":{"dura
 	}
 }
 
+func TestTaterMediaMarkerScanYieldsToLibraryOptimization(t *testing.T) {
+	root := t.TempDir()
+	mediaPath := filepath.Join(root, "Movie.mkv")
+	require.NoError(t, os.WriteFile(mediaPath, []byte("video"), 0644))
+
+	ffmpegPath := filepath.Join(root, "ffmpeg")
+	ffprobePath := filepath.Join(root, "ffprobe")
+	require.NoError(t, os.WriteFile(ffmpegPath, []byte("#!/bin/sh\ntouch \"${0}.started\"\nexit 0\n"), 0755))
+	require.NoError(t, os.WriteFile(ffprobePath, []byte("#!/bin/sh\nprintf '%s\\n' '{\"streams\":[{\"codec_type\":\"video\"}],\"chapters\":[],\"format\":{\"duration\":\"120\"}}'\n"), 0755))
+
+	cfg := config.DefaultConfig(root)
+	cfg.Transcoding.FFmpegPath = ffmpegPath
+	cfg.Transcoding.HardwareAcceleration = "auto"
+	cfg.LocalMedia.Categories = []config.LocalMediaCategory{{
+		ID: "movies", Name: "Movies", LibraryType: "movies", Paths: []string{root}, Enabled: boolPtr(true),
+	}}
+	index := taterLocalLibraryIndex{Files: []taterLocalLibraryFileIndex{{
+		CategoryID: "movies", LibraryType: "movies", SourceIndex: 0, Path: "Movie.mkv", DurationSeconds: 120,
+	}}}
+	coordinator := newTaterProcessingCoordinator()
+	require.True(t, coordinator.reserveOptimizer())
+	waiting := make(chan bool, 2)
+	finished := make(chan error, 1)
+	go func() {
+		_, err := scanTaterMediaMarkersWithOptions(
+			t.Context(), cfg, &index,
+			taterMediaMarkerScanOptions{
+				Workers:            1,
+				TryStartProcessing: coordinator.tryStartMarker,
+				FinishProcessing:   coordinator.finishMarker,
+				ProcessingWaiting: func(value bool) {
+					waiting <- value
+				},
+			},
+			nil,
+		)
+		finished <- err
+	}()
+
+	select {
+	case value := <-waiting:
+		assert.True(t, value)
+	case <-time.After(time.Second):
+		t.Fatal("marker scan did not yield to Library Optimization")
+	}
+	_, err := os.Stat(ffmpegPath + ".started")
+	assert.True(t, os.IsNotExist(err), "marker FFmpeg must not start during optimization")
+
+	coordinator.releaseOptimizer()
+	select {
+	case err := <-finished:
+		require.NoError(t, err)
+	case <-time.After(4 * time.Second):
+		t.Fatal("marker scan did not resume after Library Optimization")
+	}
+}
+
 func TestTaterTVMidrollOffsetsUsesDetectedBreaks(t *testing.T) {
 	item := taterUsenetItem{CommercialBreaks: []float64{600, 1200, 1800}}
 	assert.Equal(t, []float64{600, 1200, 1800}, taterTVMidrollOffsets(item, 2400))

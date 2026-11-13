@@ -88,6 +88,7 @@ type taterMediaMarkerStatus struct {
 	Enabled          bool      `json:"enabled"`
 	Running          bool      `json:"running"`
 	WaitingPlayback  bool      `json:"waiting_for_playback"`
+	WaitingOptimizer bool      `json:"waiting_for_library_optimizer"`
 	State            string    `json:"state"`
 	Message          string    `json:"message,omitempty"`
 	StartedAt        time.Time `json:"started_at,omitempty"`
@@ -682,9 +683,12 @@ func appendTaterMediaMarkerError(progress *taterMediaMarkerScanProgress, path st
 }
 
 type taterMediaMarkerScanOptions struct {
-	Workers         int
-	PlaybackActive  func() bool
-	PlaybackWaiting func(bool)
+	Workers            int
+	PlaybackActive     func() bool
+	PlaybackWaiting    func(bool)
+	TryStartProcessing func() bool
+	FinishProcessing   func()
+	ProcessingWaiting  func(bool)
 }
 
 type taterMediaMarkerScanJob struct {
@@ -714,6 +718,31 @@ func scanTaterMediaMarkersWithOptions(
 	if cfg == nil || index == nil {
 		return progress, fmt.Errorf("local media index is unavailable")
 	}
+	preparationSlot := false
+	if options.TryStartProcessing != nil {
+		for !options.TryStartProcessing() {
+			if options.ProcessingWaiting != nil {
+				options.ProcessingWaiting(true)
+			}
+			select {
+			case <-ctx.Done():
+				if options.ProcessingWaiting != nil {
+					options.ProcessingWaiting(false)
+				}
+				return progress, ctx.Err()
+			case <-time.After(taterMediaMarkerPlaybackPollDelay):
+			}
+		}
+		preparationSlot = true
+		if options.ProcessingWaiting != nil {
+			options.ProcessingWaiting(false)
+		}
+	}
+	defer func() {
+		if preparationSlot && options.FinishProcessing != nil {
+			options.FinishProcessing()
+		}
+	}()
 	var progressMu sync.Mutex
 	report := func(update func(*taterMediaMarkerScanProgress)) {
 		progressMu.Lock()
@@ -801,6 +830,10 @@ func scanTaterMediaMarkersWithOptions(
 			File: *file, MediaPath: mediaPath, SidecarPath: sidecarPath, Info: info,
 		})
 	}
+	if preparationSlot && options.FinishProcessing != nil {
+		options.FinishProcessing()
+		preparationSlot = false
+	}
 
 	workers := options.Workers
 	if workers <= 0 {
@@ -824,40 +857,46 @@ func scanTaterMediaMarkersWithOptions(
 		defer jobsMu.Unlock()
 		return nextJob < len(jobs)
 	}
-	var waitingMu sync.Mutex
-	waitingWorkers := 0
-	setWorkerWaiting := func(waiting *bool, next bool) {
-		if *waiting == next {
-			return
-		}
-		waitingMu.Lock()
-		wasWaiting := waitingWorkers > 0
-		if next {
-			waitingWorkers++
-		} else {
-			waitingWorkers = max(0, waitingWorkers-1)
-		}
-		isWaiting := waitingWorkers > 0
-		*waiting = next
-		waitingMu.Unlock()
-		if wasWaiting != isWaiting && options.PlaybackWaiting != nil {
-			options.PlaybackWaiting(isWaiting)
+	newWaitTracker := func(callback func(bool)) func(*bool, bool) {
+		var waitingMu sync.Mutex
+		waitingWorkers := 0
+		return func(waiting *bool, next bool) {
+			if *waiting == next {
+				return
+			}
+			waitingMu.Lock()
+			wasWaiting := waitingWorkers > 0
+			if next {
+				waitingWorkers++
+			} else {
+				waitingWorkers = max(0, waitingWorkers-1)
+			}
+			isWaiting := waitingWorkers > 0
+			*waiting = next
+			waitingMu.Unlock()
+			if wasWaiting != isWaiting && callback != nil {
+				callback(isWaiting)
+			}
 		}
 	}
+	setPlaybackWaiting := newWaitTracker(options.PlaybackWaiting)
+	setProcessingWaiting := newWaitTracker(options.ProcessingWaiting)
 
 	var workersGroup sync.WaitGroup
 	for range workers {
 		workersGroup.Add(1)
 		go func() {
 			defer workersGroup.Done()
-			waiting := false
-			defer setWorkerWaiting(&waiting, false)
+			playbackWaiting := false
+			processingWaiting := false
+			defer setPlaybackWaiting(&playbackWaiting, false)
+			defer setProcessingWaiting(&processingWaiting, false)
 			for {
 				// Match Library Optimization: finish any file already being analyzed,
 				// then keep every worker between files until playback stops.
 				if options.PlaybackActive != nil {
 					for jobsRemaining() && options.PlaybackActive() {
-						setWorkerWaiting(&waiting, true)
+						setPlaybackWaiting(&playbackWaiting, true)
 						select {
 						case <-ctx.Done():
 							return
@@ -865,12 +904,33 @@ func scanTaterMediaMarkersWithOptions(
 						}
 					}
 				}
-				setWorkerWaiting(&waiting, false)
+				setPlaybackWaiting(&playbackWaiting, false)
+
+				processingStarted := options.TryStartProcessing == nil
+				for jobsRemaining() && !processingStarted {
+					processingStarted = options.TryStartProcessing()
+					if processingStarted {
+						break
+					}
+					setProcessingWaiting(&processingWaiting, true)
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(taterMediaMarkerPlaybackPollDelay):
+					}
+				}
+				setProcessingWaiting(&processingWaiting, false)
 				job, ok := takeJob()
 				if !ok {
+					if processingStarted && options.FinishProcessing != nil {
+						options.FinishProcessing()
+					}
 					return
 				}
 				if ctx.Err() != nil {
+					if processingStarted && options.FinishProcessing != nil {
+						options.FinishProcessing()
+					}
 					return
 				}
 				report(func(progress *taterMediaMarkerScanProgress) {
@@ -881,6 +941,9 @@ func scanTaterMediaMarkersWithOptions(
 				)
 				if scanErr == nil {
 					scanErr = writeTaterJSON(job.SidecarPath, sidecar)
+				}
+				if processingStarted && options.FinishProcessing != nil {
+					options.FinishProcessing()
 				}
 				if ctx.Err() != nil {
 					return
@@ -1009,7 +1072,29 @@ func (service *taterMediaMarkerService) scan(
 					service.status.State = "waiting"
 					service.status.Message = "Paused while Tater Tube playback is active"
 					service.status.CurrentFile = ""
-				} else if service.status.Running {
+				} else if service.status.Running && !service.status.WaitingOptimizer {
+					service.status.State = "scanning"
+					service.status.Message = "Resuming media marker scanning"
+				}
+				service.mu.Unlock()
+			},
+			TryStartProcessing: func() bool {
+				return service.server == nil || service.server.processingCoordinator == nil ||
+					service.server.processingCoordinator.tryStartMarker()
+			},
+			FinishProcessing: func() {
+				if service.server != nil && service.server.processingCoordinator != nil {
+					service.server.processingCoordinator.finishMarker()
+				}
+			},
+			ProcessingWaiting: func(waiting bool) {
+				service.mu.Lock()
+				service.status.WaitingOptimizer = waiting
+				if waiting {
+					service.status.State = "waiting"
+					service.status.Message = "Paused while Library Optimization is running"
+					service.status.CurrentFile = ""
+				} else if service.status.Running && !service.status.WaitingPlayback {
 					service.status.State = "scanning"
 					service.status.Message = "Resuming media marker scanning"
 				}
@@ -1030,6 +1115,10 @@ func (service *taterMediaMarkerService) scan(
 				service.status.State = "waiting"
 				service.status.Message = "Paused while Tater Tube playback is active"
 				service.status.CurrentFile = ""
+			} else if service.status.WaitingOptimizer {
+				service.status.State = "waiting"
+				service.status.Message = "Paused while Library Optimization is running"
+				service.status.CurrentFile = ""
 			} else {
 				service.status.State = "scanning"
 				service.status.Message = progress.Message
@@ -1045,6 +1134,7 @@ func (service *taterMediaMarkerService) scan(
 	service.currentCancel = nil
 	service.status.Running = false
 	service.status.WaitingPlayback = false
+	service.status.WaitingOptimizer = false
 	service.status.FinishedAt = time.Now().UTC()
 	service.status.Checked = summary.Processed
 	service.status.Queued = 0

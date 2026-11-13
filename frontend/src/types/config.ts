@@ -214,6 +214,7 @@ export interface LibraryOptimizerStatus {
 	running: boolean;
 	paused: boolean;
 	waiting_for_playback: boolean;
+	waiting_for_media_markers: boolean;
 	started_at?: string;
 	finished_at?: string;
 	current_file?: string;
@@ -238,6 +239,7 @@ export interface MediaMarkerStatus {
 	enabled: boolean;
 	running: boolean;
 	waiting_for_playback: boolean;
+	waiting_for_library_optimizer: boolean;
 	state: "idle" | "scanning" | "waiting" | "warning" | "error" | "disabled" | string;
 	message?: string;
 	started_at?: string;
@@ -278,8 +280,16 @@ export interface LibraryOptimizerHistorySummary {
 	saved_bytes: number;
 }
 
+export interface LibraryOptimizerLifetimeStats {
+	completed_files: number;
+	original_bytes: number;
+	output_bytes: number;
+	saved_bytes: number;
+}
+
 export interface LibraryOptimizerHistory {
 	summary: LibraryOptimizerHistorySummary;
+	lifetime: LibraryOptimizerLifetimeStats;
 	filtered_total: number;
 	offset: number;
 	limit: number;

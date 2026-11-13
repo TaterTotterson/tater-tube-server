@@ -22,7 +22,7 @@ import {
 	Square,
 	Volume2,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiClient } from "../../api/client";
 import type {
 	ConfigResponse,
@@ -210,6 +210,7 @@ export function LibraryOptimizerConfigSection({
 	const [isDetecting, setIsDetecting] = useState(false);
 	const [isWorking, setIsWorking] = useState(false);
 	const [error, setError] = useState("");
+	const previousOptimizerRunning = useRef(false);
 
 	useEffect(() => {
 		setData(normalized(config.library_optimizer));
@@ -280,9 +281,17 @@ export function LibraryOptimizerConfigSection({
 	}, [status?.running, refreshStatus]);
 
 	useEffect(() => {
-		if (activeTab !== "history") return;
+		if (activeTab !== "activity" && activeTab !== "history") return;
 		void refreshHistory();
 	}, [activeTab, refreshHistory]);
+
+	useEffect(() => {
+		const running = status?.running === true;
+		if (previousOptimizerRunning.current && !running && activeTab === "activity") {
+			void refreshHistory();
+		}
+		previousOptimizerRunning.current = running;
+	}, [activeTab, refreshHistory, status?.running]);
 
 	const perform = async (action: () => Promise<LibraryOptimizerStatus>) => {
 		setIsWorking(true);
@@ -910,50 +919,83 @@ export function LibraryOptimizerConfigSection({
 					)}
 
 					{status && (
-						<div className="mt-5 rounded-2xl border border-base-300 bg-base-100/55 p-4">
-							<div className="flex flex-wrap items-center justify-between gap-2">
-								<div className="flex items-center gap-2">
-									{status.running ? (
-										<span className="loading loading-spinner loading-sm text-primary" />
-									) : (
-										<CheckCircle2 className="h-5 w-5 text-success" />
-									)}
-									<span className="font-semibold">{status.message || status.state}</span>
+						<>
+							{history && (
+								<div className="mt-5 overflow-hidden rounded-2xl border border-primary/25 bg-primary/5">
+									<div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+										<div className="flex items-center gap-3">
+											<div className="rounded-xl bg-primary/15 p-2.5 text-primary">
+												<ArchiveRestore className="h-5 w-5" />
+											</div>
+											<div>
+												<div className="font-bold text-base">All-time library savings</div>
+												<div className="mt-0.5 text-base-content/55 text-xs">
+													Persistent across optimization runs and server updates
+												</div>
+											</div>
+										</div>
+										<div className="sm:text-right">
+											<div className="font-black text-2xl text-primary">
+												{bytes(history.lifetime.saved_bytes)}
+											</div>
+											<div className="mt-0.5 text-base-content/60 text-xs">
+												across {history.lifetime.completed_files.toLocaleString()} completed files
+											</div>
+										</div>
+									</div>
 								</div>
-								{status.waiting_for_playback && (
-									<span className="badge badge-warning badge-outline">
-										<Clock3 className="mr-1 h-3.5 w-3.5" />
-										Waiting for playback
-									</span>
+							)}
+							<div className="mt-5 rounded-2xl border border-base-300 bg-base-100/55 p-4">
+								<div className="flex flex-wrap items-center justify-between gap-2">
+									<div className="flex items-center gap-2">
+										{status.running ? (
+											<span className="loading loading-spinner loading-sm text-primary" />
+										) : (
+											<CheckCircle2 className="h-5 w-5 text-success" />
+										)}
+										<span className="font-semibold">{status.message || status.state}</span>
+									</div>
+									{status.waiting_for_playback && (
+										<span className="badge badge-warning badge-outline">
+											<Clock3 className="mr-1 h-3.5 w-3.5" />
+											Waiting for playback
+										</span>
+									)}
+									{status.waiting_for_media_markers && (
+										<span className="badge badge-warning badge-outline">
+											<Clock3 className="mr-1 h-3.5 w-3.5" />
+											Waiting for Breaks & Credits
+										</span>
+									)}
+								</div>
+								{status.running && (
+									<>
+										<progress
+											className="progress progress-primary mt-4 w-full"
+											value={progress}
+											max="100"
+										/>
+										<div className="mt-2 flex justify-between gap-3 text-base-content/55 text-xs">
+											<span className="truncate">{status.current_file || "Preparing…"}</span>
+											<span className="shrink-0">
+												{status.current}/{status.total}
+											</span>
+										</div>
+									</>
+								)}
+								<div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-base-content/60 text-xs">
+									<span>{status.completed} completed</span>
+									<span>{status.skipped} skipped</span>
+									<span>{status.failed} failed</span>
+									<span>{bytes(status.saved_bytes)} saved by completed files in this run</span>
+								</div>
+								{status.last_error && (
+									<div className="mt-3 break-words rounded-lg bg-error/10 p-3 text-error text-xs">
+										{status.last_error}
+									</div>
 								)}
 							</div>
-							{status.running && (
-								<>
-									<progress
-										className="progress progress-primary mt-4 w-full"
-										value={progress}
-										max="100"
-									/>
-									<div className="mt-2 flex justify-between gap-3 text-base-content/55 text-xs">
-										<span className="truncate">{status.current_file || "Preparing…"}</span>
-										<span className="shrink-0">
-											{status.current}/{status.total}
-										</span>
-									</div>
-								</>
-							)}
-							<div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-base-content/60 text-xs">
-								<span>{status.completed} completed</span>
-								<span>{status.skipped} skipped</span>
-								<span>{status.failed} failed</span>
-								<span>{bytes(status.saved_bytes)} saved by completed files in this run</span>
-							</div>
-							{status.last_error && (
-								<div className="mt-3 break-words rounded-lg bg-error/10 p-3 text-error text-xs">
-									{status.last_error}
-								</div>
-							)}
-						</div>
+						</>
 					)}
 				</section>
 			)}
@@ -1003,10 +1045,10 @@ export function LibraryOptimizerConfigSection({
 								detail={history.summary.failed ? "Review the results below" : "No failed media"}
 							/>
 							<CapabilityTile
-								label="Total space saved"
-								value={bytes(history.summary.saved_bytes)}
+								label="All-time space saved"
+								value={bytes(history.lifetime.saved_bytes)}
 								ready={true}
-								detail="Successful replacements; safety copies expire separately"
+								detail={`${history.lifetime.completed_files.toLocaleString()} completed files · never resets`}
 							/>
 						</div>
 					)}

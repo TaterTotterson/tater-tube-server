@@ -77,6 +77,7 @@ type Server struct {
 	localLibraryScanCancel         context.CancelFunc
 	libraryOptimizerCancel         context.CancelFunc
 	libraryOptimizer               *libraryOptimizerService
+	processingCoordinator          *taterProcessingCoordinator
 	mediaMarkerCancel              context.CancelFunc
 	mediaMarkers                   *taterMediaMarkerService
 	localLibraryScanWake           chan struct{}
@@ -137,6 +138,7 @@ func NewServer(
 		streamTracker:                  streamTracker,
 		cacheSource:                    cacheSource,
 		speedtest:                      newSpeedtestCoordinator(),
+		processingCoordinator:          newTaterProcessingCoordinator(),
 		updater:                        updater.Default(),
 		localLibraryScanWake:           make(chan struct{}, 1),
 		localLibraryMonitorWake:        make(chan struct{}, 1),
